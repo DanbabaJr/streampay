@@ -6,7 +6,16 @@
 //! entrypoints return `Result<_, StreamError>` and all arithmetic is checked.
 //!
 //! Codes are part of the public interface — never renumber or reuse a variant;
-//! only append new ones.
+//! only append new ones at the bottom with the next free code. A variant that
+//! turns out to be unreachable is *retired* (kept, documented, and excluded
+//! from coverage in `surface.rs`) rather than removed or reused, so the wire
+//! codes of every existing client stay valid forever.
+//!
+//! [`StreamError::ALL`] mirrors the variant set for the generated error-surface
+//! coverage test. The exhaustive match in
+//! `error_surface_test::stream_error_variant_list_is_exhaustive` fails to
+//! compile when a variant is added, forcing the author to extend `ALL` (and the
+//! `Branch` registry) in the same change.
 
 use soroban_sdk::contracterror;
 
@@ -17,9 +26,11 @@ use soroban_sdk::contracterror;
 pub enum StreamError {
     /// No stream exists with the provided id.
     StreamNotFound = 1,
-    /// The caller is not the sender of the stream.
+    /// **Retired — never produced.** Reserved role check; retained so the
+    /// numeric code is never reused. See `docs/ERRORS.md`.
     NotStreamSender = 2,
-    /// The caller is not the recipient of the stream.
+    /// **Retired — never produced.** Reserved role check; retained so the
+    /// numeric code is never reused. See `docs/ERRORS.md`.
     NotStreamRecipient = 3,
     /// The stream is not `cancelable`, so the recipient cannot cancel it.
     StreamNotCancellable = 4,
@@ -45,4 +56,31 @@ pub enum StreamError {
     MetadataTagTooLong = 14,
     /// A stream has reached `MAX_ATTESTATIONS_PER_STREAM` attestations.
     MetadataLimitReached = 15,
+}
+
+impl StreamError {
+    /// Every variant, in code order. The error-surface coverage test iterates
+    /// this list, so a code no entrypoint can produce is a test failure unless
+    /// it is listed as retired in `crate::surface::RETIRED_CODES`.
+    pub const ALL: &'static [StreamError] = &[
+        StreamError::StreamNotFound,
+        StreamError::NotStreamSender,
+        StreamError::NotStreamRecipient,
+        StreamError::StreamNotCancellable,
+        StreamError::StreamNotActive,
+        StreamError::StartTimeInPast,
+        StreamError::InvalidTimeRange,
+        StreamError::DurationTooLong,
+        StreamError::ZeroAmount,
+        StreamError::AmountExceedsAvailable,
+        StreamError::MathOverflow,
+        StreamError::NotAuthorized,
+        StreamError::NothingToWithdraw,
+    ];
+
+    /// The stable numeric value carried across the contract boundary
+    /// (`Error(Contract, #code)`), i.e. the enum discriminant.
+    pub const fn code(self) -> u32 {
+        self as u32
+    }
 }

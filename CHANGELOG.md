@@ -21,6 +21,18 @@ interface: they are only ever appended to, never renumbered or reused.
   `scripts/verify_attestation.sh` to check a local document against an attested
   hash. Frontend: stream detail page lists a stream's attestations and lets a
   party attach one.
+- Error-surface instrumentation and a generated test matrix
+  (`error_surface_test.rs`): every `(entrypoint, condition)` rejection branch is
+  registered in `src/surface.rs`, probed for its declared `StreamError`, and
+  checked for coverage — CI fails on any error code with zero reachable
+  branches or any branch without a code.
+- Generated [`docs/ERRORS.md`](./docs/ERRORS.md) (entrypoint × branch → code
+  table) with a CI step that regenerates it and diffs the committed artifact.
+
+### Changed
+- Retired `StreamError::NotStreamSender` (2) and `NotStreamRecipient` (3) as
+  unreachable under the append-only policy: the numeric codes are kept and
+  reserved, never reused or renumbered.
 - Governed release pipeline (`sandbox → testnet → mainnet canary`):
   `.github/workflows/promote.yml` (manual dispatch, GitHub
   Environment-gated approvals, digest continuity at every step, automatic

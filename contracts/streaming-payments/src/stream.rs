@@ -9,6 +9,7 @@
 use soroban_sdk::{contracttype, Address, Env, MuxedAddress, Vec};
 
 use crate::errors::StreamError;
+use crate::surface::{self, Branch};
 
 /// Maximum supported stream duration: 100 years, including leap days
 /// (36,525 days). Bounds worst-case rate multiplications and rejects
@@ -115,7 +116,7 @@ pub fn elapsed_seconds(env: &Env, start_time: u64, end_time: u64) -> u64 {
 pub fn validate_capacity(deposit: i128, duration: u64) -> Result<(), StreamError> {
     let cap = u128::MAX / (duration.max(1) as u128);
     if (deposit as u128) > cap {
-        return Err(StreamError::MathOverflow);
+        return Err(surface::reject(Branch::CapacityOverflow));
     }
     Ok(())
 }
@@ -134,7 +135,7 @@ pub fn streamed_at(deposit: i128, duration: u64, elapsed: u64) -> Result<i128, S
     }
     let product = (deposit as u128)
         .checked_mul(elapsed as u128)
-        .ok_or(StreamError::MathOverflow)?;
+        .ok_or_else(|| surface::reject(Branch::RateProductOverflow))?;
     let streamed = (product / (duration.max(1) as u128)).min(deposit as u128);
     // `streamed <= deposit <= i128::MAX`, so the narrowing cast cannot wrap.
     Ok(streamed as i128)
@@ -157,7 +158,7 @@ pub fn available_amount(env: &Env, stream: &Stream) -> Result<i128, StreamError>
     let streamed = streamed_amount(env, stream)?;
     streamed
         .checked_sub(stream.withdrawn)
-        .ok_or(StreamError::MathOverflow)
+        .ok_or_else(|| surface::reject(Branch::AvailableBalanceOverflow))
 }
 
 /// Payout split at cancellation: `(recipient_amount, sender_amount)`.
@@ -168,11 +169,11 @@ pub fn cancel_amounts(env: &Env, stream: &Stream) -> Result<(i128, i128), Stream
     let streamed = streamed_amount(env, stream)?;
     let recipient_amount = streamed
         .checked_sub(stream.withdrawn)
-        .ok_or(StreamError::MathOverflow)?;
+        .ok_or_else(|| surface::reject(Branch::CancelSplitOverflow))?;
     let sender_amount = stream
         .deposit
         .checked_sub(streamed)
-        .ok_or(StreamError::MathOverflow)?;
+        .ok_or_else(|| surface::reject(Branch::CancelSplitOverflow))?;
     Ok((recipient_amount, sender_amount))
 }
 
@@ -194,7 +195,7 @@ pub fn get_stream(env: &Env, id: u64) -> Result<Stream, StreamError> {
     env.storage()
         .persistent()
         .get(&DataKey::Stream(id))
-        .ok_or(StreamError::StreamNotFound)
+        .ok_or_else(|| surface::reject(Branch::StreamNotFound))
 }
 
 /// Persists a stream and extends its storage TTL.

@@ -44,6 +44,15 @@ jobs:
       - name: Unit + property tests
         run: cargo test -p streampay-contract --locked
 
+      # The error-surface table is generated from the contract's branch
+      # instrumentation. Regenerate it and fail if the committed artifact has
+      # drifted — this also fails on any error code with zero coverage or any
+      # branch with no code (enforced by the error-surface tests above).
+      - name: Error-surface table is up to date
+        run: |
+          cargo run -p streampay-contract --example error_surface_doc
+          git diff --exit-code docs/ERRORS.md
+
       - name: Coverage
         uses: taiki-e/install-action@cargo-llvm-cov
         with:

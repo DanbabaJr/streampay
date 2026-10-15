@@ -38,6 +38,21 @@ pub(crate) struct Fixture {
 impl Fixture {
     pub(crate) fn setup() -> Self {
         let env = Env::default();
+        Self::setup_with_snapshot(true)
+    }
+
+    /// Like [`Fixture::setup`], but disables the SDK's test-snapshot capture.
+    /// The error-surface matrix asserts through the branch trace, so a snapshot
+    /// file per probe would be pure noise.
+    pub(crate) fn setup_quiet() -> Self {
+        Self::setup_with_snapshot(false)
+    }
+
+    fn setup_with_snapshot(capture_snapshots: bool) -> Self {
+        let mut env = Env::default();
+        env.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: capture_snapshots,
+        });
         env.mock_all_auths();
         let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = sac.address();
