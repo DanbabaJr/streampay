@@ -41,4 +41,6 @@ pub enum StreamError {
     NotAuthorized = 12,
     /// `withdraw_max` found nothing accrued-but-unwithdrawn to pay out.
     NothingToWithdraw = 13,
+    /// `resume_stream` was called on a stream that is not paused.
+    StreamNotPaused = 14,
 }

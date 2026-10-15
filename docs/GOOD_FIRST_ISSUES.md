@@ -4,10 +4,11 @@ Ready-to-file tickets for new contributors. Copy each into a GitHub issue,
 apply the `good first issue` label plus the difficulty label, and (optionally)
 attach a GrantFox bounty. Claim by commenting and opening an early draft PR.
 
-> **Status (2026-10-04):** issues **#2** (withdrawal panel), **#4** (fuzz
-> math), **#7** (fetch by id — superseded by on-chain discovery), and **#8**
-> (testnet script + demo) have been implemented on `main`. They remain here
-> as reference for the expected format of new tickets; do not claim them.
+> **Status (2026-10-15):** issues **#1** (pause/resume), **#2** (withdrawal
+> panel), **#4** (fuzz math), **#7** (fetch by id — superseded by on-chain
+> discovery), and **#8** (testnet script + demo) have been implemented on
+> `main`. They remain here as reference for the expected format of new
+> tickets; do not claim them.
 
 ---
 

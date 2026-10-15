@@ -16,6 +16,9 @@
 //! - [`StreamingPayments::cancel_stream`] — sender (or recipient, if the
 //!   stream is `cancelable`) closes the stream with a pro-rata split
 //! - [`StreamingPayments::top_up`] — add funds to a running stream
+//! - [`StreamingPayments::pause_stream`] / [`StreamingPayments::resume_stream`]
+//!   — sender freezes accrual temporarily; the window stretches by the
+//!   paused interval
 //! - [`StreamingPayments::get_stream`] / [`StreamingPayments::available`] —
 //!   read-only views
 //! - [`StreamingPayments::recipient_streams`] /
@@ -41,7 +44,9 @@ mod test_client;
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Vec};
 
 pub use errors::StreamError;
-pub use events::{StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn};
+pub use events::{
+    PauseStream, ResumeStream, StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn,
+};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{streamed_at, Stream, StreamStatus, MAX_DURATION_SECONDS, MAX_PAGE_SIZE};
@@ -116,6 +121,8 @@ impl StreamingPayments {
             end_time,
             cancelable,
             status: StreamStatus::Active,
+            paused_total: 0,
+            paused_at: 0,
         };
         stream::put_stream(&env, &s);
         stream::index_stream(&env, &s);
@@ -178,11 +185,12 @@ impl StreamingPayments {
     }
 
     /// Shared preamble for both withdrawal paths: load the stream, require
-    /// the recipient's authorization, and reject terminal streams.
+    /// the recipient's authorization, and reject terminal streams. Paused
+    /// streams may still pay out their frozen accrued balance.
     fn authorize_withdrawal(env: &Env, stream_id: u64) -> Result<Stream, StreamError> {
         let s = stream::get_stream(env, stream_id)?;
         s.recipient.require_auth();
-        if s.status != StreamStatus::Active {
+        if !s.is_live() {
             return Err(StreamError::StreamNotActive);
         }
         Ok(s)
@@ -198,6 +206,7 @@ impl StreamingPayments {
             .ok_or(StreamError::MathOverflow)?;
         if s.withdrawn == s.deposit {
             s.status = StreamStatus::Depleted;
+            s.paused_at = 0;
         }
         stream::put_stream(env, s);
 
@@ -228,7 +237,7 @@ impl StreamingPayments {
         caller.require_auth();
 
         let mut s = stream::get_stream(&env, stream_id)?;
-        if s.status != StreamStatus::Active {
+        if !s.is_live() {
             return Err(StreamError::StreamNotActive);
         }
         if caller != s.sender {
@@ -243,8 +252,10 @@ impl StreamingPayments {
 
         let (recipient_amount, sender_amount) = stream::cancel_amounts(&env, &s)?;
 
-        // Effects first (CEI): finalise state before moving tokens.
+        // Effects first (CEI): finalise state before moving tokens. A paused
+        // stream cancels at its frozen accrual point.
         s.status = StreamStatus::Cancelled;
+        s.paused_at = 0;
         s.withdrawn = s
             .withdrawn
             .checked_add(recipient_amount)
@@ -290,12 +301,21 @@ impl StreamingPayments {
     /// Note: extending `end_time` is intentionally not supported in v1 —
     /// retroactively re-baselining accrual is lossy for the recipient; see
     /// `docs/ARCHITECTURE.md` for the design considerations and roadmap.
+    ///
+    /// Top-ups are also allowed while the stream is paused (accrual stays
+    /// frozen at the same elapsed point, pro-rated over the larger deposit).
+    ///
+    /// # Pause / resume
+    ///
+    /// [`StreamingPayments::pause_stream`] freezes accrual;
+    /// [`StreamingPayments::resume_stream`] folds the paused interval into
+    /// `paused_total`, stretching the effective end of the window.
     pub fn top_up(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
         if amount <= 0 {
             return Err(StreamError::ZeroAmount);
         }
         let mut s = stream::get_stream(&env, stream_id)?;
-        if s.status != StreamStatus::Active {
+        if !s.is_live() {
             return Err(StreamError::StreamNotActive);
         }
         s.sender.require_auth();
@@ -323,6 +343,88 @@ impl StreamingPayments {
             sender: s.sender.clone(),
             amount,
             new_deposit,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Pauses an active stream: accrual freezes at the current ledger time
+    /// and only the sender may call this.
+    ///
+    /// While paused, the recipient may still withdraw what has already
+    /// accrued (against the frozen balance), the sender may top up, and
+    /// either party per the usual rules may cancel — the split uses the
+    /// frozen accrual point. The paused interval stretches the stream's
+    /// effective end: after resume, `elapsed` excludes `paused_total`, so
+    /// the full deposit still streams over exactly `duration` *unpaused*
+    /// seconds.
+    ///
+    /// Reverts with [`StreamError::NotStreamSender`] if the caller is not
+    /// the stream's sender, with [`StreamError::StreamNotActive`] if the
+    /// stream is not `Active` (including a double pause), and with
+    /// [`StreamError::StreamNotFound`] for an unknown id.
+    pub fn pause_stream(env: Env, sender: Address, stream_id: u64) -> Result<(), StreamError> {
+        sender.require_auth();
+
+        let mut s = stream::get_stream(&env, stream_id)?;
+        if sender != s.sender {
+            return Err(StreamError::NotStreamSender);
+        }
+        if s.status != StreamStatus::Active {
+            return Err(StreamError::StreamNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        s.status = StreamStatus::Paused;
+        s.paused_at = now;
+        stream::put_stream(&env, &s);
+
+        PauseStream {
+            stream_id,
+            paused_by: sender,
+            paused_at: now,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Resumes a paused stream: the paused interval is folded into
+    /// `paused_total` and accrual continues from where it froze. Only the
+    /// sender may call this.
+    ///
+    /// Reverts with [`StreamError::NotStreamSender`] if the caller is not
+    /// the stream's sender and with [`StreamError::StreamNotPaused`] if the
+    /// stream is not currently paused (including a double resume).
+    pub fn resume_stream(env: Env, sender: Address, stream_id: u64) -> Result<(), StreamError> {
+        sender.require_auth();
+
+        let mut s = stream::get_stream(&env, stream_id)?;
+        if sender != s.sender {
+            return Err(StreamError::NotStreamSender);
+        }
+        if s.status != StreamStatus::Paused {
+            return Err(StreamError::StreamNotPaused);
+        }
+
+        let paused_for = env
+            .ledger()
+            .timestamp()
+            .checked_sub(s.paused_at)
+            .ok_or(StreamError::MathOverflow)?;
+        s.paused_total = s
+            .paused_total
+            .checked_add(paused_for)
+            .ok_or(StreamError::MathOverflow)?;
+        s.paused_at = 0;
+        s.status = StreamStatus::Active;
+        stream::put_stream(&env, &s);
+
+        ResumeStream {
+            stream_id,
+            resumed_by: sender,
+            paused_total: s.paused_total,
         }
         .publish(&env);
 

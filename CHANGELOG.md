@@ -9,6 +9,24 @@ interface: they are only ever appended to, never renumbered or reused.
 
 ## [Unreleased]
 
+### Added
+- `pause_stream(sender, stream_id)` / `resume_stream(sender, stream_id)` —
+  the sender can freeze accrual temporarily (contractor on leave, audit
+  hold): accrual stops at the pause timestamp, withdrawals of the frozen
+  balance / top-ups / cancellation remain allowed while paused, and resume
+  stretches the stream's effective end by exactly the paused interval (the
+  deposit still streams over `duration` *unpaused* seconds).
+- `StreamStatus::Paused` (appended variant) plus two appended `Stream`
+  fields, `paused_total` (cumulative paused seconds) and `paused_at`
+  (freeze timestamp, `0` while running), keeping the accrual math pure.
+- `PauseStream` / `ResumeStream` events, keyed by `stream_id` topic.
+- New `StreamError::StreamNotPaused` (code 14, appended) for `resume_stream`
+  on a non-paused stream; a double pause reverts with `StreamNotActive`.
+- 11 new unit tests (frozen accrual, resume-where-it-froze, withdraw / top-up
+  / cancel while paused, stretched-window completeness, caller/state/auth
+  rejection, typed events) and a second property test covering the
+  pause-aware elapsed model; committed snapshots regenerated.
+
 ## [0.3.0] - 2026-10-04
 
 ### Changed

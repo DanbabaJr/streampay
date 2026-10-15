@@ -66,6 +66,8 @@ Deep dive (storage model, checked math, reentrancy, TTL strategy, design decisio
 | `withdraw_max(stream_id) → i128` | recipient | pays out all accrued, atomically | `Withdrawn` |
 | `cancel_stream(caller, stream_id)` | sender; recipient iff `cancelable` | pro-rata split, atomic | `StreamCancelled` |
 | `top_up(stream_id, amount)` | sender | pulls added funds | `StreamToppedUp` |
+| `pause_stream(sender, stream_id)` | sender | — (accrual freezes) | `PauseStream` |
+| `resume_stream(sender, stream_id)` | sender | — (accrual resumes; window stretches) | `ResumeStream` |
 | `get_stream(stream_id) → Stream` | — (read-only) | — | — |
 | `available(stream_id) → i128` | — (read-only) | — | — |
 | `recipient_streams(address, offset, limit) → Vec<u64>` | — (read-only) | — | — |
@@ -75,6 +77,11 @@ Deep dive (storage model, checked math, reentrancy, TTL strategy, design decisio
 append-only, creation-ordered stream-id lists per address, paginated
 (`limit` clamped to `MAX_PAGE_SIZE = 50`). Terminal streams keep their ids —
 read each stream's `status` for lifecycle state.
+
+`pause_stream` freezes accrual at the current ledger time (withdrawals of the
+frozen balance, top-ups, and cancellation all stay allowed); `resume_stream`
+stretches the stream's effective end by exactly the paused interval, so the
+deposit still streams over `duration` *unpaused* seconds.
 
 Creating a stream requires a prior token approval: `token.approve(sender, <contract id>, deposit, exp)`. All failures return typed `StreamError` codes (no panics) — see `contracts/streaming-payments/src/errors.rs`.
 
@@ -146,7 +153,7 @@ CHANGELOG.md                    release history (Keep a Changelog)
 - **v0.1** — core contract: create / withdraw / cancel / top-up, tests, CI ✅
 - **v0.2** — ✅ on-chain address indexes (`recipient_streams` /
   `sender_streams`), ✅ `withdraw_max`, ✅ frontend discovery + persistence,
-  event indexer service, `pause_stream` (good first issue)
+  event indexer service, ✅ `pause_stream` / `resume_stream`
 - **v0.3** — ✅ fuzzing in CI (`cargo-fuzz` on the rate math, scheduled),
   multi-token batch stream creation
 - **v0.4** — full web UI polish (accrual charts), ✅ testnet demo script

@@ -77,8 +77,8 @@
        between <span class="mono">start_time</span> and <span class="mono">end_time</span>, the recipient
        withdraws at any time, and cancellation refunds the unaccrued remainder pro-rata.</p>
     <div class="badges">
-      <span class="badge"><span class="dot"></span>tests 40/40 passing</span>
-      <span class="badge">soroban-sdk 27.0.6</span>
+      <span class="badge"><span class="dot"></span>tests 62/62 passing</span>
+      <span class="badge">soroban-sdk 28</span>
       <span class="badge">Rust 1.97 · wasm32v1-none</span>
       <span class="badge">Apache-2.0</span>
       <span class="badge">checked math · no panics</span>
@@ -87,9 +87,9 @@
 
   <h2>Contract status</h2>
   <div class="grid">
-    <div class="card"><div class="label">Unit + property tests</div><div class="value ok">40 / 40</div>
+    <div class="card"><div class="label">Unit + property tests</div><div class="value ok">62 / 62</div>
       <div class="hint">Every spec edge case covered</div></div>
-    <div class="card"><div class="label">Error surface</div><div class="value">12 codes</div>
+    <div class="card"><div class="label">Error surface</div><div class="value">14 codes</div>
       <div class="hint">StreamError enum — stable, append-only</div></div>
     <div class="card"><div class="label">Max stream length</div><div class="value">100 y</div>
       <div class="hint">Guards worst-case rate multiplication</div></div>
@@ -137,6 +137,10 @@
         <td>sender; recipient iff <code>cancelable</code></td><td>pro-rata split, atomic</td><td><code>StreamCancelled</code></td></tr>
     <tr><td><code>top_up(stream_id, amount)</code></td>
         <td>sender <span class="tag tx">sender auth</span></td><td>pulls added funds</td><td><code>StreamToppedUp</code></td></tr>
+    <tr><td><code>pause_stream(sender, stream_id)</code></td>
+        <td>sender <span class="tag tx">sender auth</span></td><td>— (accrual freezes)</td><td><code>PauseStream</code></td></tr>
+    <tr><td><code>resume_stream(sender, stream_id)</code></td>
+        <td>sender <span class="tag tx">sender auth</span></td><td>— (window stretches)</td><td><code>ResumeStream</code></td></tr>
     <tr><td><code>get_stream(stream_id) → Stream</code></td><td>— <span class="tag get">read-only</span></td><td>—</td><td>—</td></tr>
     <tr><td><code>available(stream_id) → i128</code></td><td>— <span class="tag get">read-only</span></td><td>—</td><td>—</td></tr>
   </table>
@@ -155,6 +159,8 @@
     <tr><td>10</td><td><code>AmountExceedsAvailable</code></td><td>withdrawal above accrued balance</td></tr>
     <tr><td>11</td><td><code>MathOverflow</code></td><td>checked math would overflow</td></tr>
     <tr><td>12</td><td><code>NotAuthorized</code></td><td>caller is neither sender nor (cancelable) recipient</td></tr>
+    <tr><td>13</td><td><code>NothingToWithdraw</code></td><td><code>withdraw_max</code> with an empty accrued balance</td></tr>
+    <tr><td>14</td><td><code>StreamNotPaused</code></td><td><code>resume_stream</code> on a stream that is not paused</td></tr>
   </table>
 
   <h2>Spec edge cases — all covered by tests</h2>
@@ -169,17 +175,21 @@
     <li>Zero duration / zero amount <span>→ rejected at creation</span></li>
     <li>Reentrancy <span>→ CEI ordering, malicious-token test</span></li>
     <li>Property test <span>→ partial sums ≤ full-window accrual</span></li>
+    <li>Pause / resume <span>→ accrual frozen, resumes exactly where it left off</span></li>
+    <li>Paused window <span>→ end stretches by the paused interval</span></li>
+    <li>While paused <span>→ withdraw, top up and cancel all still work</span></li>
   </ul>
 
   <h2>Roadmap</h2>
   <ul class="roadmap">
-    <li class="done"><span class="box">[x]</span> Core contract: create / withdraw / cancel / top-up + 40 tests <span class="meta">v0.1</span></li>
-    <li><span class="box">[ ]</span> <code>pause_stream</code> (good first issue) <span class="meta">v0.2</span></li>
+    <li class="done"><span class="box">[x]</span> Core contract: create / withdraw / cancel / top-up <span class="meta">v0.1</span></li>
+    <li class="done"><span class="box">[x]</span> On-chain discovery indexes + <code>withdraw_max</code> <span class="meta">v0.2</span></li>
+    <li class="done"><span class="box">[x]</span> <code>pause_stream</code> / <code>resume_stream</code> <span class="meta">v0.2</span></li>
     <li><span class="box">[ ]</span> Event indexer service (TypeScript, GetEvents polling) <span class="meta">v0.2</span></li>
-    <li><span class="box">[ ]</span> Fuzzing in CI (cargo-fuzz on <code>streamed_at</code>) <span class="meta">v0.3</span></li>
+    <li class="done"><span class="box">[x]</span> Fuzzing in CI (cargo-fuzz on <code>streamed_at</code>) <span class="meta">v0.3</span></li>
     <li><span class="box">[ ]</span> Multi-token batch creation <span class="meta">v0.3</span></li>
-    <li><span class="box">[ ]</span> Minimal web UI: Next.js + Freighter <span class="meta">v0.4</span></li>
-    <li><span class="box">[ ]</span> Testnet deployment + example scripts <span class="meta">v0.4</span></li>
+    <li class="done"><span class="box">[x]</span> Minimal web UI: Next.js + Freighter <span class="meta">v0.4</span></li>
+    <li class="done"><span class="box">[x]</span> Testnet deployment script + demo docs <span class="meta">v0.4</span></li>
     <li><span class="box">[ ]</span> External audit <span class="meta">v1.0</span></li>
   </ul>
 

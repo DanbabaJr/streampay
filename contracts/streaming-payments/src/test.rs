@@ -6,8 +6,9 @@
 //! values, zero-duration/zero-amount rejection, reentrancy safety via a
 //! malicious token contract, event payloads, an exhaustive accrual property
 //! test over the pure rate function, the per-address discovery indexes
-//! (append order, pagination, clamping, terminal streams), and `withdraw_max`
-//! semantics.
+//! (append order, pagination, clamping, terminal streams), `withdraw_max`
+//! semantics, and the pause/resume lifecycle (frozen accrual, stretched
+//! window, withdraw/top-up/cancel while paused).
 #![cfg(test)]
 
 use soroban_sdk::{
@@ -107,6 +108,8 @@ fn create_stream_pulls_deposit_and_stores_state() {
     assert_eq!(stream.end_time, now + DAY + 30 * DAY);
     assert!(stream.cancelable);
     assert_eq!(stream.status, StreamStatus::Active);
+    assert_eq!(stream.paused_total, 0);
+    assert_eq!(stream.paused_at, 0);
 
     // Deposit was pulled from the sender into the contract.
     assert_eq!(
@@ -747,6 +750,324 @@ fn top_up_rejects_amount_that_would_overflow_rate_math() {
     assert_eq!(f.client.mock_all_auths().get_stream(&id).deposit, DEPOSIT);
 }
 
+// ------------------------------------------------------------ pause/resume --
+
+#[test]
+fn pause_freezes_accrual_and_resume_continues_exactly() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    f.advance_time(3 * DAY); // 2 days elapsed of 10
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT / 5);
+
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Paused);
+
+    // A long pause moves the accrual clock not at all: still 2/10 streamed.
+    f.advance_time(30 * DAY);
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT / 5);
+
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Active);
+    assert_eq!(stream.paused_total, 30 * DAY);
+    assert_eq!(stream.paused_at, 0);
+
+    // Accrual picks up exactly where it froze: 3 elapsed days of 10.
+    f.advance_time(DAY);
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT * 3 / 10);
+}
+
+#[test]
+fn paused_interval_extends_the_stream_window() {
+    // The full deposit becomes withdrawable exactly `duration + paused_total`
+    // seconds after start — a pause delays the end, it never truncates it.
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false); // starts now
+
+    f.advance_time(2 * DAY);
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.advance_time(7 * DAY); // 7-day pause
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+
+    // Wall-clock has nearly reached the original end, but only 9 days of
+    // accrual have happened (2 + 7 running).
+    f.advance_time(7 * DAY); // t = start + 9d
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT * 9 / 10);
+
+    // A second pause round stacks onto `paused_total` (now 7d + 5d).
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.advance_time(5 * DAY);
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT * 9 / 10);
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+
+    // Full accrual happens at start + duration + paused_total = 22 days —
+    // one second short, then exactly.
+    f.advance_time(DAY - 1); // t = start + 21d + (1d - 1s) = 22d - 1s
+    assert!(f.client.mock_all_auths().available(&id) < DEPOSIT);
+    f.advance_time(1);
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT);
+
+    let amount = f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(amount, DEPOSIT);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+}
+
+#[test]
+fn withdraw_while_paused_pays_only_the_frozen_balance() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(5 * DAY); // half accrued
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.advance_time(100 * DAY);
+
+    // The frozen balance is still withdrawable — but not one unit more.
+    let frozen = DEPOSIT / 2;
+    f.client.mock_all_auths().withdraw(&id, &frozen);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::AmountExceedsAvailable);
+
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.withdrawn, frozen);
+    assert_eq!(stream.status, StreamStatus::Paused); // payout does not resume
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        frozen
+    );
+}
+
+#[test]
+fn cancel_while_paused_splits_at_frozen_accrual() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false); // starts now
+    f.advance_time(3 * DAY); // 3 days of 10 accrued
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.advance_time(30 * DAY); // long pause: no extra accrual
+
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+
+    let accrued = DEPOSIT * 3 / 10; // frozen at the pause point
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Cancelled);
+    assert_eq!(stream.withdrawn, accrued);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        accrued
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        0
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        2 * DEPOSIT - accrued // headroom + refund
+    );
+}
+
+#[test]
+fn top_up_while_paused_is_allowed() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false); // starts now
+    f.advance_time(3 * DAY); // 3 days of 10 accrued
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.advance_time(10 * DAY);
+
+    let extra = DEPOSIT / 2;
+    f.client.mock_all_auths().top_up(&id, &extra);
+
+    // Accrual stays frozen at the same elapsed point, now pro-rated over the
+    // larger deposit.
+    let new_deposit = DEPOSIT + extra;
+    assert_eq!(
+        f.client.mock_all_auths().available(&id),
+        new_deposit * 3 / 10
+    );
+    // The top-up did not resume accrual.
+    f.advance_time(10 * DAY);
+    assert_eq!(
+        f.client.mock_all_auths().available(&id),
+        new_deposit * 3 / 10
+    );
+}
+
+#[test]
+fn pause_before_start_freezes_at_zero_and_extends_window() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.client.mock_all_auths().pause_stream(&f.sender, &id); // paused pre-start
+
+    f.advance_time(5 * DAY);
+    assert_eq!(f.client.mock_all_auths().available(&id), 0);
+
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    // The start effectively shifted out by the 5-day pause.
+    f.advance_time(DAY); // == the original start_time
+    assert_eq!(f.client.mock_all_auths().available(&id), 0);
+    f.advance_time(10 * DAY); // the full original duration after the shift
+    assert_eq!(f.client.mock_all_auths().available(&id), DEPOSIT);
+}
+
+#[test]
+fn pause_and_resume_reject_wrong_caller_and_wrong_state() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+
+    // Only the sender may pause or resume.
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&stranger, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotStreamSender);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotStreamSender);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_resume_stream(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotStreamSender);
+
+    // Resume without a pause.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_resume_stream(&f.sender, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotPaused);
+
+    // Double pause reverts: a Paused stream is not Active.
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&f.sender, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotActive);
+
+    // Double resume reverts.
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_resume_stream(&f.sender, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotPaused);
+}
+
+#[test]
+fn pause_and_resume_require_sender_authorization() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+
+    // An attacker "signs" the calls; the sender's authorization was never
+    // granted, so both attempts fail before touching state.
+    let attacker = Address::generate(&f.env);
+    for fn_name in ["pause_stream", "resume_stream"] {
+        f.env.mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name,
+                args: (f.sender.clone(), id).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        let res = if fn_name == "pause_stream" {
+            f.client.try_pause_stream(&f.sender, &id)
+        } else {
+            f.client.try_resume_stream(&f.sender, &id)
+        };
+        assert!(res.is_err());
+    }
+}
+
+#[test]
+fn terminal_streams_cannot_be_paused() {
+    let f = Fixture::setup();
+
+    let cancelled = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.client
+        .mock_all_auths()
+        .cancel_stream(&f.sender, &cancelled);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&f.sender, &cancelled)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotActive);
+
+    let depleted = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(11 * DAY);
+    f.client.mock_all_auths().withdraw_max(&depleted);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&f.sender, &depleted)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotActive);
+
+    // Unknown id.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_pause_stream(&f.sender, &999)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotFound);
+}
+
+#[test]
+fn pause_and_resume_events_emitted() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let _ = f.env.events().all(); // drain the StreamCreated event
+
+    f.advance_time(DAY);
+    let paused_at = f.env.ledger().timestamp();
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    let paused = crate::PauseStream {
+        stream_id: id,
+        paused_by: f.sender.clone(),
+        paused_at,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [paused.to_xdr(&f.env, &f.client.address)],
+    );
+
+    f.advance_time(2 * DAY);
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let resumed = crate::ResumeStream {
+        stream_id: id,
+        resumed_by: f.sender.clone(),
+        paused_total: 2 * DAY,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [resumed.to_xdr(&f.env, &f.client.address)],
+    );
+}
+
 // ------------------------------------------------------------ reentrancy ----
 
 /// A SEP-41 token whose `transfer` reenters the streaming contract to attempt
@@ -969,6 +1290,73 @@ fn streamed_at_handles_degenerate_inputs() {
         streamed_at(i128::MAX, 3, 3).unwrap_err(),
         StreamError::MathOverflow
     );
+}
+
+/// Property: with any pause schedule folded into `paused_total`, accrual
+/// stays bounded by `[0, deposit]`, is monotonic in wall-clock time, and
+/// still reaches exactly `deposit` once unpaused elapsed covers the full
+/// duration — a pause stretches the window, it never truncates it. Mirrors
+/// the contract's elapsed model (`elapsed_seconds` in `stream.rs`).
+#[test]
+fn property_paused_streams_stay_bounded_and_complete() {
+    let deposits: [i128; 4] = [1, 7, 123_456_789, i128::MAX / 4];
+    let durations: [u64; 4] = [1, 10, 1_000, 86_400];
+    let pause_totals: [u64; 4] = [0, 1, 999, 1_000_000];
+
+    // The contract's elapsed model: wall-clock minus accumulated pause time,
+    // clamped to the window.
+    let elapsed = |wall_clock: u64, duration: u64, paused_total: u64| {
+        wall_clock.saturating_sub(paused_total).min(duration)
+    };
+
+    for deposit in deposits {
+        for duration in durations {
+            // Pairs whose worst-case product overflows are rejected at stream
+            // creation; the pure fn reports MathOverflow (covered by the
+            // main property test) — skip them here.
+            if (deposit as u128).checked_mul(duration as u128).is_none() {
+                continue;
+            }
+            for paused_total in pause_totals {
+                // Sampled wall-clock points, ascending (small pause totals
+                // can reorder the naive list; duplicates are fine).
+                let mut points = [
+                    0u64,
+                    1,
+                    paused_total,
+                    paused_total + duration / 2,
+                    paused_total + duration,
+                    paused_total + duration + 999_999,
+                ];
+                points.sort_unstable();
+                let mut prev: i128 = 0;
+                for wall_clock in points {
+                    let streamed = streamed_at(
+                        deposit,
+                        duration,
+                        elapsed(wall_clock, duration, paused_total),
+                    )
+                    .unwrap();
+                    // Bounds: never negative, never more than deposited.
+                    assert!((0..=deposit).contains(&streamed));
+                    // Monotonic: pausing never makes the balance go down.
+                    assert!(
+                        streamed >= prev,
+                        "accrual decreased at wall_clock={wall_clock}"
+                    );
+                    prev = streamed;
+                }
+                // Full-window completeness at exactly the stretched end.
+                let full = streamed_at(
+                    deposit,
+                    duration,
+                    elapsed(paused_total + duration, duration, paused_total),
+                )
+                .unwrap();
+                assert_eq!(full, deposit);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ events --------

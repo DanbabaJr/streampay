@@ -57,3 +57,28 @@ pub struct StreamToppedUp {
     /// Stream deposit after the top-up.
     pub new_deposit: i128,
 }
+
+/// Emitted when the sender pauses a stream. Accrual freezes at `paused_at`
+/// until the stream is resumed.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseStream {
+    #[topic]
+    pub stream_id: u64,
+    pub paused_by: Address,
+    /// Ledger timestamp at which accrual froze.
+    pub paused_at: u64,
+}
+
+/// Emitted when the sender resumes a paused stream. The paused interval is
+/// folded into `paused_total`, shifting the effective end of the stream's
+/// window out by exactly that amount.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResumeStream {
+    #[topic]
+    pub stream_id: u64,
+    pub resumed_by: Address,
+    /// Cumulative paused seconds after this resume.
+    pub paused_total: u64,
+}

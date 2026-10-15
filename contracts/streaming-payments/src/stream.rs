@@ -39,6 +39,10 @@ pub enum StreamStatus {
     Cancelled,
     /// Fully streamed and fully withdrawn. Terminal.
     Depleted,
+    /// Paused by the sender: accrual is frozen at the pause timestamp until
+    /// the stream is resumed. Withdrawals (of the frozen balance), top-ups,
+    /// and cancellation all remain allowed while paused.
+    Paused,
 }
 
 /// Full state of a payment stream.
@@ -58,6 +62,11 @@ pub struct Stream {
     /// If true, the recipient may also cancel and reclaim their accrued balance.
     pub cancelable: bool,
     pub status: StreamStatus,
+    /// Cumulative seconds this stream has been paused. Accrual and the
+    /// effective end of the window exclude this time.
+    pub paused_total: u64,
+    /// Ledger timestamp at which the current pause began; `0` while running.
+    pub paused_at: u64,
 }
 
 impl Stream {
@@ -65,6 +74,12 @@ impl Stream {
     /// (`create_stream` rejects `end_time <= start_time`).
     pub fn duration(&self) -> u64 {
         self.end_time - self.start_time
+    }
+
+    /// True for statuses that hold funds and are not terminal: `Active` and
+    /// `Paused`. Cancelled and depleted streams reject further mutation.
+    pub fn is_live(&self) -> bool {
+        matches!(self.status, StreamStatus::Active | StreamStatus::Paused)
     }
 }
 
@@ -85,19 +100,25 @@ pub enum DataKey {
     SenderStreams(Address),
 }
 
-/// Seconds elapsed of the stream window at the current ledger time.
+/// Seconds elapsed of the stream window at the current ledger time,
+/// excluding paused time.
 ///
 /// The window is half-open `[start_time, end_time)`: at `now == start_time`
-/// nothing has accrued yet; at `now >= end_time` the full duration has elapsed.
-pub fn elapsed_seconds(env: &Env, start_time: u64, end_time: u64) -> u64 {
-    let now = env.ledger().timestamp();
-    if now <= start_time {
-        0
-    } else if now >= end_time {
-        end_time - start_time
+/// nothing has accrued yet; at `now >= end_time` the full duration has
+/// elapsed. While the stream is `Paused` the clock is frozen at the pause
+/// timestamp, and paused seconds are also subtracted from elapsed after
+/// resuming — so the effective end of the window shifts out by exactly the
+/// total paused interval.
+pub fn elapsed_seconds(env: &Env, stream: &Stream) -> u64 {
+    let effective_now = if stream.status == StreamStatus::Paused {
+        stream.paused_at
     } else {
-        now - start_time
-    }
+        env.ledger().timestamp()
+    };
+    effective_now
+        .saturating_sub(stream.start_time)
+        .saturating_sub(stream.paused_total)
+        .min(stream.duration())
 }
 
 /// Validates that `deposit * duration` — the worst-case rate multiplication —
@@ -136,7 +157,7 @@ pub fn streamed_at(deposit: i128, duration: u64, elapsed: u64) -> Result<i128, S
 ///
 /// See [`streamed_at`] for the rate semantics.
 pub fn streamed_amount(env: &Env, stream: &Stream) -> Result<i128, StreamError> {
-    let elapsed = elapsed_seconds(env, stream.start_time, stream.end_time);
+    let elapsed = elapsed_seconds(env, stream);
     streamed_at(stream.deposit, stream.duration(), elapsed)
 }
 

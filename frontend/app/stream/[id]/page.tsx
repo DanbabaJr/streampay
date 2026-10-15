@@ -130,7 +130,11 @@ export default function StreamDetail() {
     <main className="wrap">
       <p className="kicker mono">STREAM #{stream.id}</p>
       <h1>
-        {stream.status === "Active" ? "⚡ Streaming" : `⏹ ${stream.status}`}
+        {stream.status === "Active"
+          ? "⚡ Streaming"
+          : stream.status === "Paused"
+            ? "⏸ Paused — accrual frozen"
+            : `⏹ ${stream.status}`}
       </h1>
       {status && <p className="ok">{status}</p>}
       {error && <p className="err">{error}</p>}
@@ -185,7 +189,10 @@ export default function StreamDetail() {
         </table>
       </section>
 
-      {isRecipient && stream.status === "Active" && (
+      {/* Withdrawals stay available while paused: the frozen accrued balance
+          can still be claimed. */}
+      {isRecipient &&
+        (stream.status === "Active" || stream.status === "Paused") && (
         <section className="card">
           <h2>Withdraw accrued funds</h2>
           <div className="row">
@@ -213,8 +220,10 @@ export default function StreamDetail() {
         </section>
       )}
 
+      {/* Cancelling a paused stream is allowed: the split uses the frozen
+          accrual point. */}
       {(isSender || (isRecipient && stream.cancelable)) &&
-        stream.status === "Active" && (
+        (stream.status === "Active" || stream.status === "Paused") && (
           <section className="card">
             <h2>Cancel stream</h2>
             <p className="muted">
