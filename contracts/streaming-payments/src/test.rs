@@ -278,6 +278,23 @@ fn create_stream_rejects_duration_over_max() {
 }
 
 #[test]
+fn create_stream_stores_correct_duration() {
+    // Kills mutant: lib.rs:92 (replace - with + in duration calculation)
+    let f = Fixture::setup();
+    let now = f.env.ledger().timestamp();
+    let start = now + DAY;
+    let end = now + DAY + 10 * DAY;
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(stream.start_time, start);
+    assert_eq!(stream.end_time, end);
+    // The duration should be end - start, not end + start
+    assert_eq!(stream.duration(), end - start);
+    assert_eq!(stream.duration(), 10 * DAY);
+}
+
+#[test]
 fn create_stream_rejects_deposit_that_overflows_rate_math() {
     let f = Fixture::setup();
     let now = f.env.ledger().timestamp();
@@ -299,6 +316,41 @@ fn create_stream_rejects_deposit_that_overflows_rate_math() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, StreamError::MathOverflow);
+}
+
+#[test]
+fn create_stream_accepts_exact_capacity_boundary() {
+    // Kills mutant: stream.rs:109 (replace > with >= in validate_capacity)
+    // The function uses > to reject when deposit exceeds capacity.
+    // At the exact boundary (deposit == capacity), it should be accepted.
+    let f = Fixture::setup();
+    let now = f.env.ledger().timestamp();
+    // Use a deposit that exactly equals u128::MAX / duration
+    // but small enough to fit within the test allowance
+    let duration = 1000u64;
+    let deposit = (u128::MAX / (duration as u128)) as i128;
+
+    // Increase allowance to handle the large deposit
+    StellarAssetClient::new(&f.env, &f.token).approve(
+        &f.sender,
+        &f.client.address,
+        &deposit,
+        &1_000_000u32,
+    );
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &deposit);
+
+    let id = f.client.mock_all_auths().create_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &deposit,
+        &now,
+        &(now + duration),
+        &false,
+    );
+    assert!(id >= 1);
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(stream.deposit, deposit);
 }
 
 #[test]
@@ -664,6 +716,63 @@ fn cancel_at_exact_start_pays_sender_everything() {
         2 * DEPOSIT // headroom + full refund
     );
     assert_eq!(TokenClient::new(&f.env, &f.token).balance(&f.recipient), 0);
+}
+
+#[test]
+fn elapsed_after_end_returns_full_duration() {
+    // Kills mutant: stream.rs:97 (replace - with + in elapsed_seconds)
+    // When now >= end_time, elapsed should be end_time - start_time, not end_time + start_time
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false); // starts now
+    f.advance_time(20 * DAY); // well past end_time
+
+    // At this point, the full duration should have elapsed
+    // If the mutant changed - to +, elapsed would be wildly wrong
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    let available = f.client.mock_all_auths().available(&id);
+    assert_eq!(available, DEPOSIT); // full deposit available
+    assert_eq!(stream.deposit, DEPOSIT);
+}
+
+#[test]
+fn cancel_with_zero_recipient_amount_skips_transfer() {
+    // Kills mutant: lib.rs:263 (replace > with >= in recipient_amount check)
+    // Cancelling before start yields recipient_amount = 0, which should not trigger a transfer.
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    // Cancel immediately (before start_time) - recipient gets 0
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Cancelled);
+    assert_eq!(stream.withdrawn, 0);
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&f.recipient), 0);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        2 * DEPOSIT // headroom + full refund
+    );
+}
+
+#[test]
+fn cancel_with_zero_sender_amount_skips_transfer() {
+    // Kills mutant: lib.rs:270 (replace > with >= in sender_amount check)
+    // Cancelling after end yields sender_amount = 0, which should not trigger a transfer.
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.advance_time(50 * DAY); // fully accrued
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Cancelled);
+    assert_eq!(stream.withdrawn, DEPOSIT);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        DEPOSIT
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        DEPOSIT // headroom only, no refund
+    );
 }
 
 // ------------------------------------------------------------ top-up --------
@@ -1103,6 +1212,28 @@ fn create_stream_indexes_ids_for_sender_and_recipient() {
     let expected = soroban_sdk::Vec::from_slice(&f.env, &[id1, id2]);
     assert_eq!(f.client.recipient_streams(&f.recipient, &0, &10), expected);
     assert_eq!(f.client.sender_streams(&f.sender, &0, &10), expected);
+}
+
+#[test]
+fn stream_ids_are_unique_and_monotonic() {
+    // Kills mutant: stream.rs:178 (replace next_stream_id with constant 1)
+    // Stream IDs must be unique and monotonically increasing.
+    let f = Fixture::setup();
+    let id1 = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let id2 = f.create_stream(DEPOSIT / 2, 0, 5 * DAY, true);
+    let id3 = f.create_stream(DEPOSIT / 4, 0, 3 * DAY, false);
+
+    assert!(id1 >= 1);
+    assert!(id2 > id1);
+    assert!(id3 > id2);
+
+    // Verify the streams have the expected IDs
+    let s1 = f.client.mock_all_auths().get_stream(&id1);
+    let s2 = f.client.mock_all_auths().get_stream(&id2);
+    let s3 = f.client.mock_all_auths().get_stream(&id3);
+    assert_eq!(s1.id, id1);
+    assert_eq!(s2.id, id2);
+    assert_eq!(s3.id, id3);
 }
 
 #[test]

@@ -25,6 +25,12 @@ out/
 # Local tooling leftovers
 .freebuff/
 
+# TTL sentinel: build output, local config, runtime state (all per-operator)
+infra/ttl-sentinel/dist/
+infra/ttl-sentinel/ttl-sentinel.config.json
+infra/ttl-sentinel/.ttl-sentinel.state.json
+infra/ttl-sentinel/.ttl-sentinel.state.json.*.json
+
 # Release-pipeline evidence bundles (produced by scripts/release_gates.sh and
 # the dress rehearsal; uploaded as CI artifacts, never committed)
 /evidence/

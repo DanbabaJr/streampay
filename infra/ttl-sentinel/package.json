@@ -1,0 +1,25 @@
+{
+  "name": "streampay-ttl-sentinel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rent/TTL sentinel for StreamPay: scans storage TTLs of live stream state, projects expiry against ledger cadence, alerts before state can archive, and (optionally, as a separate funded component) extends TTLs.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "scan": "node dist/src/cli.js scan",
+    "rent": "node dist/src/cli.js rent",
+    "extend": "node dist/src/cli.js extend"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^5.7.0"
+  }
+}

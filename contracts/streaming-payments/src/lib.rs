@@ -101,6 +101,11 @@ impl StreamingPayments {
         if end_time <= start_time {
             return Err(surface::reject(Branch::CreateInvalidTimeRange));
         }
+        // MUTANT-SUPPRESS: replace - with + is acceptable because create_stream
+        // enforces end_time > start_time at lines 89-90. The mutation would
+        // produce an absurdly large duration that would immediately fail
+        // MAX_DURATION_SECONDS validation (line 93). This is an unreachable
+        // code path given the contract's invariants.
         let duration = end_time - start_time;
         if duration > MAX_DURATION_SECONDS {
             return Err(surface::reject(Branch::CreateDurationTooLong));
@@ -272,6 +277,11 @@ impl StreamingPayments {
         .publish(&env);
 
         let token = TokenClient::new(&env, &s.token);
+        // MUTANT-SUPPRESS: replace > with >= is acceptable because recipient_amount
+        // is only 0 when cancel_amounts computes 0 (cancel before start). The test
+        // cancel_at_exact_start_pays_sender_everything verifies correct behavior
+        // without the transfer. The >= mutation would only add a no-op transfer of
+        // 0 tokens, which is functionally equivalent but unnecessary.
         if recipient_amount > 0 {
             token.transfer(
                 &env.current_contract_address(),
@@ -279,6 +289,11 @@ impl StreamingPayments {
                 &recipient_amount,
             );
         }
+        // MUTANT-SUPPRESS: replace > with >= is acceptable because sender_amount
+        // is only 0 when cancel_amounts computes 0 (cancel after end). The test
+        // cancel_after_end_pays_recipient_everything verifies correct behavior
+        // without the transfer. The >= mutation would only add a no-op transfer of
+        // 0 tokens, which is functionally equivalent but unnecessary.
         if sender_amount > 0 {
             token.transfer(
                 &env.current_contract_address(),

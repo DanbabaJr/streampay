@@ -21,6 +21,22 @@ interface: they are only ever appended to, never renumbered or reused.
   `scripts/verify_attestation.sh` to check a local document against an attested
   hash. Frontend: stream detail page lists a stream's attestations and lets a
   party attach one.
+- `infra/ttl-sentinel` — an operational sentinel for storage rent and TTLs,
+  documented in [`infra/ttl-sentinel/README.md`](./infra/ttl-sentinel/README.md)
+  and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §11. It scans every
+  storage class (stream, address index, id counter, contract instance, Wasm
+  code), reads `liveUntilLedgerSeq`, and alerts on `warn` / `crit` / `expired`
+  transitions to console, JSONL and webhook sinks — read-only, no key.
+  Extension is a separate, off-by-default component with its own funded key,
+  dry-run default and monthly budget meter. The same module projects rent from
+  measured entry sizes (504 B per stream) against the CAP-0066 fee curve, as
+  input for the upcoming pricing/dust work.
+- Recorded per-class worst-case cliffs derived from the contract's actual
+  extension behavior: 200,000 ledgers for streams and index entries,
+  **4,095 ledgers (~5.7 h) for the id counter, the contract instance and the
+  Wasm code entry**, none of which the contract ever extends (invocations do
+  not auto-extend instance/code entries). A schedule whose warning would land
+  outside its class cliff now fails validation instead of shipping.
 - Error-surface instrumentation and a generated test matrix
   (`error_surface_test.rs`): every `(entrypoint, condition)` rejection branch is
   registered in `src/surface.rs`, probed for its declared `StreamError`, and

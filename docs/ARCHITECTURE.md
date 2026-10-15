@@ -45,6 +45,12 @@ way to bound state bloat without penalizing active users. Index entries get
 the same TTL treatment on write *and* on read, so an actively-queried address
 stays hot.
 
+Nothing extends `DataKey::NextStreamId`, the contract instance entry or the
+Wasm code entry, and invoking a contract does not auto-extend instance/code
+entries either. All three therefore expire `min_persistent_entry_ttl - 1` =
+4,095 ledgers (~5.7 h) after creation unless something extends them — an
+operational constraint §11 covers in detail.
+
 There is still **no global registry** of all streams (no contract-wide
 `Vec<u64>`): that would make `create_stream` cost grow with total stream count.
 Instead, discovery is **per-address**: `create_stream` appends the new id to
@@ -277,3 +283,62 @@ or off-chain UX.
   read-modify-write; a `Stream` split into hot/cold fields could shave bytes.
 - Event indexer service — TypeScript worker polling `getEvents` per topic
   `stream_id`, materializing stream history for the UI.
+- Contract-side TTL maintenance — extend `NextStreamId`, the instance entry and
+  the code entry from inside the contract (or from the deploy path) instead of
+  relying on the external sentinel. Costs rent on the write path but removes
+  the ~5.7 h cliff in §11 entirely.
+
+## 11. TTL and rent operations
+
+§2 describes what the contract extends. This section is the other half: what
+it never touches, and the operational tooling that exists because of it —
+[`infra/ttl-sentinel/`](../infra/ttl-sentinel/README.md).
+
+| Entry | Extended on-chain? | Worst-case cliff | At 5 s/ledger |
+|---|---|---:|---:|
+| `Stream(id)` | yes, every mutating entrypoint | 200,000 ledgers | 11.6 d |
+| `SenderStreams` / `RecipientStreams` | yes, on write **and** on page read | 200,000 ledgers | 11.6 d |
+| `NextStreamId` | **never** | 4,095 ledgers | **5.7 h** |
+| contract instance | **never** | 4,095 ledgers | **5.7 h** |
+| Wasm code | **never** | 4,095 ledgers | **5.7 h** |
+
+Two properties with real consequences:
+
+- **The extension threshold is a cliff, not a target.** `extend_ttl(200_000,
+  500_000)` only fires when the remaining TTL is already below the threshold,
+  and then sets `liveUntil = now + 500_000`. The last write that ever extends
+  a stream can land as late as `L_ext + 300_000`, which leaves exactly  200,000 ledgers: the worst case is *tight*, so alert thresholds must be
+  derived from the 200,000 cliff rather than from the comfortable 500,000
+  extension target.
+- **Never-extended entries are the sharp edge.** `next_stream_id` reads the
+  counter with `get().unwrap_or(1)` and writes it back without extending it,
+  and a plain `stellar contract deploy` (or
+  [`scripts/deploy_testnet.sh`](../scripts/deploy_testnet.sh)) leaves the
+  instance and code entries un-extended. Every deployment therefore has a
+  ~5.7-hour window before stream creation and *all* reads — `get_stream`
+  included — start failing on archived entries, until the entry is restored
+  (a paid operation) and extended.
+
+`infra/ttl-sentinel` scans every class, reads `liveUntilLedgerSeq` for each
+key, projects expiry per class against a sampled ledger cadence, and alerts on
+`warn` / `crit` / `expired` transitions (console, JSONL, webhook sinks).
+Alerting is read-only and key-less; enumeration is counter-driven
+(`1..next_id-1`, batched `getLedgerEntries`) so it never depends on event
+retention. Extension is a **separate, off-by-default** component with its own
+funded key, a per-transaction entry cap, dry-run default and a persisted
+monthly budget meter — the protocol lets anyone extend anyone's entry, so that
+key only ever needs to cover fees.
+
+The same module projects rent from *measured* entry sizes (504 B per stream
+entry; index entries by id count) against the CAP-0066 fee curve. That is
+direct input for pricing and dust economics: ~0.021 XLM per live stream per
+month at the floor fee, plus ~14.6 XLM per MiB of Wasm per month — code rent
+is scale-invariant, so bytecode is the dominant cost centre below roughly 80
+live streams.
+
+`cargo test` cannot cover any of this today: the contract's tests advance
+`ledger().timestamp()` but never the ledger sequence, so no test archives an
+entry. The sentinel's own suite fast-forwards a fake chain ledger-by-ledger
+and asserts the observed alert timing, plus a constants-sync test that fails
+if `TTL_THRESHOLD_LEDGERS` / `TTL_EXTEND_LEDGERS`, the extension call sites or
+the never-extended counter drift from what this section documents.
