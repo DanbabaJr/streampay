@@ -41,4 +41,8 @@ pub enum StreamError {
     NotAuthorized = 12,
     /// `withdraw_max` found nothing accrued-but-unwithdrawn to pay out.
     NothingToWithdraw = 13,
+    /// A metadata attestation tag exceeds `MAX_TAG_LEN` bytes.
+    MetadataTagTooLong = 14,
+    /// A stream has reached `MAX_ATTESTATIONS_PER_STREAM` attestations.
+    MetadataLimitReached = 15,
 }

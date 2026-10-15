@@ -5,12 +5,15 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getAddress, isConnected } from "@stellar/freighter-api";
 import {
+  attachMetadata,
   cancelStream,
   describeError,
+  readAttestations,
   readAvailable,
   readStream,
   withdrawFromStream,
   withdrawMaxFromStream,
+  type AttestationView,
   type StreamView,
 } from "@/lib/stellar";
 
@@ -24,6 +27,9 @@ export default function StreamDetail() {
 
   const [stream, setStream] = useState<StreamView | null>(null);
   const [available, setAvailable] = useState<bigint | null>(null);
+  const [attestations, setAttestations] = useState<AttestationView[]>([]);
+  const [hashInput, setHashInput] = useState<string>("");
+  const [tagInput, setTagInput] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
   const [address, setAddress] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -32,9 +38,14 @@ export default function StreamDetail() {
   const reload = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, a] = await Promise.all([readStream(id), readAvailable(id)]);
+      const [s, a, att] = await Promise.all([
+        readStream(id),
+        readAvailable(id),
+        readAttestations(id),
+      ]);
       setStream(s);
       setAvailable(a);
+      setAttestations(att);
       setError("");
     } catch (e) {
       setError(describeError(e));
@@ -120,6 +131,26 @@ export default function StreamDetail() {
     try {
       await cancelStream(address, stream!.id);
       setStatus("Stream cancelled.");
+      await reload();
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }
+
+  async function doAttach() {
+    if (!address) return;
+    setError("");
+    setStatus("");
+    try {
+      const index = await attachMetadata(
+        address,
+        stream!.id,
+        hashInput,
+        tagInput
+      );
+      setStatus(`Attestation #${index} recorded on-chain.`);
+      setHashInput("");
+      setTagInput("");
       await reload();
     } catch (e) {
       setError(describeError(e));
@@ -224,6 +255,82 @@ export default function StreamDetail() {
             <button onClick={() => void doCancel()}>Cancel stream</button>
           </section>
         )}
+
+      <section className="card">
+        <h2>Metadata attestations</h2>
+        <p className="muted">
+          Hash-linked claims attached by either party — e.g. the SHA-256 of an
+          invoice this stream pays. The contract records who claimed which hash
+          and when; it never stores the document. Verify a document against a
+          hash with <code>scripts/verify_attestation.sh</code>.
+        </p>
+        {attestations.length === 0 ? (
+          <p className="muted">No attestations recorded.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Attester</th>
+                <th>Tag</th>
+                <th>Content hash (SHA-256)</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attestations.map((a) => (
+                <tr key={a.index}>
+                  <td className="mono">{a.index}</td>
+                  <td className="mono">
+                    {a.attester === stream.sender
+                      ? "sender "
+                      : a.attester === stream.recipient
+                        ? "recipient "
+                        : ""}
+                    {a.attester.slice(0, 8)}…
+                  </td>
+                  <td>{a.tag || "—"}</td>
+                  <td className="mono" title={a.contentHash}>
+                    {a.contentHash.slice(0, 16)}…
+                  </td>
+                  <td className="mono">
+                    {new Date(a.timestamp * 1000).toISOString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {(isSender || isRecipient) && (
+        <section className="card">
+          <h2>Attach metadata</h2>
+          <p className="muted">
+            Attach a 32-byte content hash (64 hex characters) and a short tag,
+            e.g. for an invoice PDF. Attestations are append-only: attaching
+            again never overwrites an earlier entry.
+          </p>
+          <label htmlFor="hash">Content hash (SHA-256, hex)</label>
+          <input
+            id="hash"
+            type="text"
+            placeholder="64 hex characters"
+            value={hashInput}
+            onChange={(e) => setHashInput(e.target.value)}
+          />
+          <label htmlFor="tag">Tag (at most 32 bytes)</label>
+          <input
+            id="tag"
+            type="text"
+            maxLength={32}
+            placeholder="invoice-0042"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+          />
+          <button onClick={() => void doAttach()}>Attach attestation</button>
+        </section>
+      )}
 
       <p>
         <Link href="/">← All streams</Link>

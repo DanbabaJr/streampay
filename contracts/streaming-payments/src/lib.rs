@@ -30,18 +30,25 @@
 //! - All state changes happen *before* token transfers (checks-effects-
 //!   interactions), so reentrant token callbacks cannot over-withdraw.
 
+#[cfg(test)]
+extern crate std;
+
 mod errors;
 mod events;
+mod metadata;
+#[cfg(test)]
+mod metadata_test;
 mod stream;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_client;
 
-use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, BytesN, Env, String, Vec};
 
 pub use errors::StreamError;
-pub use events::{StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn};
+pub use events::{MetadataAttached, StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn};
+pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{streamed_at, Stream, StreamStatus, MAX_DURATION_SECONDS, MAX_PAGE_SIZE};
@@ -362,5 +369,87 @@ impl StreamingPayments {
     /// pagination and advisory semantics as [`StreamingPayments::recipient_streams`].
     pub fn sender_streams(env: Env, sender: Address, offset: u32, limit: u32) -> Vec<u64> {
         stream::page_stream_ids(&env, &stream::DataKey::SenderStreams(sender), offset, limit)
+    }
+
+    /// Attaches a hash-linked metadata attestation to a stream.
+    ///
+    /// Either party (sender or recipient) may call this; their authorization is
+    /// required. `content_hash` is a 32-byte digest (e.g. SHA-256) of an
+    /// external document the stream references — an invoice, a payslip, a
+    /// contract. `tag` is a short caller-chosen label (at most
+    /// [`MAX_TAG_LEN`](crate::MAX_TAG_LEN) bytes). Neither the document nor any
+    /// proof of it is stored: the contract only records *who claimed which hash
+    /// and when*, so third parties can later recompute the hash of the document
+    /// they hold and compare it against this on-chain claim.
+    ///
+    /// Attestations are **append-only**: attaching again never overwrites an
+    /// existing entry, and each attach is recorded both in the stream's list
+    /// and in each party's index. The list is capped at
+    /// [`MAX_ATTESTATIONS_PER_STREAM`](crate::MAX_ATTESTATIONS_PER_STREAM).
+    ///
+    /// Returns the new attestation's index within the stream's list. A stream's
+    /// attestations are readable via [`StreamingPayments::stream_attestations`]
+    /// (or [`StreamingPayments::attestation_count`]); a party's attestations
+    /// across their streams via [`StreamingPayments::party_attestations`].
+    pub fn attach_metadata(
+        env: Env,
+        attester: Address,
+        stream_id: u64,
+        content_hash: BytesN<32>,
+        tag: String,
+    ) -> Result<u32, StreamError> {
+        attester.require_auth();
+
+        let s = stream::get_stream(&env, stream_id)?;
+        if attester != s.sender && attester != s.recipient {
+            return Err(StreamError::NotAuthorized);
+        }
+        if tag.len() > MAX_TAG_LEN {
+            return Err(StreamError::MetadataTagTooLong);
+        }
+
+        let timestamp = env.ledger().timestamp();
+        let index = metadata::append(&env, &s, &attester, &content_hash, &tag, timestamp)?;
+
+        MetadataAttached {
+            stream_id,
+            index,
+            attester,
+            content_hash,
+            tag,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(index)
+    }
+
+    /// One page of a stream's attestations, oldest first. `limit` is clamped to
+    /// [`MAX_PAGE_SIZE`](crate::MAX_PAGE_SIZE); an offset past the end (or an
+    /// unknown stream) yields an empty page rather than an error.
+    pub fn stream_attestations(
+        env: Env,
+        stream_id: u64,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<Attestation> {
+        metadata::page_attestations(&env, stream_id, offset, limit)
+    }
+
+    /// Number of attestations recorded for a stream (0 for an unknown stream).
+    pub fn attestation_count(env: Env, stream_id: u64) -> u32 {
+        metadata::attestation_count(&env, stream_id)
+    }
+
+    /// One page of the attestation references recorded under a party's address
+    /// (as sender or recipient), oldest first. Pagination and clamping match
+    /// [`StreamingPayments::recipient_streams`].
+    pub fn party_attestations(
+        env: Env,
+        party: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<AttestationRef> {
+        metadata::page_party_attestations(&env, &party, offset, limit)
     }
 }

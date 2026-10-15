@@ -9,6 +9,19 @@ interface: they are only ever appended to, never renumbered or reused.
 
 ## [Unreleased]
 
+### Added
+- Hash-linked metadata attestations: `attach_metadata(attester, stream_id,
+  content_hash, tag)` records who claimed which 32-byte content hash, when, on
+  a stream — append-only, indexed by both parties, size-bounded, with a
+  `MetadataAttached` event. Read back with `stream_attestations`,
+  `attestation_count`, and `party_attestations`. New codes
+  `MetadataTagTooLong` (14) and `MetadataLimitReached` (15), appended.
+- `docs/VERIFYING_ATTESTATIONS.md` — the honest scope (attestation, not
+  verification) with a worked invoice + hash-check recipe, and
+  `scripts/verify_attestation.sh` to check a local document against an attested
+  hash. Frontend: stream detail page lists a stream's attestations and lets a
+  party attach one.
+
 ## [0.3.0] - 2026-10-04
 
 ### Changed

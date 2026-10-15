@@ -70,6 +70,19 @@ Deep dive (storage model, checked math, reentrancy, TTL strategy, design decisio
 | `available(stream_id) → i128` | — (read-only) | — | — |
 | `recipient_streams(address, offset, limit) → Vec<u64>` | — (read-only) | — | — |
 | `sender_streams(address, offset, limit) → Vec<u64>` | — (read-only) | — | — |
+| `attach_metadata(attester, stream_id, content_hash, tag) → u32` | sender or recipient | — | `MetadataAttached` |
+| `stream_attestations(stream_id, offset, limit) → Vec<Attestation>` | — (read-only) | — | — |
+| `attestation_count(stream_id) → u32` | — (read-only) | — | — |
+| `party_attestations(party, offset, limit) → Vec<AttestationRef>` | — (read-only) | — | — |
+
+`attach_metadata` lets either party attach a **content hash** (32 bytes, e.g.
+SHA-256) plus a short tag to a stream — an invoice, a payslip, a contract —
+without storing the document on-chain. Attestations are append-only, indexed by
+both parties, and size-bounded. This is *attestation*, not verification: the
+contract records who claimed which hash when; a third party recomputes the hash
+of the document they hold and compares. See
+[`docs/VERIFYING_ATTESTATIONS.md`](./docs/VERIFYING_ATTESTATIONS.md) and
+[`scripts/verify_attestation.sh`](./scripts/verify_attestation.sh).
 
 `recipient_streams` / `sender_streams` are on-chain discovery indexes:
 append-only, creation-ordered stream-id lists per address, paginated

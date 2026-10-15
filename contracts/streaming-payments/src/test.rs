@@ -23,20 +23,20 @@ use crate::{StreamError, StreamStatus, StreamingPayments, MAX_DURATION_SECONDS};
 
 // ---------------------------------------------------------------- fixtures --
 
-const DAY: u64 = 24 * 60 * 60;
+pub(crate) const DAY: u64 = 24 * 60 * 60;
 /// 1000 tokens with 7 decimals (default for SAC-issued assets in tests).
 const DEPOSIT: i128 = 10_000_000_000;
 
-struct Fixture {
-    env: Env,
-    token: Address,
-    client: Client<'static>,
-    sender: Address,
-    recipient: Address,
+pub(crate) struct Fixture {
+    pub(crate) env: Env,
+    pub(crate) token: Address,
+    pub(crate) client: Client<'static>,
+    pub(crate) sender: Address,
+    pub(crate) recipient: Address,
 }
 
 impl Fixture {
-    fn setup() -> Self {
+    pub(crate) fn setup() -> Self {
         let env = Env::default();
         env.mock_all_auths();
         let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
@@ -70,7 +70,13 @@ impl Fixture {
 
     /// Creates a stream starting `start_in` seconds from now, lasting
     /// `duration` seconds, with the given deposit and cancelability.
-    fn create_stream(&self, deposit: i128, start_in: u64, duration: u64, cancelable: bool) -> u64 {
+    pub(crate) fn create_stream(
+        &self,
+        deposit: i128,
+        start_in: u64,
+        duration: u64,
+        cancelable: bool,
+    ) -> u64 {
         let now = self.env.ledger().timestamp();
         self.client.mock_all_auths().create_stream(
             &self.sender,
@@ -83,7 +89,7 @@ impl Fixture {
         )
     }
 
-    fn advance_time(&self, seconds: u64) {
+    pub(crate) fn advance_time(&self, seconds: u64) {
         self.env.ledger().with_mut(|li| li.timestamp += seconds);
     }
 }

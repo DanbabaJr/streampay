@@ -60,6 +60,16 @@ export interface StreamView {
   status: string;
 }
 
+/** One hash-linked attestation attached to a stream (see `attach_metadata`). */
+export interface AttestationView {
+  index: number;
+  attester: string;
+  /** Lowercase hex (64 chars) of the 32-byte content hash. */
+  contentHash: string;
+  tag: string;
+  timestamp: number;
+}
+
 function scAddr(s: string) {
   return nativeToScVal(new Address(s), { type: "address" });
 }
@@ -97,6 +107,8 @@ const STREAM_ERRORS: Record<number, string> = {
   11: "MathOverflow",
   12: "NotAuthorized",
   13: "NothingToWithdraw",
+  14: "MetadataTagTooLong",
+  15: "MetadataLimitReached",
 };
 
 /** Rewrites raw simulation/tx error text into a readable StreamError name. */
@@ -287,6 +299,79 @@ export async function readAvailable(streamId: string): Promise<bigint> {
     throw new Error(`Stream #${streamId} not found or RPC unavailable`);
   }
   return BigInt(scValToNative(retval) as bigint);
+}
+
+/** Parses a 64-char hex string into the 32 bytes a `BytesN<32>` expects. */
+function hexToBytes32(hex: string): Uint8Array {
+  const clean = hex.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) {
+    throw new Error(
+      "Content hash must be 64 hex characters (a 32-byte digest, e.g. SHA-256)."
+    );
+  }
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+/**
+ * Attaches a hash-linked attestation to a stream (`attach_metadata`).
+ * `attester` must be the stream's sender or recipient and sign the call.
+ * Returns the new attestation's index. Attestations are append-only.
+ */
+export async function attachMetadata(
+  attester: string,
+  streamId: string,
+  contentHashHex: string,
+  tag: string
+): Promise<number> {
+  const op = contract().call(
+    "attach_metadata",
+    scAddr(attester),
+    u64(streamId),
+    nativeToScVal(hexToBytes32(contentHashHex), { type: "bytes" }),
+    nativeToScVal(tag, { type: "string" })
+  );
+  return send(attester, op, (v) => Number(scValToNative(v)));
+}
+
+/**
+ * Reads a stream's attestations (read-only), following pagination until
+ * exhausted. An unknown stream yields an empty list.
+ */
+export async function readAttestations(
+  streamId: string
+): Promise<AttestationView[]> {
+  const out: AttestationView[] = [];
+  for (let offset = 0; ; offset += MAX_PAGE_SIZE) {
+    const retval = await simulateRead("stream_attestations", [
+      u64(streamId),
+      u32(offset),
+      u32(MAX_PAGE_SIZE),
+    ]);
+    if (!retval) break;
+    const raw =
+      (scValToNative(retval) as Array<Record<string, unknown>>) ?? [];
+    for (const a of raw) {
+      out.push({
+        index: Number(a.index),
+        attester: String(a.attester),
+        contentHash: bytesToHex(a.content_hash as Uint8Array),
+        tag: String(a.tag),
+        timestamp: Number(a.timestamp),
+      });
+    }
+    if (raw.length < MAX_PAGE_SIZE) break;
+  }
+  return out;
 }
 
 const MAX_PAGE_SIZE = 50; // mirrors the contract's MAX_PAGE_SIZE

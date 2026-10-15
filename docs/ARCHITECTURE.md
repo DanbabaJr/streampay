@@ -12,11 +12,14 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 │                                                                    │
 │  lib.rs      entrypoints: create_stream / withdraw / withdraw_max / │
 │              cancel_stream / top_up / get_stream / available /      │
-│              recipient_streams / sender_streams                    │
+│              recipient_streams / sender_streams / attach_metadata / │
+│              stream_attestations / attestation_count /              │
+│              party_attestations                                   │
 │  stream.rs   Stream type, storage, checked accrual math            │
+│  metadata.rs hash-linked attestations (attach, read, party index)  │
 │  errors.rs   StreamError — stable numeric codes, append-only       │
 │  events.rs   StreamCreated / Withdrawn / StreamCancelled /         │
-│              StreamToppedUp (stream_id as topic)                   │
+│              StreamToppedUp / MetadataAttached (stream_id topic)   │
 └──────────────────────────┬─────────────────────────────────────────┘
                            │ token interface (SAC-compatible)
                            ▼
@@ -31,6 +34,8 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 | `DataKey::Stream(id)` | `Stream` | full per-stream state |
 | `DataKey::RecipientStreams(addr)` | `Vec<u64>` | append-only ids where `addr` receives |
 | `DataKey::SenderStreams(addr)` | `Vec<u64>` | append-only ids created by `addr` |
+| `DataKey::Attestations(stream_id)` | `Vec<Attestation>` | append-only metadata attestations for a stream |
+| `DataKey::PartyAttestations(addr)` | `Vec<AttestationRef>` | refs to attestations on streams where `addr` is a party |
 
 Streams live in **persistent** storage. Every mutating entrypoint that touches
 a stream extends its TTL (`TTL_THRESHOLD_LEDGERS = 200_000`, extend to
@@ -50,6 +55,19 @@ user's activity, written only at creation, and paginated on read
 them; the `Stream` entry is the source of truth, and `StreamCreated` events
 remain the complete audit trail (an external indexer can still rebuild or
 cross-check the lists).
+
+**Attestations** follow the same pattern. `attach_metadata` appends one
+`Attestation` (a 32-byte content hash, a byte length bounded `tag`, an attester,
+a timestamp, and the index in the list) to `DataKey::Attestations(stream_id)`
+and one `AttestationRef` to *both* parties' `PartyAttestations` index. The list
+is never rewritten in place — a second attach appends, it does not overwrite —
+and is capped at `MAX_ATTESTATIONS_PER_STREAM` (32) so per-stream storage cost
+is bounded (32-byte hash × the cap). The entrypoints move no tokens, so there
+is no CEI concern; the emitted `MetadataAttached` event is the durable record.
+This is *attestation*, not verification: the contract stores no document and
+cannot check that any document hashes to the value — see
+[`VERIFYING_ATTESTATIONS.md`](./VERIFYING_ATTESTATIONS.md) for what a verifier
+can and cannot conclude, and the runnable recipe.
 
 ## 3. Accrual math
 
@@ -94,6 +112,7 @@ nothing has accrued, at `now ≥ end_time` the full duration has elapsed.
 | `withdraw` | recipient only | recipient |
 | `cancel_stream` | sender always; recipient iff `cancelable` | caller |
 | `top_up` | sender only | sender |
+| `attach_metadata` | sender or recipient | attester |
 
 The `cancelable` flag is chosen per stream at creation: payroll senders often
 want sender-only cancellation, while vesting recipients may want the right to
@@ -169,6 +188,8 @@ the public interface:
 | 11 | `MathOverflow` | a checked computation would overflow |
 | 12 | `NotAuthorized` | caller is neither sender nor (cancelable) recipient |
 | 13 | `NothingToWithdraw` | `withdraw_max` with an empty accrued balance |
+| 14 | `MetadataTagTooLong` | `attach_metadata` tag exceeds `MAX_TAG_LEN` (32 bytes) |
+| 15 | `MetadataLimitReached` | `attach_metadata` on a stream already holding `MAX_ATTESTATIONS_PER_STREAM` (32) |
 
 Codes are **append-only**: never renumber or reuse a variant.
 
@@ -219,6 +240,10 @@ or off-chain UX.
   monotonicity, and "errors are only ever genuine `MathOverflow`". CI runs a
   scheduled session (`fuzz.yml`, non-blocking); any crash becomes a regression
   unit test.
+- **Metadata attestations** (`metadata_test.rs`): both-party attribution,
+  append-not-overwrite on repeated attestation, oversized-tag and per-stream-cap
+  rejection, non-party / unknown-stream / missing-auth rejection, event payload,
+  and the paginated per-stream and per-party reads.
 - **`withdraw_max`** shares the `withdraw` payout tail (`pay_out`) so both
   paths inherit the same CEI ordering and reentrancy proof; index pagination
   and TTL behavior have dedicated tests in `test.rs`.

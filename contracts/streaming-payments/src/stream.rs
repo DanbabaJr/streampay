@@ -26,8 +26,8 @@ pub const MAX_PAGE_SIZE: u32 = 50;
 /// eventually archived off-chain (and auto-restored at a fee when next read).
 /// Every mutating entrypoint extends the stream entry's TTL, so a stream that
 /// is actually being used never goes cold.
-const TTL_THRESHOLD_LEDGERS: u32 = 200_000; // extend when TTL drops below ~11.5 days
-const TTL_EXTEND_LEDGERS: u32 = 500_000; // extend to ~29 days
+pub(crate) const TTL_THRESHOLD_LEDGERS: u32 = 200_000; // extend when TTL drops below ~11.5 days
+pub(crate) const TTL_EXTEND_LEDGERS: u32 = 500_000; // extend to ~29 days
 
 /// Lifecycle state of a stream.
 #[contracttype]
@@ -83,6 +83,14 @@ pub enum DataKey {
     /// Append-only index of stream ids created (as sender) by the given
     /// address. Same advisory semantics as [`DataKey::RecipientStreams`].
     SenderStreams(Address),
+    /// Append-only list of metadata attestations attached to a stream, in
+    /// attach order. Never rewritten in place — entries only ever grow.
+    Attestations(u64),
+    /// Append-only index of attestations on the streams where the given address
+    /// is a party (sender or recipient), so either side can enumerate them
+    /// without knowing the stream ids up front. Advisory, like the stream
+    /// indexes above.
+    PartyAttestations(Address),
 }
 
 /// Seconds elapsed of the stream window at the current ledger time.

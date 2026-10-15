@@ -3,7 +3,7 @@
 //! Every event is keyed by `stream_id` as a topic, so indexers can filter per
 //! stream efficiently. Non-`#[topic]` fields are event data.
 
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, BytesN, String};
 
 /// Emitted when a new stream is created and its deposit pulled in.
 #[contractevent]
@@ -56,4 +56,20 @@ pub struct StreamToppedUp {
     pub amount: i128,
     /// Stream deposit after the top-up.
     pub new_deposit: i128,
+}
+
+/// Emitted when a party attaches a hash-linked metadata attestation to a
+/// stream. Append-only: this event is the durable record that
+/// `attester` claimed `content_hash` (tagged `tag`) at `timestamp`.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataAttached {
+    #[topic]
+    pub stream_id: u64,
+    /// Position of the attestation in the stream's append-only list.
+    pub index: u32,
+    pub attester: Address,
+    pub content_hash: BytesN<32>,
+    pub tag: String,
+    pub timestamp: u64,
 }

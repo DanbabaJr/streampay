@@ -1,0 +1,18 @@
+INVOICE 0042
+========================================
+From:  Acme DevOps Ltd. <billing@acme.example>
+To:    Northwind DAO <treasury@northwind.example>
+Date:  2026-10-01
+Asset: USDC (Stellar)
+Total: 4,200.00 USDC
+Terms: Streamed per second over 30 days (StreamPay stream).
+
+Line items
+----------------------------------------
+  Oct 2026 retainer ........... 3,000.00
+  Migration support ........... 1,200.00
+----------------------------------------
+  TOTAL ....................... 4,200.00
+
+Payable continuously via the referenced StreamPay stream. The SHA-256 of
+this exact file is what the stream's metadata attestation commits to.
