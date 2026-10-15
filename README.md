@@ -144,13 +144,18 @@ stellar contract deploy \
 contracts/streaming-payments/   the contract (lib.rs, stream.rs, errors.rs, events.rs, test.rs)
 frontend/                       minimal Next.js UI (Freighter wallet)
 fuzz/                           cargo-fuzz harness for the accrual math (own workspace)
-scripts/deploy_testnet.sh       one-command testnet demo
+scripts/                        deploy_testnet.sh + the release/promotion pipeline scripts
+deployments/                    append-only promotion records + interface baselines
 docs/ARCHITECTURE.md            design deep-dive
+docs/DEPLOY_PIPELINE.md         sandbox → testnet → mainnet-canary promotion design
+docs/CANARY_RUNBOOK.md          mainnet canary + rollback procedure
 docs/DEMO.md                    verified testnet walkthrough
 docs/GOOD_FIRST_ISSUES.md       ready-to-file contributor tickets
 .github/workflows/ci.yml        test + fmt + clippy + coverage + wasm + lint/build/audit + supply chain
 .github/workflows/release.yml   tag-driven Wasm release with SHA-256 digests
 .github/workflows/fuzz.yml      scheduled fuzz sessions (non-blocking)
+.github/workflows/promote.yml   gated promotions (sandbox → testnet → mainnet canary)
+.github/workflows/rehearsal.yml secret-free dress rehearsal of the pipeline
 CHANGELOG.md                    release history (Keep a Changelog)
 ```
 

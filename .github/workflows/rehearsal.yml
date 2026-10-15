@@ -1,0 +1,66 @@
+name: Release pipeline rehearsal
+
+# Full dress rehearsal of the promotion pipeline: sandbox gates run for real,
+# the testnet and mainnet-canary deploys are mocked (no chain credentials, no
+# secrets). It exercises every gate and every script the governed pipeline uses,
+# so a change to the pipeline is verified before it is used for a real release.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/promote.yml"
+      - ".github/workflows/rehearsal.yml"
+      - "scripts/**"
+      - "docs/DEPLOY_PIPELINE.md"
+      - "docs/CANARY_RUNBOOK.md"
+      - "deployments/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rehearsal:
+    name: Dress rehearsal (testnet -> mocked mainnet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rehearsal-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-rehearsal-
+
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Install cargo-fuzz (for the soak gate)
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run the rehearsal
+        run: scripts/promote_rehearsal.sh
+
+      - name: Upload rehearsal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-evidence
+          path: evidence/rehearsal/

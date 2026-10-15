@@ -1,0 +1,288 @@
+name: Promote
+
+# Governed promotion pipeline: sandbox (CI gates) -> testnet -> mainnet canary.
+#
+# Each environment is a GitHub Actions Environment with required reviewers, so
+# the run pauses for approval before it may touch a network. A public chain
+# cannot un-deploy, so "rollback" is a NEW deploy of the previously promoted
+# digest, never a reversal (see docs/CANARY_RUNBOOK.md).
+#
+# Digest continuity: every deploy step downloads the Wasm published by
+# release.yml and verifies its SHA-256 against the release's SHA256SUMS asset.
+# Nothing is ever deployed from a local build.
+#
+# Prerequisites:
+#   * Environments `testnet` and `mainnet-canary` exist with required reviewers.
+#   * Repository variable `PROMOTION_ISSUE` (optional) pins the append-only log issue.
+#   * Environment `mainnet-canary` provides secret `MAINNET_DEPLOYER_SECRET`
+#     (a Stellar secret key) for real mainnet deploys.
+#   * The release tag must be cut from a commit that includes this file and scripts/.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to promote (must have a published Wasm + SHA256SUMS asset)"
+        required: true
+        type: string
+      through:
+        description: "Promote up to this environment"
+        required: true
+        type: choice
+        default: testnet
+        options:
+          - testnet
+          - mainnet-canary
+      schema_change_ack:
+        description: "Acknowledge a contract-interface (schema) change"
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Dress rehearsal: run gates for real, mock the deploys"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: promote-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.release_tag }}
+  SCHEMA_CHANGE_ACK: ${{ inputs.schema_change_ack && '1' || '0' }}
+  PROMOTION_ISSUE: ${{ vars.PROMOTION_ISSUE }}
+  GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  # ---------------------------------------------------------------- sandbox --
+  sandbox:
+    name: Sandbox gates
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.record.outputs.digest }}
+      interface: ${{ steps.record.outputs.interface }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-promote-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-promote-
+
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Install cargo-fuzz (for the soak gate)
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run gates (tests / fuzz / digest / schema)
+        env:
+          TARGET_ENV: testnet
+          EVIDENCE_DIR: evidence
+          FUZZ_SECONDS: "120"
+        run: scripts/release_gates.sh
+
+      - name: Record digests for downstream jobs
+        id: record
+        run: |
+          echo "digest=$(awk '{print $1}' evidence/digest.txt)" >> "$GITHUB_OUTPUT"
+          echo "interface=$(cat evidence/interface.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-sandbox-${{ inputs.release_tag }}
+          path: evidence/
+
+  # ---------------------------------------------------------------- testnet --
+  testnet:
+    name: Testnet (approval required)
+    needs: sandbox
+    runs-on: ubuntu-latest
+    environment: testnet
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Download published Wasm
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts
+          gh release download "$RELEASE_TAG" --pattern streampay_contract.wasm --dir artifacts
+
+      - name: Verify digest continuity
+        run: scripts/verify_release_digest.sh "$RELEASE_TAG" artifacts/streampay_contract.wasm
+
+      - name: Deploy to testnet
+        id: deploy
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/deploy_contract.sh testnet artifacts/streampay_contract.wasm --dry-run | tee /tmp/deploy.out
+          else
+            scripts/deploy_contract.sh testnet artifacts/streampay_contract.wasm | tee /tmp/deploy.out
+          fi
+          echo "contract_id=$(tail -n 1 /tmp/deploy.out)" >> "$GITHUB_OUTPUT"
+
+      - name: Canary checks
+        env:
+          SMOKE_STREAM_ID: ${{ vars.TESTNET_SMOKE_STREAM_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/canary_check.sh testnet "${{ steps.deploy.outputs.contract_id }}" --mock
+          else
+            scripts/canary_check.sh testnet "${{ steps.deploy.outputs.contract_id }}"
+          fi
+
+      - name: Record promotion
+        env:
+          EVIDENCE_DIR: evidence
+        run: |
+          mkdir -p evidence
+          scripts/record_promotion.sh testnet "$RELEASE_TAG" \
+            "${{ needs.sandbox.outputs.digest }}" "${{ needs.sandbox.outputs.interface }}" \
+            "${{ steps.deploy.outputs.contract_id }}" promoted
+          # The record is append-only: never rewrite the log, only add to it.
+          echo "promotions-log-delta:"; tail -n 1 deployments/promotions.log
+
+      - name: Upload promotion record
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-testnet-${{ inputs.release_tag }}
+          path: |
+            deployments/promotions.log
+            deployments/runs/
+
+  # -------------------------------------------------------- mainnet canary ---
+  mainnet-canary:
+    name: Mainnet canary (approval required)
+    needs: testnet
+    if: ${{ inputs.through == 'mainnet-canary' }}
+    runs-on: ubuntu-latest
+    environment: mainnet-canary
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Download published Wasm
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts
+          gh release download "$RELEASE_TAG" --pattern streampay_contract.wasm --dir artifacts
+
+      - name: Verify digest continuity
+        run: scripts/verify_release_digest.sh "$RELEASE_TAG" artifacts/streampay_contract.wasm
+
+      - name: Load mainnet deployer key
+        if: ${{ inputs.dry_run != true }}
+        env:
+          MAINNET_DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: |
+          test -n "$MAINNET_DEPLOYER_SECRET" || { echo "MAINNET_DEPLOYER_SECRET is required for mainnet deploys" >&2; exit 1; }
+          stellar keys add mainnet-deployer --secret-key "$MAINNET_DEPLOYER_SECRET"
+
+      - name: Deploy to mainnet
+        id: deploy
+        env:
+          STELLAR_SOURCE_KEY: ${{ inputs.dry_run != true && 'mainnet-deployer' || '' }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/deploy_contract.sh mainnet-canary artifacts/streampay_contract.wasm --dry-run | tee /tmp/deploy.out
+          else
+            scripts/deploy_contract.sh mainnet-canary artifacts/streampay_contract.wasm | tee /tmp/deploy.out
+          fi
+          echo "contract_id=$(tail -n 1 /tmp/deploy.out)" >> "$GITHUB_OUTPUT"
+
+      - name: Canary checks (rollback trigger)
+        env:
+          SMOKE_STREAM_ID: ${{ vars.MAINNET_SMOKE_STREAM_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/canary_check.sh mainnet-canary "${{ steps.deploy.outputs.contract_id }}" --mock
+          else
+            scripts/canary_check.sh mainnet-canary "${{ steps.deploy.outputs.contract_id }}"
+          fi
+
+      - name: Record promotion
+        if: ${{ success() }}
+        env:
+          EVIDENCE_DIR: evidence
+        run: |
+          mkdir -p evidence
+          scripts/record_promotion.sh mainnet-canary "$RELEASE_TAG" \
+            "${{ needs.sandbox.outputs.digest }}" "${{ needs.sandbox.outputs.interface }}" \
+            "${{ steps.deploy.outputs.contract_id }}" promoted
+
+      - name: Upload promotion record
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-mainnet-${{ inputs.release_tag }}
+          path: |
+            deployments/promotions.log
+            deployments/runs/
+
+  # --------------------------------------------------------------- rollback --
+  rollback:
+    name: Mainnet rollback (automatic on canary failure)
+    needs: [sandbox, testnet, mainnet-canary]
+    if: ${{ failure() && needs.mainnet-canary.result == 'failure' }}
+    runs-on: ubuntu-latest
+    environment: mainnet-canary
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+      - name: Roll back to the previously promoted digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAINNET_DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: |
+          stellar keys add mainnet-deployer --secret-key "$MAINNET_DEPLOYER_SECRET"
+          STELLAR_SOURCE_KEY=mainnet-deployer scripts/rollback_mainnet.sh
+      - name: Upload rollback record
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-mainnet-${{ github.run_id }}
+          path: deployments/runs/

@@ -26,7 +26,11 @@
 use libfuzzer_sys::fuzz_target;
 use streampay_contract::{streamed_at, StreamError};
 
-fuzz_target!(|(deposit, duration, elapsed): (i128, u64, u64)| {
+// `fuzz_target!` only accepts a single bound identifier, not a tuple pattern, so
+// bind the structured input and destructure it here. The tuple implements
+// `arbitrary::Arbitrary` (re-exported by `libfuzzer_sys`).
+fuzz_target!(|input: (i128, u64, u64)| {
+    let (deposit, duration, elapsed) = input;
     let reference = |e: u64| -> Option<Result<i128, StreamError>> {
         let product = (deposit as u128).checked_mul(e as u128)?;
         if deposit <= 0 || duration == 0 || e == 0 {
