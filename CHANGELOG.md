@@ -21,9 +21,35 @@ interface: they are only ever appended to, never renumbered or reused.
   `scripts/verify_attestation.sh` to check a local document against an attested
   hash. Frontend: stream detail page lists a stream's attestations and lets a
   party attach one.
+- **Optional protocol-fee treasury** (`treasury.rs`): a fee charged once at
+  the deposit boundary of `create_stream` (`deposit × fee_bps / 10_000`,
+  floored, sender pays `deposit + fee`). The stream's `deposit` and every
+  accrual/payout/cancel computation are unchanged — at `fee_bps = 0` (the
+  default) behavior is bit-for-bit identical to v0.3. Protocol cap:
+  `MAX_FEE_BPS = 100` (1 %), a hard constant.
+- Per-token treasury accounting (`Treasury { charged_total, withdrawn_total }`)
+  plus a per-stream fee record (`StreamFee { token, amount }`), written only
+  in lockstep with the new append-only events `FeeCharged` (stream_id topic)
+  and `FeeWithdrawn` (token topic).
+- Withdrawal governance: `__constructor(governor)` binds the treasury
+  governor at deploy time (no front-runnable bootstrap); two-step rotation
+  (`nominate_governor` / `accept_governor`); governor-gated `set_fee_bps`
+  and `withdraw_treasury` (CEI-ordered, bounded by fees collected minus
+  fees withdrawn).
+- Open verification reads: `treasury_status(token)`, `stream_fee(stream_id)`,
+  `total_streams()`, and the bounded paged scan `verify_treasury(token,
+  start_id, count)` — proving `fee_total == Σ per-stream fees == Σ FeeCharged
+  events` from public reads. `scripts/verify-fees.ts` is a key-less public
+  audit script reconciling all three records against any Soroban RPC.
+- New `StreamError` variants (appended): `FeeRateTooHigh` (14),
+  `NotGovernor` (15), `NoPendingGovernor` (16),
+  `InsufficientTreasuryBalance` (17).
+- Treasury test suite incl. the decision-table test for fees ×
+  cancel-refunds and a seeded property test asserting the verifier always
+  agrees across random activity sequences.
 - `infra/ttl-sentinel` — an operational sentinel for storage rent and TTLs,
   documented in [`infra/ttl-sentinel/README.md`](./infra/ttl-sentinel/README.md)
-  and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §11. It scans every
+  and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §12. It scans every
   storage class (stream, address index, id counter, contract instance, Wasm
   code), reads `liveUntilLedgerSeq`, and alerts on `warn` / `crit` / `expired`
   transitions to console, JSONL and webhook sinks — read-only, no key.
@@ -44,11 +70,6 @@ interface: they are only ever appended to, never renumbered or reused.
   branches or any branch without a code.
 - Generated [`docs/ERRORS.md`](./docs/ERRORS.md) (entrypoint × branch → code
   table) with a CI step that regenerates it and diffs the committed artifact.
-
-### Changed
-- Retired `StreamError::NotStreamSender` (2) and `NotStreamRecipient` (3) as
-  unreachable under the append-only policy: the numeric codes are kept and
-  reserved, never reused or renumbered.
 - Governed release pipeline (`sandbox → testnet → mainnet canary`):
   `.github/workflows/promote.yml` (manual dispatch, GitHub
   Environment-gated approvals, digest continuity at every step, automatic
@@ -61,6 +82,16 @@ interface: they are only ever appended to, never renumbered or reused.
 - Append-only deployment records in `deployments/` (promotion log, per-run
   records, per-environment contract-interface baselines) and the design +
   operator docs `docs/DEPLOY_PIPELINE.md` and `docs/CANARY_RUNBOOK.md`.
+
+### Changed
+- **Deployment interface:** the contract now has a constructor. Deploy with
+  the governor address as a constructor argument
+  (`stellar contract deploy … -- --governor G…`); `scripts/deploy_testnet.sh`
+  passes the deployer as governor. Existing v0.3 deployments are unaffected
+  (no upgrade path; new deployments only).
+- Retired `StreamError::NotStreamSender` (2) and `NotStreamRecipient` (3) as
+  unreachable under the append-only policy: the numeric codes are kept and
+  reserved, never reused or renumbered.
 
 ## [0.3.0] - 2026-10-04
 

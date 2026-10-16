@@ -16,13 +16,17 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 6 | `StartTimeInPast` | reachable (1 branch(es)) | `create_stream` | start_time is before the current ledger timestamp |
 | 7 | `InvalidTimeRange` | reachable (1 branch(es)) | `create_stream` | end_time is not strictly after start_time (zero or negative duration) |
 | 8 | `DurationTooLong` | reachable (1 branch(es)) | `create_stream` | duration exceeds MAX_DURATION_SECONDS (100 years) |
-| 9 | `ZeroAmount` | reachable (3 branch(es)) | `create_stream`, `top_up`, `withdraw` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative |
+| 9 | `ZeroAmount` | reachable (4 branch(es)) | `create_stream`, `top_up`, `withdraw`, `withdraw_treasury` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative; treasury withdrawal amount is zero or negative |
 | 10 | `AmountExceedsAvailable` | reachable (1 branch(es)) | `withdraw` | amount exceeds the accrued-but-unwithdrawn balance |
 | 11 | `MathOverflow` | reachable (6 branch(es)) | `available`, `cancel_stream`, `create_stream`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128 |
 | 12 | `NotAuthorized` | reachable (2 branch(es)) | `attach_metadata`, `cancel_stream` | the caller is neither the sender nor the recipient; the attester is neither the stream's sender nor its recipient |
 | 13 | `NothingToWithdraw` | reachable (1 branch(es)) | `withdraw_max` | nothing has accrued yet, or everything accrued was already withdrawn |
 | 14 | `MetadataTagTooLong` | reachable (1 branch(es)) | `attach_metadata` | the tag exceeds MAX_TAG_LEN (32) bytes |
 | 15 | `MetadataLimitReached` | reachable (1 branch(es)) | `attach_metadata` | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations |
+| 14 | `FeeRateTooHigh` | reachable (1 branch(es)) | `set_fee_bps` | new_fee_bps exceeds MAX_FEE_BPS (the protocol cap) |
+| 15 | `NotGovernor` | reachable (2 branch(es)) | `accept_governor`, `nominate_governor`, `set_fee_bps`, `withdraw_treasury` | the caller is not the treasury governor; the caller is not the nominated governor |
+| 16 | `NoPendingGovernor` | reachable (1 branch(es)) | `accept_governor` | accept_governor with no nomination pending |
+| 17 | `InsufficientTreasuryBalance` | reachable (1 branch(es)) | `withdraw_treasury` | amount exceeds fees collected minus fees already withdrawn |
 
 ## Branch matrix (entrypoint × condition → error)
 
@@ -49,6 +53,12 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `AvailableBalanceOverflow` | `available`, `withdraw`, `withdraw_max` | `MathOverflow` | 11 | withdrawn exceeds streamed (an invariant-violating stored stream) | defensive (unreachable) |
 | `CancelSplitOverflow` | `cancel_stream` | `MathOverflow` | 11 | the cancel pro-rata split would underflow | defensive (unreachable) |
 | `PayoutOverflow` | `withdraw`, `withdraw_max` | `MathOverflow` | 11 | withdrawn + amount would overflow i128 | defensive (unreachable) |
+| `SetFeeRateTooHigh` | `set_fee_bps` | `FeeRateTooHigh` | 14 | new_fee_bps exceeds MAX_FEE_BPS (the protocol cap) | reachable |
+| `GovernorNotAllowed` | `set_fee_bps`, `nominate_governor`, `withdraw_treasury` | `NotGovernor` | 15 | the caller is not the treasury governor | reachable |
+| `AcceptGovernorNoPending` | `accept_governor` | `NoPendingGovernor` | 16 | accept_governor with no nomination pending | reachable |
+| `AcceptGovernorNotNominee` | `accept_governor` | `NotGovernor` | 15 | the caller is not the nominated governor | reachable |
+| `WithdrawTreasuryAmountNonPositive` | `withdraw_treasury` | `ZeroAmount` | 9 | treasury withdrawal amount is zero or negative | reachable |
+| `WithdrawTreasuryExceedsBalance` | `withdraw_treasury` | `InsufficientTreasuryBalance` | 17 | amount exceeds fees collected minus fees already withdrawn | reachable |
 
 ## Retired codes
 

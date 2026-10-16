@@ -10,6 +10,13 @@
 //! semantics.
 #![cfg(test)]
 
+// The crate is `no_std`, but the test build links std: the property-test
+// model uses plain `Vec` and `format!`.
+extern crate std;
+
+use std::format;
+use std::vec::Vec;
+
 use soroban_sdk::{
     contract, contractimpl, contracttype,
     testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
@@ -33,6 +40,7 @@ pub(crate) struct Fixture {
     pub(crate) client: Client<'static>,
     pub(crate) sender: Address,
     pub(crate) recipient: Address,
+    pub(crate) governor: Address,
 }
 
 impl Fixture {
@@ -58,9 +66,11 @@ impl Fixture {
 
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
+        let governor = Address::generate(&env);
         StellarAssetClient::new(&env, &token).mint(&sender, &(2 * DEPOSIT));
 
-        let contract_id = env.register(StreamingPayments, ());
+        // The constructor binds the treasury governor at "deploy" time.
+        let contract_id = env.register(StreamingPayments, (governor.clone(),));
         let client = Client::new(&env, &contract_id);
 
         // The sender pre-approves the streaming contract to pull tokens for
@@ -79,6 +89,7 @@ impl Fixture {
             client,
             sender,
             recipient,
+            governor,
         }
     }
 
@@ -987,7 +998,8 @@ fn reentrant_withdrawal_during_payout_cannot_double_spend() {
     let recipient = Address::generate(&env);
     mal.mint(&sender, &DEPOSIT);
 
-    let contract_id = env.register(StreamingPayments, ());
+    let governor = Address::generate(&env);
+    let contract_id = env.register(StreamingPayments, (governor,));
     let client = Client::new(&env, &contract_id);
 
     let now = env.ledger().timestamp();
@@ -1014,6 +1026,143 @@ fn reentrant_withdrawal_during_payout_cannot_double_spend() {
     let stream = client.get_stream(&id);
     assert_eq!(stream.withdrawn, DEPOSIT / 10);
     assert_eq!(stream.status, StreamStatus::Active);
+}
+
+// ------------------------------------------------- treasury reentrancy ----
+
+/// A SEP-41 token whose `transfer` reenters `withdraw_treasury` while the
+/// treasury payout is in flight: the accounting was already persisted (CEI),
+/// so the inner call must fail with `InsufficientTreasuryBalance` and the
+/// outer withdrawal pays exactly once.
+#[contract]
+struct ReentrantTreasuryToken;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TreasuryAttack {
+    target: Address,
+    token: Address,
+    governor: Address,
+    amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TreasuryAttackKey {
+    Armed,
+}
+
+#[contractimpl]
+impl ReentrantTreasuryToken {
+    pub fn arm(env: Env, target: Address, token: Address, governor: Address, amount: i128) {
+        env.storage().temporary().set(
+            &TreasuryAttackKey::Armed,
+            &Some(TreasuryAttack {
+                target,
+                token,
+                governor,
+                amount,
+            }),
+        );
+    }
+
+    // --- SEP-41 TokenInterface surface ---
+
+    pub fn transfer(env: Env, from: Address, _to: MuxedAddress, _amount: i128) {
+        let attack: Option<TreasuryAttack> = env
+            .storage()
+            .temporary()
+            .get(&TreasuryAttackKey::Armed)
+            .unwrap_or(None);
+        if let Some(a) = attack {
+            if a.target == from {
+                // Disarm first, then reenter. The treasury accounting has
+                // already been updated, so the inner withdrawal must fail.
+                env.storage().temporary().remove(&TreasuryAttackKey::Armed);
+                let inner = crate::test_client::StreamingPaymentsClient::new(&env, &a.target);
+                let _ = inner.try_withdraw_treasury(&a.governor, &a.token, &a.governor, &a.amount);
+            }
+        }
+    }
+
+    pub fn transfer_from(env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        env.storage().temporary().remove(&TreasuryAttackKey::Armed);
+    }
+
+    pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        i128::MAX
+    }
+
+    pub fn approve(
+        _env: Env,
+        _from: Address,
+        _spender: Address,
+        _amount: i128,
+        _live_until_ledger: u32,
+    ) {
+    }
+
+    pub fn balance(_env: Env, _id: Address) -> i128 {
+        0
+    }
+
+    pub fn burn(_env: Env, _from: Address, _amount: i128) {}
+
+    pub fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {}
+
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn name(env: Env) -> SdkString {
+        SdkString::from_str(&env, "Reentrant Token")
+    }
+
+    pub fn symbol(env: Env) -> SdkString {
+        SdkString::from_str(&env, "REENT")
+    }
+}
+
+#[test]
+fn reentrant_treasury_withdrawal_cannot_double_spend() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let mal_id = env.register(ReentrantTreasuryToken, ());
+    let mal = ReentrantTreasuryTokenClient::new(&env, &mal_id);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let governor = Address::generate(&env);
+
+    let contract_id = env.register(StreamingPayments, (governor.clone(),));
+    let client = Client::new(&env, &contract_id);
+
+    // Fee on: 100 bps of DEPOSIT collected at creation.
+    client.mock_all_auths().set_fee_bps(&governor, &100);
+    let now = env.ledger().timestamp();
+    let id = client.create_stream(
+        &sender,
+        &recipient,
+        &mal_id,
+        &DEPOSIT,
+        &(now + DAY),
+        &(now + DAY + 10 * DAY),
+        &false,
+    );
+    let fee = DEPOSIT / 100;
+    assert_eq!(client.stream_fee(&id), fee);
+    assert_eq!(client.treasury_status(&mal_id).charged_total, fee);
+
+    // Arm the trap: while the treasury payout transfers, the token reenters
+    // withdraw_treasury trying to grab the same fee again.
+    mal.arm(&contract_id, &mal_id, &governor, &fee);
+    client.withdraw_treasury(&governor, &mal_id, &governor, &fee);
+
+    // Exactly one withdrawal happened: the reentrant call saw the
+    // already-persisted accounting and failed.
+    let status = client.treasury_status(&mal_id);
+    assert_eq!(status.withdrawn_total, fee);
+    assert_eq!(status.collectible, 0);
 }
 
 // ------------------------------------------------------------ property test -
@@ -1409,4 +1558,941 @@ fn withdraw_max_emits_withdrawn_event() {
         f.env.events().all().filter_by_contract(&f.client.address),
         [withdrawn.to_xdr(&f.env, &f.client.address)],
     );
+}
+
+// ------------------------------------------------------------ treasury ------
+
+/// Sets the fee rate as the fixture's governor (auth is mocked).
+fn set_fee(f: &Fixture, bps: u32) {
+    f.client.mock_all_auths().set_fee_bps(&f.governor, &bps);
+}
+
+/// Pages `verify_treasury` from id 1 until `done`, asserting contiguous,
+/// terminating pagination, and returns the summed per-stream fees — the
+/// number that must equal `treasury_status(token).charged_total`.
+fn scan_all_fees(client: &Client<'_>, token: &Address) -> i128 {
+    let mut total: i128 = 0;
+    let mut start: u64 = 1;
+    let mut pages = 0;
+    loop {
+        let scan = client.verify_treasury(token, &start, &50);
+        assert_eq!(scan.start_id, start.max(1));
+        assert_eq!(scan.token, *token);
+        total += scan.fees_in_range;
+        pages += 1;
+        assert!(pages <= 4_096, "fee scan did not terminate");
+        if scan.done {
+            break;
+        }
+        assert!(scan.next_start > start, "fee scan made no progress");
+        start = scan.next_start;
+    }
+    total
+}
+
+#[test]
+fn constructor_binds_governor_and_defaults_fees_off() {
+    let f = Fixture::setup();
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.token, f.token);
+    assert_eq!(status.governor, f.governor);
+    assert_eq!(status.pending_governor, None::<Address>);
+    assert_eq!(status.fee_bps, 0);
+    assert_eq!(status.max_fee_bps, crate::MAX_FEE_BPS);
+    assert_eq!(status.charged_total, 0);
+    assert_eq!(status.withdrawn_total, 0);
+    assert_eq!(status.collectible, 0);
+    assert_eq!(f.client.total_streams(), 0);
+}
+
+#[test]
+fn fee_disabled_streams_behave_exactly_like_v0_3() {
+    // fee_bps == 0: no extra pull, no fee storage, no FeeCharged event —
+    // the full backward-compatible path.
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    // Only StreamCreated was emitted — no FeeCharged for a zero fee.
+    let created = crate::StreamCreated {
+        stream_id: id,
+        sender: f.sender.clone(),
+        recipient: f.recipient.clone(),
+        token: f.token.clone(),
+        deposit: DEPOSIT,
+        start_time: f.env.ledger().timestamp() + DAY,
+        end_time: f.env.ledger().timestamp() + DAY + 10 * DAY,
+        cancelable: false,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [created.to_xdr(&f.env, &f.client.address)],
+    );
+
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        DEPOSIT
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT
+    );
+    assert_eq!(f.client.stream_fee(&id), 0);
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.charged_total, 0);
+}
+
+#[test]
+fn fee_charged_at_creation_accrual_math_unaffected() {
+    let f = Fixture::setup();
+    set_fee(&f, 100); // 1 %
+    let fee = DEPOSIT / 100;
+
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    // Sender paid deposit + fee in one pull; the contract holds both.
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        DEPOSIT - fee
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT + fee
+    );
+
+    // The stream's deposit — and therefore every accrual computation —
+    // never sees the fee.
+    let s = f.client.get_stream(&id);
+    assert_eq!(s.deposit, DEPOSIT);
+    f.advance_time(3 * DAY); // 2 days elapsed of 10
+    assert_eq!(f.client.available(&id), DEPOSIT / 5);
+
+    // Stored accounting agrees.
+    assert_eq!(f.client.stream_fee(&id), fee);
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.charged_total, fee);
+    assert_eq!(status.collectible, fee);
+    assert_eq!(f.client.total_streams(), 1);
+}
+
+#[test]
+fn set_fee_bps_applies_to_new_streams_only() {
+    let f = Fixture::setup();
+    // Headroom for two deposit-pulls, one of them fee-bearing.
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &(2 * DEPOSIT));
+    let id_before = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    set_fee(&f, 100);
+    let id_after = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    // Fees are a property of the deposit boundary a stream actually crossed:
+    // the pre-existing stream is untouched.
+    assert_eq!(f.client.stream_fee(&id_before), 0);
+    assert_eq!(f.client.stream_fee(&id_after), DEPOSIT / 100);
+    assert_eq!(
+        f.client.treasury_status(&f.token).charged_total,
+        DEPOSIT / 100
+    );
+}
+
+#[test]
+fn top_ups_are_fee_free() {
+    let f = Fixture::setup();
+    // Headroom for the deposit + fee pull plus the top-up pull.
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &DEPOSIT);
+    set_fee(&f, 100);
+    let fee = DEPOSIT / 100;
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    f.client.mock_all_auths().top_up(&id, &DEPOSIT);
+
+    // The fee is charged once, at creation: top-ups pull face value only.
+    assert_eq!(f.client.treasury_status(&f.token).charged_total, fee);
+    assert_eq!(f.client.stream_fee(&id), fee); // unchanged
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        2 * DEPOSIT + fee
+    );
+}
+
+#[test]
+fn fee_floors_to_zero_for_dusty_deposits() {
+    let f = Fixture::setup();
+    set_fee(&f, 1); // 1 bp
+    let now = f.env.ledger().timestamp();
+    let deposit = 9_999i128; // 1 bp of 9_999 floors to 0 whole units
+
+    let id = f.client.mock_all_auths().create_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &deposit,
+        &(now + DAY),
+        &(now + DAY + DAY),
+        &false,
+    );
+
+    // Only StreamCreated was emitted — a fee flooring to zero is no fee.
+    let created = crate::StreamCreated {
+        stream_id: id,
+        sender: f.sender.clone(),
+        recipient: f.recipient.clone(),
+        token: f.token.clone(),
+        deposit,
+        start_time: now + DAY,
+        end_time: now + DAY + DAY,
+        cancelable: false,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [created.to_xdr(&f.env, &f.client.address)],
+    );
+
+    // A fee that floors to zero charges nothing, stores nothing, emits nothing.
+    assert_eq!(f.client.stream_fee(&id), 0);
+    assert_eq!(f.client.treasury_status(&f.token).charged_total, 0);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        2 * DEPOSIT - deposit
+    );
+}
+
+#[test]
+fn set_fee_bps_enforces_cap_and_governance() {
+    let f = Fixture::setup();
+    // Exactly at the cap: accepted.
+    f.client
+        .mock_all_auths()
+        .set_fee_bps(&f.governor, &crate::MAX_FEE_BPS);
+    assert_eq!(
+        f.client.treasury_status(&f.token).fee_bps,
+        crate::MAX_FEE_BPS
+    );
+
+    // One basis point above the protocol cap: rejected, state unchanged.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_set_fee_bps(&f.governor, &(crate::MAX_FEE_BPS + 1))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::FeeRateTooHigh);
+    assert_eq!(
+        f.client.treasury_status(&f.token).fee_bps,
+        crate::MAX_FEE_BPS
+    );
+
+    // A non-governor cannot touch the rate, even below the cap.
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_set_fee_bps(&stranger, &10)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotGovernor);
+    assert_eq!(
+        f.client.treasury_status(&f.token).fee_bps,
+        crate::MAX_FEE_BPS
+    );
+}
+
+#[test]
+fn withdraw_treasury_pays_out_and_tracks_totals() {
+    let f = Fixture::setup();
+    set_fee(&f, 100);
+    let fee = DEPOSIT / 100;
+    let _ = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let vault = Address::generate(&f.env);
+    let half = fee / 2;
+
+    f.client
+        .mock_all_auths()
+        .withdraw_treasury(&f.governor, &f.token, &vault, &half);
+
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&vault), half);
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.charged_total, fee);
+    assert_eq!(status.withdrawn_total, half);
+    assert_eq!(status.collectible, fee - half);
+
+    // The rest drains cleanly, then not a unit more.
+    f.client
+        .mock_all_auths()
+        .withdraw_treasury(&f.governor, &f.token, &vault, &(fee - half));
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_treasury(&f.governor, &f.token, &vault, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::InsufficientTreasuryBalance);
+    // Stream funds are untouched by the treasury drain.
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT
+    );
+}
+
+#[test]
+fn withdraw_treasury_rejects_zero_and_non_governor() {
+    let f = Fixture::setup();
+    set_fee(&f, 100);
+    let _ = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_treasury(&f.governor, &f.token, &f.governor, &0)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::ZeroAmount);
+
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_treasury(&stranger, &f.token, &stranger, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotGovernor);
+
+    // An attacker "signing" the call still fails the governor identity check.
+    f.env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "withdraw_treasury",
+            args: (stranger.clone(), f.token.clone(), stranger.clone(), 1i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(f
+        .client
+        .try_withdraw_treasury(&stranger, &f.token, &stranger, &1)
+        .is_err());
+}
+
+#[test]
+fn fully_withdrawn_stream_leaves_only_fees_in_contract() {
+    let f = Fixture::setup();
+    set_fee(&f, 100);
+    let fee = DEPOSIT / 100;
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(20 * DAY);
+
+    f.client.mock_all_auths().withdraw_max(&id); // pays the full deposit
+
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        DEPOSIT
+    );
+    // Every deposit unit went to the recipient; the contract now holds
+    // exactly the fees.
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        fee
+    );
+
+    let vault = Address::generate(&f.env);
+    f.client
+        .mock_all_auths()
+        .withdraw_treasury(&f.governor, &f.token, &vault, &fee);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        0
+    );
+}
+
+#[test]
+fn cancel_refunds_ignore_fees_decision_table() {
+    // Decision table (docs/ARCHITECTURE.md §11):
+    //   cancel before start → sender ← full deposit (fee not refunded)
+    //   cancel mid-stream   → recipient ← accrued, sender ← deposit − accrued
+    //   cancel after end    → recipient ← full deposit
+    // In every row the fee stays collected; the split legs never change.
+    let f = Fixture::setup();
+    set_fee(&f, 100);
+    let fee = DEPOSIT / 100;
+
+    // Row 1: cancel before start.
+    let id1 = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id1);
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&f.recipient), 0);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        2 * DEPOSIT - fee // headroom + full refund, minus the fee paid
+    );
+
+    // Row 2: cancel mid-stream (4 of 10 days elapsed → 2/5 accrued).
+    let id2 = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(4 * DAY);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id2);
+    let accrued = DEPOSIT * 2 / 5;
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        accrued
+    );
+    // headroom − two (deposit + fee) pulls + the unaccrued refund
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        2 * DEPOSIT - 2 * fee - accrued
+    );
+
+    // Row 3: cancel after end.
+    let id3 = f.create_stream(DEPOSIT, 0, 5 * DAY, false);
+    f.advance_time(10 * DAY);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id3);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        accrued + DEPOSIT
+    );
+
+    // All streams terminal: the contract holds exactly the three fees, and
+    // the treasury accounting says the same.
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.charged_total, 3 * fee);
+    assert_eq!(status.collectible, 3 * fee);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        3 * fee
+    );
+}
+
+#[test]
+fn fee_events_are_emitted_with_expected_payloads() {
+    let f = Fixture::setup();
+    set_fee(&f, 50);
+    let now = f.env.ledger().timestamp();
+    let id = f.client.mock_all_auths().create_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &DEPOSIT,
+        &(now + DAY),
+        &(now + DAY + 10 * DAY),
+        &true,
+    );
+    let fee = DEPOSIT * 50 / 10_000;
+
+    // StreamCreated then FeeCharged, in that order, typed as full XDR.
+    let created = crate::StreamCreated {
+        stream_id: id,
+        sender: f.sender.clone(),
+        recipient: f.recipient.clone(),
+        token: f.token.clone(),
+        deposit: DEPOSIT,
+        start_time: now + DAY,
+        end_time: now + DAY + 10 * DAY,
+        cancelable: true,
+    };
+    let charged = crate::FeeCharged {
+        stream_id: id,
+        token: f.token.clone(),
+        payer: f.sender.clone(),
+        amount: fee,
+        fee_bps: 50,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [
+            created.to_xdr(&f.env, &f.client.address),
+            charged.to_xdr(&f.env, &f.client.address),
+        ],
+    );
+
+    // FeeWithdrawn after a treasury withdrawal (event log drains on read).
+    f.client
+        .mock_all_auths()
+        .withdraw_treasury(&f.governor, &f.token, &f.governor, &fee);
+    let withdrawn = crate::FeeWithdrawn {
+        token: f.token.clone(),
+        governor: f.governor.clone(),
+        recipient: f.governor.clone(),
+        amount: fee,
+        withdrawn_total: fee,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [withdrawn.to_xdr(&f.env, &f.client.address)],
+    );
+}
+
+#[test]
+fn governor_rotation_is_two_step() {
+    let f = Fixture::setup();
+    let next = Address::generate(&f.env);
+
+    // A stranger cannot nominate.
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_nominate_governor(&stranger, &next)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotGovernor);
+
+    // Accepting before any nomination reverts.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_governor(&next)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NoPendingGovernor);
+
+    // The governor nominates; only the nominee can accept.
+    f.client
+        .mock_all_auths()
+        .nominate_governor(&f.governor, &next);
+    assert_eq!(
+        f.client.treasury_status(&f.token).pending_governor,
+        Some(next.clone())
+    );
+    let other = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_governor(&other)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotGovernor);
+
+    // Acceptance moves the powers.
+    f.client.mock_all_auths().accept_governor(&next);
+    let status = f.client.treasury_status(&f.token);
+    assert_eq!(status.governor, next.clone());
+    assert_eq!(status.pending_governor, None::<Address>);
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_set_fee_bps(&f.governor, &10)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotGovernor);
+    f.client.mock_all_auths().set_fee_bps(&next, &10);
+    assert_eq!(f.client.treasury_status(&f.token).fee_bps, 10);
+
+    // The nomination is consumed: a second accept reverts.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_governor(&next)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NoPendingGovernor);
+}
+
+#[test]
+fn stream_fee_rejects_unknown_stream() {
+    let f = Fixture::setup();
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_stream_fee(&999)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotFound);
+}
+
+#[test]
+fn verify_treasury_scans_reconcile_across_tokens() {
+    let f = Fixture::setup();
+    // A second token, funded and approved like the first.
+    let sac2 = f
+        .env
+        .register_stellar_asset_contract_v2(Address::generate(&f.env));
+    let token2 = sac2.address();
+    StellarAssetClient::new(&f.env, &token2).mint(&f.sender, &(2 * DEPOSIT));
+    StellarAssetClient::new(&f.env, &token2).approve(
+        &f.sender,
+        &f.client.address,
+        &(10 * DEPOSIT),
+        &1_000_000u32,
+    );
+
+    set_fee(&f, 100);
+    let now = f.env.ledger().timestamp();
+    let id1 = f.create_stream(DEPOSIT, DAY, 10 * DAY, false); // token 1, fee
+    let id2 = f.client.mock_all_auths().create_stream(
+        &f.sender,
+        &f.recipient,
+        &token2,
+        &DEPOSIT,
+        &(now + DAY),
+        &(now + DAY + DAY),
+        &false,
+    ); // token 2, fee
+    set_fee(&f, 0);
+    let id3 = f.create_stream(DEPOSIT / 2, DAY, 10 * DAY, false); // token 1, no fee
+
+    assert_eq!(f.client.stream_fee(&id1), DEPOSIT / 100);
+    assert_eq!(f.client.stream_fee(&id2), DEPOSIT / 100);
+    assert_eq!(f.client.stream_fee(&id3), 0);
+    assert_eq!(f.client.total_streams(), 3);
+
+    // Scans are per-token: token 1's scan skips token 2's fee entry even
+    // though the ids interleave.
+    assert_eq!(scan_all_fees(&f.client, &f.token), DEPOSIT / 100);
+    assert_eq!(scan_all_fees(&f.client, &token2), DEPOSIT / 100);
+    assert_eq!(
+        f.client.treasury_status(&f.token).charged_total,
+        DEPOSIT / 100
+    );
+    assert_eq!(
+        f.client.treasury_status(&token2).charged_total,
+        DEPOSIT / 100
+    );
+
+    // Requested windows clamp to the id space; scans past the end are empty
+    // and done.
+    let scan = f.client.verify_treasury(&f.token, &1, &u32::MAX);
+    assert_eq!(scan.scanned_count, 3);
+    assert!(scan.done);
+    let scan = f.client.verify_treasury(&f.token, &99, &10);
+    assert_eq!(scan.scanned_count, 0);
+    assert_eq!(scan.fees_in_range, 0);
+    assert!(scan.done);
+
+    // An unknown token scans to all zeros (nothing was ever charged in it).
+    let stranger_token = Address::generate(&f.env);
+    assert_eq!(scan_all_fees(&f.client, &stranger_token), 0);
+}
+
+/// Deterministic xorshift64* so property runs are reproducible from their
+/// seeds; failures name the seed and step.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        if n == 0 {
+            0
+        } else {
+            self.next() % n
+        }
+    }
+}
+
+/// Off-chain mirror of one stream for the property model. Accrual is
+/// duplicated here (floor ratio over the half-open window) on purpose: the
+/// model must not import the contract's own accounting helpers.
+#[derive(Clone, Debug)]
+struct PStream {
+    token_idx: usize,
+    deposit: i128,
+    withdrawn: i128,
+    fee: i128,
+    start: u64,
+    end: u64,
+    cancelable: bool,
+    live: bool,
+}
+
+impl PStream {
+    fn available(&self, now: u64) -> i128 {
+        if !self.live {
+            return 0;
+        }
+        let duration = self.end - self.start;
+        let elapsed = now.clamp(self.start, self.end) - self.start;
+        let streamed = (self.deposit as u128 * elapsed as u128 / duration as u128) as i128;
+        streamed - self.withdrawn
+    }
+}
+
+/// Property: across random activity sequences (creates, withdrawals,
+/// over-withdraw attempts, cancels, top-ups, fee reconfigurations, treasury
+/// drains), after every single step
+///   1. `treasury_status` equals the model ledger per token,
+///   2. the paged `verify_treasury` scan sums exactly to `charged_total`
+///      (the verifier always agrees), and
+///   3. the contract's token balance equals outstanding stream funds plus
+///      the collectible fees — fee funds and stream funds never mix.
+#[test]
+fn property_random_activity_sequences_keep_the_verifier_in_agreement() {
+    for seed in [0x5EED_C0DE_0001, 0x5EED_C0DE_0002, 0x5EED_C0DE_0003] {
+        run_fee_property(seed, 120);
+    }
+}
+
+fn run_fee_property(seed: u64, steps: usize) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sacs: [Address; 2] = [
+        env.register_stellar_asset_contract_v2(Address::generate(&env))
+            .address(),
+        env.register_stellar_asset_contract_v2(Address::generate(&env))
+            .address(),
+    ];
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let governor = Address::generate(&env);
+    let vault = Address::generate(&env);
+
+    let contract_id = env.register(StreamingPayments, (governor.clone(),));
+    let client = Client::new(&env, &contract_id);
+    for token in &sacs {
+        StellarAssetClient::new(&env, token).mint(&sender, &1_000_000_000_000i128);
+        StellarAssetClient::new(&env, token).approve(
+            &sender,
+            &contract_id,
+            &(i128::MAX / 2),
+            &1_000_000u32,
+        );
+    }
+
+    let mut rng = Rng(seed | 1);
+    let mut streams: Vec<PStream> = Vec::new();
+    let mut charged = [0i128; 2];
+    let mut twithdrawn = [0i128; 2];
+    let mut fee_bps: u32 = 0;
+
+    for step in 0..steps {
+        let ctx = format!("seed {seed:#x} step {step}");
+        match rng.below(8) {
+            0 => {
+                // create a stream
+                let ti = rng.below(2) as usize;
+                let deposit = 1 + rng.below(1_000_000) as i128;
+                let duration = 1 + rng.below(200);
+                let start_in = rng.below(3);
+                let cancelable = rng.below(2) == 0;
+                let now = env.ledger().timestamp();
+                let fee = crate::treasury::fee_amount(deposit, fee_bps).unwrap();
+                let id = client.mock_all_auths().create_stream(
+                    &sender,
+                    &recipient,
+                    &sacs[ti],
+                    &deposit,
+                    &(now + start_in),
+                    &(now + start_in + duration),
+                    &cancelable,
+                );
+                assert_eq!(id as usize, streams.len() + 1, "{ctx}: id sequence");
+                charged[ti] += fee;
+                streams.push(PStream {
+                    token_idx: ti,
+                    deposit,
+                    withdrawn: 0,
+                    fee,
+                    start: now + start_in,
+                    end: now + start_in + duration,
+                    cancelable,
+                    live: true,
+                });
+            }
+            1 => {
+                // advance time
+                env.ledger()
+                    .with_mut(|li| li.timestamp += 1 + rng.below(50));
+            }
+            2 => {
+                // withdraw / withdraw_max / over-withdraw attempt
+                if streams.is_empty() {
+                    continue;
+                }
+                let idx = rng.below(streams.len() as u64) as usize;
+                if !streams[idx].live {
+                    continue;
+                }
+                let id = (idx as u64) + 1;
+                let now = env.ledger().timestamp();
+                let avail = streams[idx].available(now);
+                match rng.below(4) {
+                    0 if avail > 0 => {
+                        client.mock_all_auths().withdraw(&id, &avail);
+                        streams[idx].withdrawn += avail;
+                    }
+                    1 if avail > 0 => {
+                        let amount = 1 + rng.below(avail as u64) as i128;
+                        client.mock_all_auths().withdraw(&id, &amount);
+                        streams[idx].withdrawn += amount;
+                    }
+                    2 => {
+                        // Over-withdrawal must always revert, leaving state intact.
+                        let err = client
+                            .mock_all_auths()
+                            .try_withdraw(&id, &(avail + 1))
+                            .unwrap_err()
+                            .unwrap();
+                        assert_eq!(
+                            err,
+                            StreamError::AmountExceedsAvailable,
+                            "{ctx}: over-withdraw"
+                        );
+                    }
+                    _ => {
+                        if avail > 0 {
+                            let paid = client.mock_all_auths().withdraw_max(&id);
+                            assert_eq!(paid, avail, "{ctx}: withdraw_max pays available");
+                            streams[idx].withdrawn += paid;
+                        } else {
+                            let err = client
+                                .mock_all_auths()
+                                .try_withdraw_max(&id)
+                                .unwrap_err()
+                                .unwrap();
+                            assert_eq!(err, StreamError::NothingToWithdraw, "{ctx}");
+                        }
+                    }
+                }
+                if streams[idx].withdrawn == streams[idx].deposit {
+                    streams[idx].live = false;
+                }
+            }
+            3 => {
+                // cancel (sender)
+                if streams.is_empty() {
+                    continue;
+                }
+                let idx = rng.below(streams.len() as u64) as usize;
+                if !streams[idx].live {
+                    continue;
+                }
+                let id = (idx as u64) + 1;
+                let now = env.ledger().timestamp();
+                let avail = streams[idx].available(now);
+                client.mock_all_auths().cancel_stream(&sender, &id);
+                streams[idx].withdrawn += avail;
+                streams[idx].live = false;
+            }
+            4 => {
+                // top up
+                if streams.is_empty() {
+                    continue;
+                }
+                let idx = rng.below(streams.len() as u64) as usize;
+                if !streams[idx].live {
+                    continue;
+                }
+                let amount = 1 + rng.below(10_000) as i128;
+                client.mock_all_auths().top_up(&((idx as u64) + 1), &amount);
+                streams[idx].deposit += amount;
+            }
+            5 => {
+                // reconfigure the fee rate
+                fee_bps = rng.below(crate::MAX_FEE_BPS as u64 + 1) as u32;
+                client.mock_all_auths().set_fee_bps(&governor, &fee_bps);
+            }
+            6 => {
+                // treasury withdrawal (valid drain, exact drain, or a
+                // guaranteed-to-fail attempt)
+                let ti = rng.below(2) as usize;
+                let collectible = charged[ti] - twithdrawn[ti];
+                match rng.below(3) {
+                    0 if collectible > 0 => {
+                        let amount = 1 + rng.below(collectible as u64) as i128;
+                        client
+                            .mock_all_auths()
+                            .withdraw_treasury(&governor, &sacs[ti], &vault, &amount);
+                        twithdrawn[ti] += amount;
+                    }
+                    1 => {
+                        let amount = if collectible == 0 {
+                            0
+                        } else {
+                            collectible + 1 + rng.below(1_000) as i128
+                        };
+                        let expected = if amount == 0 {
+                            StreamError::ZeroAmount
+                        } else {
+                            StreamError::InsufficientTreasuryBalance
+                        };
+                        let err = client
+                            .mock_all_auths()
+                            .try_withdraw_treasury(&governor, &sacs[ti], &vault, &amount)
+                            .unwrap_err()
+                            .unwrap();
+                        assert_eq!(err, expected, "{ctx}: treasury overdraw guard");
+                    }
+                    _ => {
+                        if collectible > 0 {
+                            client.mock_all_auths().withdraw_treasury(
+                                &governor,
+                                &sacs[ti],
+                                &vault,
+                                &collectible,
+                            );
+                            twithdrawn[ti] += collectible;
+                        }
+                    }
+                }
+            }
+            _ => {
+                // cancel by the recipient (only on cancelable streams)
+                if streams.is_empty() {
+                    continue;
+                }
+                let idx = rng.below(streams.len() as u64) as usize;
+                if !streams[idx].live || !streams[idx].cancelable {
+                    continue;
+                }
+                let id = (idx as u64) + 1;
+                let now = env.ledger().timestamp();
+                let avail = streams[idx].available(now);
+                client.mock_all_auths().cancel_stream(&recipient, &id);
+                streams[idx].withdrawn += avail;
+                streams[idx].live = false;
+            }
+        }
+
+        // --- invariants, after every step ---
+        assert_eq!(
+            client.total_streams() as usize,
+            streams.len(),
+            "{ctx}: total_streams"
+        );
+
+        for (i, s) in streams.iter().enumerate() {
+            assert_eq!(
+                client.stream_fee(&((i as u64) + 1)),
+                s.fee,
+                "{ctx}: per-stream fee {}",
+                i + 1
+            );
+        }
+
+        for ti in 0..2 {
+            let status = client.treasury_status(&sacs[ti]);
+            assert_eq!(status.fee_bps, fee_bps, "{ctx}: fee_bps");
+            assert_eq!(status.charged_total, charged[ti], "{ctx}: charged");
+            assert_eq!(status.withdrawn_total, twithdrawn[ti], "{ctx}: withdrawn");
+            assert_eq!(
+                status.collectible,
+                charged[ti] - twithdrawn[ti],
+                "{ctx}: collectible"
+            );
+
+            // The verifier always agrees.
+            let scanned = scan_all_fees(&client, &sacs[ti]);
+            assert_eq!(
+                scanned, charged[ti],
+                "{ctx}: verifier disagrees for token {ti}"
+            );
+
+            // Conservation: the contract holds exactly what it owes —
+            // outstanding stream funds + collectible fees.
+            let outstanding: i128 = streams
+                .iter()
+                .filter(|s| s.token_idx == ti && s.live)
+                .map(|s| s.deposit - s.withdrawn)
+                .sum();
+            assert_eq!(
+                TokenClient::new(&env, &sacs[ti]).balance(&contract_id),
+                outstanding + charged[ti] - twithdrawn[ti],
+                "{ctx}: balance conservation for token {ti}"
+            );
+        }
+    }
 }

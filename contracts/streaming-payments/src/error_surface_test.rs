@@ -22,6 +22,7 @@ use crate::stream::streamed_at;
 use crate::surface::{trace, Branch, Reachability, RETIRED_CODES};
 use crate::test::Fixture;
 use crate::{StreamError, MAX_ATTESTATIONS_PER_STREAM, MAX_DURATION_SECONDS, MAX_TAG_LEN};
+use crate::{StreamError, MAX_DURATION_SECONDS, MAX_FEE_BPS};
 
 const DAY: u64 = 24 * 60 * 60;
 const DEPOSIT: i128 = 10_000_000_000;
@@ -230,6 +231,57 @@ fn probe(branch: Branch) -> Option<StreamError> {
             // (its error is a bare `StreamError`, not a host error wrapper).
             Some(streamed_at(i128::MAX, 3, 3).unwrap_err())
         }
+        // ---------------------------------------------------------- treasury
+        Branch::SetFeeRateTooHigh => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_set_fee_bps(&f.governor, &(MAX_FEE_BPS + 1),)))
+        }
+        Branch::GovernorNotAllowed => {
+            let f = Fixture::setup_quiet();
+            let stranger = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_set_fee_bps(&stranger, &0)))
+        }
+        Branch::AcceptGovernorNoPending => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_governor(&f.sender)))
+        }
+        Branch::AcceptGovernorNotNominee => {
+            let f = Fixture::setup_quiet();
+            f.client
+                .mock_all_auths()
+                .nominate_governor(&f.governor, &f.recipient);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_governor(&f.sender)))
+        }
+        Branch::WithdrawTreasuryAmountNonPositive => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f.client.mock_all_auths().try_withdraw_treasury(
+                &f.governor,
+                &f.token,
+                &f.recipient,
+                &0,
+            )))
+        }
+        Branch::WithdrawTreasuryExceedsBalance => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f.client.mock_all_auths().try_withdraw_treasury(
+                &f.governor,
+                &f.token,
+                &f.recipient,
+                &1,
+            )))
+        }
         // Invariant-protected: a stored stream always satisfies
         // `0 <= withdrawn <= streamed <= deposit <= i128::MAX`, so these
         // checked subtractions/addition can never cross an i128 boundary —
@@ -360,6 +412,10 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::NothingToWithdraw
             | StreamError::MetadataTagTooLong
             | StreamError::MetadataLimitReached => StreamError::ALL.contains(&e),
+            | StreamError::FeeRateTooHigh
+            | StreamError::NotGovernor
+            | StreamError::NoPendingGovernor
+            | StreamError::InsufficientTreasuryBalance => StreamError::ALL.contains(&e),
         }
     }
 

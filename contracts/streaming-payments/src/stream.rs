@@ -92,6 +92,21 @@ pub enum DataKey {
     /// without knowing the stream ids up front. Advisory, like the stream
     /// indexes above.
     PartyAttestations(Address),
+    /// Treasury governor address (instance storage; set once by the
+    /// contract constructor, later by two-step nomination/acceptance).
+    Governor,
+    /// Pending governor nominee (instance storage; set by
+    /// `nominate_governor`, cleared by `accept_governor`).
+    PendingGovernor,
+    /// Configured protocol fee in basis points (instance storage; absent
+    /// means 0 — fees disabled, the v0.3 behavior).
+    FeeBps,
+    /// Per-token fee accounting: fees charged minus fees withdrawn
+    /// (persistent storage; written only by fee-affecting entrypoints).
+    Treasury(Address),
+    /// Fee charged for one stream at creation time (persistent storage;
+    /// written only when the fee rounds above zero, so absent == 0).
+    StreamFee(u64),
 }
 
 /// Seconds elapsed of the stream window at the current ledger time.

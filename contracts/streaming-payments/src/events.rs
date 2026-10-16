@@ -72,4 +72,41 @@ pub struct MetadataAttached {
     pub content_hash: BytesN<32>,
     pub tag: String,
     pub timestamp: u64,
+/// Emitted exactly once per funded stream that owes a protocol fee, in the
+/// same transaction as (and immediately after) `StreamCreated`. Keyed by
+/// `stream_id` so fee history is auditable per stream; the stream's stored
+/// fee (`stream_fee` read) and the token's `treasury_status` totals must
+/// always reconcile with the sum of these events — that reconciliation is
+/// the treasury invariant, checkable by anyone via `verify_treasury` and
+/// `scripts/verify-fees.ts`.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeCharged {
+    #[topic]
+    pub stream_id: u64,
+    pub token: Address,
+    /// The sender who paid the fee on top of the deposit.
+    pub payer: Address,
+    /// Fee amount in smallest token units (deposit * fee_bps / 10_000, floored).
+    pub amount: i128,
+    /// The fee rate in basis points that produced this amount.
+    pub fee_bps: u32,
+}
+
+/// Emitted when the treasury governor withdraws accumulated protocol fees for
+/// one token. Keyed by `token` (treasury accounting is per token);
+/// `withdrawn_total` carries the cumulative withdrawn amount so event
+/// consumers can reconcile against `treasury_status` without reading state.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeWithdrawn {
+    #[topic]
+    pub token: Address,
+    /// The governor who authorized the withdrawal.
+    pub governor: Address,
+    /// Where the withdrawn fees were sent.
+    pub recipient: Address,
+    pub amount: i128,
+    /// Total fees withdrawn for this token after this withdrawal.
+    pub withdrawn_total: i128,
 }

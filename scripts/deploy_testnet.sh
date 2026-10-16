@@ -46,10 +46,14 @@ fund_friendbot() { curl -sf "https://friendbot.stellar.org?addr=$1" >/dev/null |
 DEPLOYER_ADDR="$(stellar keys address deployer)"
 fund_friendbot "$DEPLOYER_ADDR"
 
-say "Deploying contract to $NETWORK"
+say "Deploying contract to $NETWORK (constructor: governor = deployer)"
+# The contract's __constructor binds the treasury governor at deploy time;
+# args after `--` are passed to it. Fees start disabled (fee_bps = 0) —
+# enable with: invoke set_fee_bps --caller deployer --new_fee_bps N
 CONTRACT_ID="$(stellar contract deploy \
   --wasm "$REPO_ROOT/$WASM" \
-  --source deployer --network "$NETWORK" | tail -n 1)"
+  --source deployer --network "$NETWORK" \
+  -- --governor "$(stellar keys address deployer)" | tail -n 1)"
 [ -n "$CONTRACT_ID" ] || die "deploy returned no contract id"
 echo "contract id: $CONTRACT_ID"
 

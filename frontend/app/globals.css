@@ -153,3 +153,10 @@ code,
   background: #e0e7ff;
   color: #3730a3;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .mono {
+    transition: none !important;
+    animation: none !important;
+  }
+}

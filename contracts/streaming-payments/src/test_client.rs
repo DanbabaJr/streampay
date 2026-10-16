@@ -11,6 +11,7 @@
 use soroban_sdk::{contractclient, Address, BytesN, Env, String, Vec};
 
 use crate::{Attestation, AttestationRef, Stream, StreamError};
+use crate::{FeeScan, Stream, StreamError, TreasuryStatus};
 
 /// Interface of the StreamPay streaming-payments contract.
 #[contractclient(name = "StreamingPaymentsClient")]
@@ -46,4 +47,22 @@ pub trait StreamingPaymentsApi {
     fn attestation_count(env: Env, stream_id: u64) -> u32;
     fn party_attestations(env: Env, party: Address, offset: u32, limit: u32)
         -> Vec<AttestationRef>;
+    fn set_fee_bps(env: Env, caller: Address, new_fee_bps: u32) -> Result<(), StreamError>;
+    fn nominate_governor(
+        env: Env,
+        caller: Address,
+        new_governor: Address,
+    ) -> Result<(), StreamError>;
+    fn accept_governor(env: Env, caller: Address) -> Result<(), StreamError>;
+    fn withdraw_treasury(
+        env: Env,
+        caller: Address,
+        token: Address,
+        recipient: Address,
+        amount: i128,
+    ) -> Result<(), StreamError>;
+    fn treasury_status(env: Env, token: Address) -> TreasuryStatus;
+    fn stream_fee(env: Env, stream_id: u64) -> Result<i128, StreamError>;
+    fn verify_treasury(env: Env, token: Address, start_id: u64, count: u32) -> FeeScan;
+    fn total_streams(env: Env) -> u64;
 }

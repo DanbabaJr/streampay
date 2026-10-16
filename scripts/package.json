@@ -1,0 +1,20 @@
+{
+  "name": "streampay-scripts",
+  "private": true,
+  "description": "Standalone audit tooling for StreamPay: scripts/verify-fees.ts reconciles the on-chain protocol-fee ledger against its event trail.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "verify-fees": "node verify-fees.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^5.7.0"
+  }
+}

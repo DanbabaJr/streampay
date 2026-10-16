@@ -80,6 +80,21 @@ pub enum Branch {
     CancelSplitOverflow,
     /// `pay_out`: `withdrawn + amount` would overflow `i128`.
     PayoutOverflow,
+    // ----------------------------------------------------------- treasury
+    /// `set_fee_bps`: the requested rate exceeds `MAX_FEE_BPS`.
+    SetFeeRateTooHigh,
+    /// `set_fee_bps` / `nominate_governor` / `withdraw_treasury`: the caller
+    /// is not the treasury governor.
+    GovernorNotAllowed,
+    /// `accept_governor`: no nomination is pending.
+    AcceptGovernorNoPending,
+    /// `accept_governor`: the caller is not the nominated address.
+    AcceptGovernorNotNominee,
+    /// `withdraw_treasury`: amount is zero or negative.
+    WithdrawTreasuryAmountNonPositive,
+    /// `withdraw_treasury`: amount exceeds fees collected minus fees already
+    /// withdrawn.
+    WithdrawTreasuryExceedsBalance,
 }
 
 impl Branch {
@@ -87,6 +102,7 @@ impl Branch {
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
     pub const ALL: [Branch; 21] = [
+    pub const ALL: [Branch; 24] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -108,6 +124,12 @@ impl Branch {
         Branch::AvailableBalanceOverflow,
         Branch::CancelSplitOverflow,
         Branch::PayoutOverflow,
+        Branch::SetFeeRateTooHigh,
+        Branch::GovernorNotAllowed,
+        Branch::AcceptGovernorNoPending,
+        Branch::AcceptGovernorNotNominee,
+        Branch::WithdrawTreasuryAmountNonPositive,
+        Branch::WithdrawTreasuryExceedsBalance,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -150,6 +172,16 @@ impl Branch {
             Branch::AvailableBalanceOverflow => &["available", "withdraw", "withdraw_max"],
             Branch::CancelSplitOverflow => &["cancel_stream"],
             Branch::PayoutOverflow => &["withdraw", "withdraw_max"],
+            Branch::SetFeeRateTooHigh => &["set_fee_bps"],
+            Branch::GovernorNotAllowed => {
+                &["set_fee_bps", "nominate_governor", "withdraw_treasury"]
+            }
+            Branch::AcceptGovernorNoPending | Branch::AcceptGovernorNotNominee => {
+                &["accept_governor"]
+            }
+            Branch::WithdrawTreasuryAmountNonPositive | Branch::WithdrawTreasuryExceedsBalance => {
+                &["withdraw_treasury"]
+            }
         }
     }
 
@@ -179,6 +211,13 @@ impl Branch {
             Branch::AvailableBalanceOverflow => StreamError::MathOverflow,
             Branch::CancelSplitOverflow => StreamError::MathOverflow,
             Branch::PayoutOverflow => StreamError::MathOverflow,
+            Branch::SetFeeRateTooHigh => StreamError::FeeRateTooHigh,
+            Branch::GovernorNotAllowed | Branch::AcceptGovernorNotNominee => {
+                StreamError::NotGovernor
+            }
+            Branch::AcceptGovernorNoPending => StreamError::NoPendingGovernor,
+            Branch::WithdrawTreasuryAmountNonPositive => StreamError::ZeroAmount,
+            Branch::WithdrawTreasuryExceedsBalance => StreamError::InsufficientTreasuryBalance,
         }
     }
 
@@ -222,6 +261,16 @@ impl Branch {
             }
             Branch::CancelSplitOverflow => "the cancel pro-rata split would underflow",
             Branch::PayoutOverflow => "withdrawn + amount would overflow i128",
+            Branch::SetFeeRateTooHigh => "new_fee_bps exceeds MAX_FEE_BPS (the protocol cap)",
+            Branch::GovernorNotAllowed => "the caller is not the treasury governor",
+            Branch::AcceptGovernorNoPending => "accept_governor with no nomination pending",
+            Branch::AcceptGovernorNotNominee => "the caller is not the nominated governor",
+            Branch::WithdrawTreasuryAmountNonPositive => {
+                "treasury withdrawal amount is zero or negative"
+            }
+            Branch::WithdrawTreasuryExceedsBalance => {
+                "amount exceeds fees collected minus fees already withdrawn"
+            }
         }
     }
 

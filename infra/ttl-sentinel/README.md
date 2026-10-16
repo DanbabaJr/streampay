@@ -229,7 +229,7 @@ pays**, and **who holds the key**.
 - Extending a never-extended entry lifts its cliff from 4,095 to ≥ 200,000
   ledgers — the fast-forward suite asserts the alert then resolves.
 
-`docs/ARCHITECTURE.md` §11 covers where this sits in the system.
+`docs/ARCHITECTURE.md` §12 covers where this sits in the system.
 
 ## Limitations (read this before relying on it)
 

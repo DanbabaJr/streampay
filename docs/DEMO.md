@@ -41,11 +41,15 @@ funded account JSON.
 stellar contract build   # in contracts/streaming-payments (sdk 28 requires stellar-cli)
 stellar contract deploy \
   --wasm target/wasm32v1-none/release/streampay_contract.wasm \
-  --source deployer --network testnet
+  --source deployer --network testnet \
+  -- --governor $(stellar keys address deployer)
 ```
 
-Expected output: a contract id `C…` (46 chars). Set it in
-`frontend/.env.local` as `NEXT_PUBLIC_STREAMING_CONTRACT_ID`.
+Expected output: a contract id `C…` (46 chars). Arguments after `--` go to
+the contract's constructor: `__constructor(governor)` binds the treasury
+governor at deploy time (here: the deployer). Fees start disabled
+(`fee_bps = 0`). Set it in `frontend/.env.local` as
+`NEXT_PUBLIC_STREAMING_CONTRACT_ID`.
 
 ### 3. Demo token + approval
 
@@ -118,6 +122,32 @@ Expected output: `[1, …]` — every stream id where that address is the
 recipient, oldest first, clamped to 50 per page. `sender_streams` works the
 same way for the funding side. This is what the frontend's **Discover
 on-chain** button and the `/stream/[id]` detail page build on.
+
+### 9. (Optional) Protocol fees + public verification
+
+Fees are off by default. The governor (the deployer in this demo) can
+ten basis points on new streams:
+
+```bash
+stellar contract invoke --id $CONTRACT --source deployer --network testnet -- \
+  set_fee_bps --caller $(stellar keys address deployer) --new_fee_bps 10
+```
+
+Streams created afterwards charge `deposit × 10 / 10_000` on top of the
+deposit (the sender's approval must cover `deposit + fee`), emit
+`FeeCharged`, and accrue exactly as before — the fee never touches
+per-second math. Anyone can audit the fee ledger without keys:
+
+```bash
+cd scripts && npm install
+npm run verify-fees -- --contract $CONTRACT --token $TOKEN
+# add --start-ledger <deploy ledger> to also reconcile the event trail
+```
+
+The script reconciles `treasury_status`, the `verify_treasury` per-stream
+scan, and (optionally) the `FeeCharged` / `FeeWithdrawn` events, exiting
+non-zero on any mismatch. Governor withdrawals:
+`withdraw_treasury --caller <deployer> --token $TOKEN --recipient <G…> --amount N`.
 
 ## Frontend
 

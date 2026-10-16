@@ -16,6 +16,7 @@ import {
   type AttestationView,
   type StreamView,
 } from "@/lib/stellar";
+import { computeAvailable, StreamSnapshot } from "@/lib/accrual";
 
 function fmtUnits(v: bigint): string {
   return v.toString();
@@ -30,6 +31,10 @@ export default function StreamDetail() {
   const [attestations, setAttestations] = useState<AttestationView[]>([]);
   const [hashInput, setHashInput] = useState<string>("");
   const [tagInput, setTagInput] = useState<string>("");
+  const [displayAvailable, setDisplayAvailable] = useState<bigint | null>(
+    null
+  );
+  const [snapshot, setSnapshot] = useState<StreamSnapshot | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [address, setAddress] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -46,6 +51,13 @@ export default function StreamDetail() {
       setStream(s);
       setAvailable(a);
       setAttestations(att);
+      setSnapshot({
+        deposit: BigInt(s.deposit),
+        startTime: s.startTime,
+        endTime: s.endTime,
+        withdrawn: BigInt(s.withdrawn),
+        status: s.status,
+      });
       setError("");
     } catch (e) {
       setError(describeError(e));
@@ -59,6 +71,23 @@ export default function StreamDetail() {
     const t = setInterval(() => void reload(), 15_000); // live accrual
     return () => clearInterval(t);
   }, [reload]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const timer = setInterval(() => {
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      const next = computeAvailable(
+        snapshot.deposit,
+        snapshot.startTime,
+        snapshot.endTime,
+        snapshot.withdrawn,
+        snapshot.status,
+        now
+      );
+      setDisplayAvailable(next);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [snapshot]);
 
   useEffect(() => {
     void (async () => {
@@ -195,7 +224,11 @@ export default function StreamDetail() {
             </tr>
             <tr>
               <th>Available now</th>
-              <td className="mono">{available?.toString() ?? "…"}</td>
+              <td className="mono">
+                {snapshot?.status === "Active"
+                  ? (displayAvailable ?? available)?.toString() ?? "…"
+                  : available?.toString() ?? "…"}
+              </td>
             </tr>
             <tr>
               <th>Window</th>
