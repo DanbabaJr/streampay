@@ -146,10 +146,9 @@ export default function Home() {
 
       <BatchStreamForm
         onCreate={async (token, entries, cancelable) => {
-          setError("");
           try {
             const ids = await createStreams(address, token, entries, cancelable);
-            setStatus(
+            toast.success(
               `${ids.length} stream${ids.length === 1 ? "" : "s"} created: ${ids
                 .map((id) => `#${id}`)
                 .join(", ")}.`
@@ -157,7 +156,7 @@ export default function Home() {
             await Promise.all(ids.map((id) => refresh(String(id))));
             return true;
           } catch (e) {
-            setError(describeError(e));
+            toast.error(describeError(e));
             return false;
           }
         }}

@@ -10,8 +10,9 @@
 
 use soroban_sdk::{contractclient, Address, BytesN, Env, String, Vec};
 
-use crate::{Attestation, AttestationRef, FeeScan, Stream, StreamError, TreasuryStatus};
-use crate::{FeeScan, Stream, StreamError, StreamInput, TreasuryStatus};
+use crate::{
+    Attestation, AttestationRef, FeeScan, Stream, StreamError, StreamInput, TreasuryStatus,
+};
 
 /// Interface of the StreamPay streaming-payments contract.
 #[contractclient(name = "StreamingPaymentsClient")]

@@ -55,16 +55,16 @@ mod test;
 mod test_client;
 mod treasury;
 
-use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, BytesN, Env, String, Vec};
-use soroban_sdk::{contract, contractimpl, contracttype, token::TokenClient, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token::TokenClient, Address, BytesN, Env, String, Vec,
+};
 
 use surface::Branch;
 
 pub use errors::StreamError;
 pub use events::{
     FeeCharged, FeeWithdrawn, MetadataAttached, StreamCancelled, StreamCreated, StreamToppedUp,
-    FeeCharged, FeeWithdrawn, StreamCancelled, StreamCreated, StreamToppedUp, StreamsCreated,
-    Withdrawn,
+    StreamsCreated, Withdrawn,
 };
 pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
 // `streamed_at` is re-exported for the fuzz target and downstream rate

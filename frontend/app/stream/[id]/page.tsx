@@ -168,8 +168,6 @@ export default function StreamDetail() {
 
   async function doAttach() {
     if (!address) return;
-    setError("");
-    setStatus("");
     try {
       const index = await attachMetadata(
         address,
@@ -177,12 +175,12 @@ export default function StreamDetail() {
         hashInput,
         tagInput
       );
-      setStatus(`Attestation #${index} recorded on-chain.`);
+      toast.success(`Attestation #${index} recorded on-chain.`);
       setHashInput("");
       setTagInput("");
       await reload();
     } catch (e) {
-      setError(describeError(e));
+      toast.error(describeError(e));
     }
   }
 
