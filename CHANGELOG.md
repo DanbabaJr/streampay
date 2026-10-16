@@ -21,6 +21,9 @@ interface: they are only ever appended to, never renumbered or reused.
   `scripts/verify_attestation.sh` to check a local document against an attested
   hash. Frontend: stream detail page lists a stream's attestations and lets a
   party attach one.
+- `indexer/` TypeScript service that decodes StreamPay Soroban events into a
+  cursor-backed SQLite projection and exposes stream-by-id and address stream
+  REST endpoints, with local setup/API documentation.
 - **Optional protocol-fee treasury** (`treasury.rs`): a fee charged once at
   the deposit boundary of `create_stream` (`deposit × fee_bps / 10_000`,
   floored, sender pays `deposit + fee`). The stream's `deposit` and every
@@ -92,7 +95,6 @@ interface: they are only ever appended to, never renumbered or reused.
 - Retired `StreamError::NotStreamSender` (2) and `NotStreamRecipient` (3) as
   unreachable under the append-only policy: the numeric codes are kept and
   reserved, never reused or renumbered.
-
 ## [0.3.0] - 2026-10-04
 
 ### Changed

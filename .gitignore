@@ -1,6 +1,7 @@
 # Rust / Soroban
 target/
 **/target/
+indexer/dist/
 *.wasm
 
 # Node / Next.js frontend

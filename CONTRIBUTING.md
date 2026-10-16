@@ -8,6 +8,7 @@ conventions, the branch/PR process, and how to run everything locally.
 ```text
 contracts/streaming-payments/   the Soroban contract (Rust, no_std)
 frontend/                       minimal Next.js + Freighter UI
+indexer/                        TypeScript Soroban event indexer + SQLite REST API
 fuzz/                           cargo-fuzz harness for the accrual math (own workspace)
 docs/                           ARCHITECTURE.md, GOOD_FIRST_ISSUES.md, DEMO.md
 .github/workflows/              ci.yml, fuzz.yml, release.yml
@@ -85,6 +86,15 @@ lint/typecheck/build when frontend files are touched) are the minimum gate.
   presentational.
 - Mutating flow is always: build → simulate → Freighter sign → send → poll →
   decode. Don't skip simulation; it's our error-message surface.
+
+### TypeScript / indexer
+
+- Keep event amounts and timestamps as decimal strings at the API boundary;
+  they can exceed JavaScript's safe integer range.
+- Keep event ingestion idempotent and update the event log, stream projection,
+  and cursor transactionally where they share a page.
+- The event definitions in `contracts/streaming-payments/src/events.rs` are
+  the source of truth for field names and payloads.
 
 ### Docs
 
