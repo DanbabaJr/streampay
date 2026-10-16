@@ -56,6 +56,15 @@ pub enum Branch {
     // --------------------------------------------------------------- top_up
     TopUpAmountNonPositive,
     TopUpDepositOverflow,
+    // ------------------------------------------------------ attach_metadata
+    /// `attach_metadata`: the caller is neither the stream's sender nor its
+    /// recipient.
+    AttachMetadataNotAuthorized,
+    /// `attach_metadata`: the tag is longer than `MAX_TAG_LEN` bytes.
+    AttachMetadataTagTooLong,
+    /// `attach_metadata`: the stream already holds
+    /// `MAX_ATTESTATIONS_PER_STREAM` attestations.
+    AttachMetadataLimitReached,
     // ------------------------------------------------- shared storage/math
     /// `stream.rs::get_stream` finds no stored entry.
     StreamNotFound,
@@ -77,7 +86,7 @@ impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 18] = [
+    pub const ALL: [Branch; 21] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -89,6 +98,9 @@ impl Branch {
         Branch::CancelStreamNotAuthorized,
         Branch::TopUpAmountNonPositive,
         Branch::TopUpDepositOverflow,
+        Branch::AttachMetadataNotAuthorized,
+        Branch::AttachMetadataTagTooLong,
+        Branch::AttachMetadataLimitReached,
         Branch::StreamNotFound,
         Branch::StreamNotActive,
         Branch::CapacityOverflow,
@@ -115,6 +127,9 @@ impl Branch {
                 &["cancel_stream"]
             }
             Branch::TopUpAmountNonPositive | Branch::TopUpDepositOverflow => &["top_up"],
+            Branch::AttachMetadataNotAuthorized
+            | Branch::AttachMetadataTagTooLong
+            | Branch::AttachMetadataLimitReached => &["attach_metadata"],
             Branch::StreamNotFound => &[
                 "get_stream",
                 "available",
@@ -154,6 +169,9 @@ impl Branch {
             Branch::CancelStreamNotAuthorized => StreamError::NotAuthorized,
             Branch::TopUpAmountNonPositive => StreamError::ZeroAmount,
             Branch::TopUpDepositOverflow => StreamError::MathOverflow,
+            Branch::AttachMetadataNotAuthorized => StreamError::NotAuthorized,
+            Branch::AttachMetadataTagTooLong => StreamError::MetadataTagTooLong,
+            Branch::AttachMetadataLimitReached => StreamError::MetadataLimitReached,
             Branch::StreamNotFound => StreamError::StreamNotFound,
             Branch::StreamNotActive => StreamError::StreamNotActive,
             Branch::CapacityOverflow => StreamError::MathOverflow,
@@ -188,6 +206,13 @@ impl Branch {
             }
             Branch::TopUpAmountNonPositive => "top-up amount is zero or negative",
             Branch::TopUpDepositOverflow => "deposit + amount would overflow i128",
+            Branch::AttachMetadataNotAuthorized => {
+                "the attester is neither the stream's sender nor its recipient"
+            }
+            Branch::AttachMetadataTagTooLong => "the tag exceeds MAX_TAG_LEN (32) bytes",
+            Branch::AttachMetadataLimitReached => {
+                "the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations"
+            }
             Branch::StreamNotFound => "no stream is stored under the id",
             Branch::StreamNotActive => "the stream status is Cancelled or Depleted",
             Branch::CapacityOverflow => "deposit * duration would overflow u128",

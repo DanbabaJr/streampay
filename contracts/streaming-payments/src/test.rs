@@ -37,7 +37,6 @@ pub(crate) struct Fixture {
 
 impl Fixture {
     pub(crate) fn setup() -> Self {
-        let env = Env::default();
         Self::setup_with_snapshot(true)
     }
 

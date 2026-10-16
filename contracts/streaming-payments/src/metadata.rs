@@ -16,6 +16,7 @@ use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 use crate::errors::StreamError;
 use crate::stream::{DataKey, Stream, MAX_PAGE_SIZE, TTL_EXTEND_LEDGERS, TTL_THRESHOLD_LEDGERS};
+use crate::surface::{self, Branch};
 
 /// Maximum tag length in bytes (UTF-8). Tags are short human labels, not
 /// payloads; the actual content stays off-chain.
@@ -70,7 +71,7 @@ pub fn append(
         .get(&key)
         .unwrap_or_else(|| Vec::new(env));
     if list.len() >= MAX_ATTESTATIONS_PER_STREAM {
-        return Err(StreamError::MetadataLimitReached);
+        return Err(surface::reject(Branch::AttachMetadataLimitReached));
     }
 
     let index = list.len();

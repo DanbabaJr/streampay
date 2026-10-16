@@ -76,6 +76,8 @@ impl StreamError {
         StreamError::MathOverflow,
         StreamError::NotAuthorized,
         StreamError::NothingToWithdraw,
+        StreamError::MetadataTagTooLong,
+        StreamError::MetadataLimitReached,
     ];
 
     /// The stable numeric value carried across the contract boundary

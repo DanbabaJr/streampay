@@ -16,15 +16,25 @@
 
 use std::vec::Vec;
 
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{testutils::Address as _, BytesN, String as SdkString};
 
 use crate::stream::streamed_at;
 use crate::surface::{trace, Branch, Reachability, RETIRED_CODES};
 use crate::test::Fixture;
-use crate::{StreamError, MAX_DURATION_SECONDS};
+use crate::{StreamError, MAX_ATTESTATIONS_PER_STREAM, MAX_DURATION_SECONDS, MAX_TAG_LEN};
 
 const DAY: u64 = 24 * 60 * 60;
 const DEPOSIT: i128 = 10_000_000_000;
+
+/// A 32-byte attestation hash filled with `byte`.
+fn attestation_hash(env: &soroban_sdk::Env, byte: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[byte; 32])
+}
+
+/// A short attestation tag.
+fn attestation_tag(env: &soroban_sdk::Env, s: &str) -> SdkString {
+    SdkString::from_str(env, s)
+}
 
 /// Unwraps the contract's rejection into its `StreamError`.
 macro_rules! rejected {
@@ -160,6 +170,49 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .client
                 .mock_all_auths()
                 .try_top_up(&id, &i128::MAX)))
+        }
+        // --------------------------------------------------- attach_metadata
+        Branch::AttachMetadataNotAuthorized => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let stranger = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f.client.mock_all_auths().try_attach_metadata(
+                &stranger,
+                &id,
+                &attestation_hash(&f.env, 0x01),
+                &attestation_tag(&f.env, "invoice-0042"),
+            )))
+        }
+        Branch::AttachMetadataTagTooLong => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let too_long: std::string::String =
+                "a".repeat(usize::try_from(MAX_TAG_LEN).unwrap() + 1);
+            Some(rejected!(f.client.mock_all_auths().try_attach_metadata(
+                &f.sender,
+                &id,
+                &attestation_hash(&f.env, 0x02),
+                &SdkString::from_str(&f.env, &too_long),
+            )))
+        }
+        Branch::AttachMetadataLimitReached => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            // Fill the stream's append-only list to its cap, then attach once more.
+            for _ in 0..MAX_ATTESTATIONS_PER_STREAM {
+                f.client.mock_all_auths().attach_metadata(
+                    &f.sender,
+                    &id,
+                    &attestation_hash(&f.env, 0x0F),
+                    &attestation_tag(&f.env, "label"),
+                );
+            }
+            Some(rejected!(f.client.mock_all_auths().try_attach_metadata(
+                &f.sender,
+                &id,
+                &attestation_hash(&f.env, 0xFF),
+                &attestation_tag(&f.env, "one-too-many"),
+            )))
         }
         // --------------------------------------------- shared storage / math
         Branch::StreamNotFound => {
@@ -304,7 +357,9 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::AmountExceedsAvailable
             | StreamError::MathOverflow
             | StreamError::NotAuthorized
-            | StreamError::NothingToWithdraw => StreamError::ALL.contains(&e),
+            | StreamError::NothingToWithdraw
+            | StreamError::MetadataTagTooLong
+            | StreamError::MetadataLimitReached => StreamError::ALL.contains(&e),
         }
     }
 

@@ -422,10 +422,10 @@ impl StreamingPayments {
 
         let s = stream::get_stream(&env, stream_id)?;
         if attester != s.sender && attester != s.recipient {
-            return Err(StreamError::NotAuthorized);
+            return Err(surface::reject(Branch::AttachMetadataNotAuthorized));
         }
         if tag.len() > MAX_TAG_LEN {
-            return Err(StreamError::MetadataTagTooLong);
+            return Err(surface::reject(Branch::AttachMetadataTagTooLong));
         }
 
         let timestamp = env.ledger().timestamp();
