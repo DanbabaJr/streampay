@@ -165,7 +165,6 @@ jobs:
       - name: Dependency audit
         run: npm audit --omit=dev --audit-level=high
 
-
   supply-chain:
     name: Security — advisories / licenses
     runs-on: ubuntu-latest

@@ -1,9 +1,9 @@
 /**
  * Per-second accrual math mirroring Soroban streaming-payments contract.
- * 
+ *
  * Computes: deposit * floor(now - start, 0, duration) / duration
  * Equivalent to contract's streamed_at(deposit, duration, floor_elapsed)
- * 
+ *
  * All math uses BigInt for exact i128 arithmetic without overflow.
  * Clamping ensures: 0 <= result <= deposit
  */

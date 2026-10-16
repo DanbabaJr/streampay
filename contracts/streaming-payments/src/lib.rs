@@ -34,6 +34,13 @@
 //!   token treasuries (funds are only ever moved by these entry points).
 //! - All state changes happen *before* token transfers (checks-effects-
 //!   interactions), so reentrant token callbacks cannot over-withdraw.
+//! - Every token call goes through the SDK's fallible (`try_`) client and a
+//!   failure is re-raised as a distinct `StreamError` transfer-failure code
+//!   (18–22). Token contract errors share the `Error(Contract, #N)` namespace
+//!   with this contract's codes, so propagating them raw would let a token's
+//!   own code masquerade as a StreamPay code in clients. Because the failure
+//!   is still returned as `Err`, the whole invocation — including any effects
+//!   written before the transfer — rolls back atomically.
 //! - `treasury.charged_total == sum of FeeCharged events == sum of stored
 //!   per-stream fees`, provable from public reads (see `treasury.rs`).
 
@@ -47,6 +54,9 @@ mod events;
 mod metadata;
 #[cfg(test)]
 mod metadata_test;
+mod schedule;
+#[cfg(test)]
+mod schedule_test;
 mod stream;
 pub mod surface;
 #[cfg(test)]
@@ -54,9 +64,12 @@ mod test;
 #[cfg(test)]
 mod test_client;
 mod treasury;
+pub mod verification;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, token::TokenClient, Address, BytesN, Env, String, Vec,
+    contract, contractimpl, contracttype, token::TokenClient, Address, ConversionError, Env,
+    Error as SorobanError, InvokeError, MuxedAddress, Vec,
 };
 
 use surface::Branch;
@@ -67,6 +80,11 @@ pub use events::{
     StreamsCreated, Withdrawn,
 };
 pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
+    FeeCharged, FeeWithdrawn, ScheduledIntentCancelled, ScheduledIntentExpired,
+    ScheduledStreamExecuted, StreamCancelled, StreamCreated, StreamScheduled, StreamToppedUp,
+    StreamsCreated, Withdrawn,
+};
+pub use schedule::{IntentStatus, ScheduledIntent, MAX_OCCURRENCES};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{streamed_at, Stream, StreamStatus, MAX_DURATION_SECONDS, MAX_PAGE_SIZE};
@@ -87,6 +105,70 @@ pub struct StreamInput {
 /// The StreamPay streaming-payments contract.
 #[contract]
 pub struct StreamingPayments;
+
+/// Outcome of an SDK fallible (`try_`) call on a token contract: an outer
+/// `Err` is a failed invocation (token contract error or host failure), an
+/// inner `Err` a return-value conversion failure (a non-SEP-41 return type).
+type TokenCall<T> = Result<Result<T, ConversionError>, Result<SorobanError, InvokeError>>;
+
+/// Unwraps a token call, mapping **every** failure mode to `on_failure`.
+///
+/// A token's own error code must never escape this contract: contract error
+/// numbers are per-contract and clients see them as `Error(Contract, #N)`, so
+/// a token's `#5` would otherwise be indistinguishable from
+/// [`StreamError::StreamNotActive`] (#5). Callers must always propagate the
+/// mapped error with `?`: returning `Err` aborts the top-level invocation, so
+/// effects already written in this call roll back together with the failed
+/// (and therefore fully rolled-back) token transfer — no partial state and no
+/// partial event log can survive a failed transfer.
+fn token_result<T>(res: TokenCall<T>, on_failure: Branch) -> Result<T, StreamError> {
+    match res {
+        Ok(Ok(value)) => Ok(value),
+        // Conversion failures mean the callee did not return a SEP-41 shaped
+        // value; treat a non-compliant token exactly like a failed transfer.
+        // Both failure modes are reported through the branch registry, so the
+        // error-surface matrix sees the exact `(entrypoint, condition)` that
+        // refused the call.
+        Ok(Err(_)) | Err(_) => Err(surface::reject(on_failure)),
+    }
+}
+
+/// Pulls `amount` of `token` from `payer` into this contract via
+/// `transfer_from`, mapping a token-side failure (insufficient balance or
+/// allowance, a non-transferable asset, a non-token contract) to the code
+/// `on_failure` declares.
+fn pull(
+    env: &Env,
+    token: &Address,
+    payer: &Address,
+    amount: i128,
+    on_failure: Branch,
+) -> Result<(), StreamError> {
+    let res = TokenClient::new(env, token).try_transfer_from(
+        &env.current_contract_address(),
+        payer,
+        &env.current_contract_address(),
+        &amount,
+    );
+    token_result(res, on_failure)
+}
+
+/// Sends `amount` of `token` held by this contract to `recipient` via
+/// `transfer`, mapping a token-side failure to the code `on_failure` declares.
+fn push(
+    env: &Env,
+    token: &Address,
+    recipient: &MuxedAddress,
+    amount: i128,
+    on_failure: Branch,
+) -> Result<(), StreamError> {
+    let res = TokenClient::new(env, token).try_transfer(
+        &env.current_contract_address(),
+        recipient,
+        &amount,
+    );
+    token_result(res, on_failure)
+}
 
 #[contractimpl]
 impl StreamingPayments {
@@ -126,6 +208,10 @@ impl StreamingPayments {
     ///   `cancel_stream` to reclaim their accrued balance.
     ///
     /// Returns the new stream id (monotonically increasing, starting at 1).
+    ///
+    /// The deposit pull is mapped to [`StreamError::DepositTransferFailed`]
+    /// (missing balance/allowance, or an asset that refuses the transfer);
+    /// nothing is persisted when it fails, so no stream id is consumed.
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -150,13 +236,16 @@ impl StreamingPayments {
             .ok_or(StreamError::MathOverflow)?;
 
         // Interaction: pull the deposit (plus fee, when configured) from
-        // the sender.
-        TokenClient::new(&env, &token).transfer_from(
-            &env.current_contract_address(),
+        // the sender. A token-side failure maps to a distinct code; returning
+        // `Err` aborts before anything is persisted (no id consumed, no fee
+        // recorded, no event emitted).
+        pull(
+            &env,
+            &token,
             &sender,
-            &env.current_contract_address(),
-            &pull_amount,
-        );
+            pull_amount,
+            Branch::CreateDepositTransferFailed,
+        )?;
 
         // Effects: persist the stream and announce it.
         let id = stream::next_stream_id(&env);
@@ -227,6 +316,53 @@ impl StreamingPayments {
             return Err(surface::reject(Branch::CreateDurationTooLong));
         }
         stream::validate_capacity(deposit_amount, duration)
+    }
+
+    /// Allocates the next stream id, persists the stream, indexes it under both
+    /// parties, and emits [`StreamCreated`]. No authorization and no token
+    /// movement: callers are responsible for the checks and for having the
+    /// deposit escrowed in the contract (scheduled execution uses an intent's
+    /// already-escrowed deposit).
+    #[allow(clippy::too_many_arguments)]
+    fn create_stream_internal(
+        env: &Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        deposit: i128,
+        start_time: u64,
+        end_time: u64,
+        cancelable: bool,
+    ) -> u64 {
+        let id = stream::next_stream_id(env);
+        let stream = Stream {
+            id,
+            sender: sender.clone(),
+            recipient: recipient.clone(),
+            token: token.clone(),
+            deposit,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cancelable,
+            status: StreamStatus::Active,
+        };
+        stream::put_stream(env, &stream);
+        stream::index_stream(env, &stream);
+
+        StreamCreated {
+            stream_id: id,
+            sender,
+            recipient,
+            token,
+            deposit,
+            start_time,
+            end_time,
+            cancelable,
+        }
+        .publish(env);
+
+        id
     }
 
     /// Creates multiple streams atomically, authorizing the sender once and
@@ -307,18 +443,21 @@ impl StreamingPayments {
             index += 1;
         }
 
-        let contract_address = env.current_contract_address();
         let mut token_index = 0;
         while token_index < pull_totals.len() {
             let (token, amount) = pull_totals
                 .get(token_index)
                 .ok_or(StreamError::MathOverflow)?;
-            TokenClient::new(&env, &token).transfer_from(
-                &contract_address,
+            // A token-side refusal maps to [`StreamError::DepositTransferFailed`]
+            // like the single-stream path: the whole batch aborts and every
+            // effect written so far (including the reserved ids) rolls back.
+            pull(
+                &env,
+                &token,
                 &sender,
-                &contract_address,
-                &amount,
-            );
+                amount,
+                Branch::CreateDepositTransferFailed,
+            )?;
             token_index += 1;
         }
 
@@ -371,6 +510,10 @@ impl StreamingPayments {
     /// Reverts with [`StreamError::AmountExceedsAvailable`] if `amount`
     /// exceeds what has accrued so far; before `start_time` nothing has
     /// accrued, at or after `end_time` the full remainder is available.
+    ///
+    /// A token-side failure to deliver the payout returns
+    /// [`StreamError::RecipientPayoutFailed`] and rolls the recorded
+    /// `withdrawn` update back with it.
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
         if amount <= 0 {
             return Err(surface::reject(Branch::WithdrawAmountNonPositive));
@@ -392,8 +535,10 @@ impl StreamingPayments {
     /// This is the atomic form of "read `available`, then `withdraw` it":
     /// clients never risk a stale amount between the two calls. Reverts with
     /// [`StreamError::NothingToWithdraw`] when nothing has accrued yet (or
-    /// everything accrued has already been withdrawn), and with
-    /// [`StreamError::StreamNotActive`] on cancelled or depleted streams.
+    /// everything accrued has already been withdrawn), with
+    /// [`StreamError::StreamNotActive`] on cancelled or depleted streams, and
+    /// with [`StreamError::RecipientPayoutFailed`] if the token refuses the
+    /// payout (state rolls back unchanged).
     pub fn withdraw_max(env: Env, stream_id: u64) -> Result<i128, StreamError> {
         let mut s = Self::authorize_withdrawal(&env, stream_id)?;
 
@@ -438,13 +583,13 @@ impl StreamingPayments {
         }
         .publish(env);
 
-        TokenClient::new(env, &s.token).transfer(
-            &env.current_contract_address(),
-            stream::muxed(&s.recipient),
-            &amount,
-        );
-
-        Ok(())
+        push(
+            env,
+            &s.token,
+            &stream::muxed(&s.recipient),
+            amount,
+            Branch::RecipientPayoutFailed,
+        )
     }
 
     /// Cancels a stream: pays the recipient their accrued-but-unwithdrawn
@@ -453,6 +598,12 @@ impl StreamingPayments {
     /// Callable by the sender always, and by the recipient only if the stream
     /// was created with `cancelable = true`. Cancelling an already-cancelled
     /// or depleted stream reverts with [`StreamError::StreamNotActive`].
+    ///
+    /// Each payout leg maps a token-side failure to its own code —
+    /// [`StreamError::RecipientPayoutFailed`] for the recipient's accrued
+    /// share and [`StreamError::SenderRefundFailed`] for the sender's refund —
+    /// and any failure rolls the whole cancellation back: the stream stays
+    /// `Active`, `withdrawn` is restored, and no event survives.
     pub fn cancel_stream(env: Env, caller: Address, stream_id: u64) -> Result<(), StreamError> {
         caller.require_auth();
 
@@ -488,18 +639,19 @@ impl StreamingPayments {
         }
         .publish(&env);
 
-        let token = TokenClient::new(&env, &s.token);
         // MUTANT-SUPPRESS: replace > with >= is acceptable because recipient_amount
         // is only 0 when cancel_amounts computes 0 (cancel before start). The test
         // cancel_at_exact_start_pays_sender_everything verifies correct behavior
         // without the transfer. The >= mutation would only add a no-op transfer of
         // 0 tokens, which is functionally equivalent but unnecessary.
         if recipient_amount > 0 {
-            token.transfer(
-                &env.current_contract_address(),
-                stream::muxed(&s.recipient),
-                &recipient_amount,
-            );
+            push(
+                &env,
+                &s.token,
+                &stream::muxed(&s.recipient),
+                recipient_amount,
+                Branch::RecipientPayoutFailed,
+            )?;
         }
         // MUTANT-SUPPRESS: replace > with >= is acceptable because sender_amount
         // is only 0 when cancel_amounts computes 0 (cancel after end). The test
@@ -507,11 +659,13 @@ impl StreamingPayments {
         // without the transfer. The >= mutation would only add a no-op transfer of
         // 0 tokens, which is functionally equivalent but unnecessary.
         if sender_amount > 0 {
-            token.transfer(
-                &env.current_contract_address(),
-                stream::muxed(&s.sender),
-                &sender_amount,
-            );
+            push(
+                &env,
+                &s.token,
+                &stream::muxed(&s.sender),
+                sender_amount,
+                Branch::SenderRefundFailed,
+            )?;
         }
 
         Ok(())
@@ -525,6 +679,9 @@ impl StreamingPayments {
     /// Top-ups are rejected on cancelled or depleted streams. Topping up a
     /// stream that has already passed `end_time` adds fully-accrued funds the
     /// recipient can withdraw immediately.
+    ///
+    /// A token-side failure to pull the funds returns
+    /// [`StreamError::TopUpTransferFailed`] and leaves `deposit` unchanged.
     ///
     /// Note: extending `end_time` is intentionally not supported in v1 —
     /// retroactively re-baselining accrual is lossy for the recipient; see
@@ -545,13 +702,16 @@ impl StreamingPayments {
             .ok_or_else(|| surface::reject(Branch::TopUpDepositOverflow))?;
         stream::validate_capacity(new_deposit, s.duration())?;
 
-        // Interaction: pull the added funds from the sender.
-        TokenClient::new(&env, &s.token).transfer_from(
-            &env.current_contract_address(),
+        // Interaction: pull the added funds from the sender. A token-side
+        // failure maps to a distinct code; the effects below never run, and
+        // no partial state survives the `Err`.
+        pull(
+            &env,
+            &s.token,
             &s.sender,
-            &env.current_contract_address(),
-            &amount,
-        );
+            amount,
+            Branch::TopUpTransferFailed,
+        )?;
 
         // Effects: record the new deposit and announce it.
         s.deposit = new_deposit;
@@ -683,6 +843,322 @@ impl StreamingPayments {
         limit: u32,
     ) -> Vec<AttestationRef> {
         metadata::page_party_attestations(&env, &party, offset, limit)
+    // ------------------------------------------------- scheduled intents ----
+
+    /// Pre-authorizes the creation of one or more streams at a future time and
+    /// escrows the up-front cost.
+    ///
+    /// `sender` must authorize this call (their signature over the invocation
+    /// is verified by the host). The contract escrows
+    /// `(deposit_amount + fee_budget) * occurrences` of `token`:
+    /// `deposit_amount` per occurrence funds the stream, and `fee_budget` per
+    /// occurrence is the reward paid to whichever keeper later executes it.
+    ///
+    /// * A **one-shot** intent is scheduled with `occurrences = 1` and
+    ///   `interval = 0`.
+    /// * A **recurring** intent is scheduled with `occurrences > 1` and a
+    ///   strictly positive `interval` (seconds between occurrence starts). The
+    ///   `i`-th occurrence's stream window is `[start_time + i*interval,
+    ///   end_time + i*interval)`.
+    ///
+    /// Timing constraints: `execute_after <= start_time`, `now <= execute_after`
+    /// and `start_time` must be strictly in the future; `expires_at >
+    /// execute_after` bounds the execution window. The exact parameters are
+    /// committed into the intent's `params_hash`.
+    ///
+    /// Returns the new intent id (monotonically increasing, starting at 1).
+    #[allow(clippy::too_many_arguments)] // the scheduling surface is intentionally explicit
+    pub fn schedule_stream(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        deposit_amount: i128,
+        start_time: u64,
+        end_time: u64,
+        cancelable: bool,
+        interval: u64,
+        occurrences: u32,
+        fee_budget: i128,
+        execute_after: u64,
+        expires_at: u64,
+    ) -> Result<u64, StreamError> {
+        sender.require_auth();
+
+        let total_escrow = schedule::validate_schedule(
+            &env,
+            deposit_amount,
+            start_time,
+            end_time,
+            interval,
+            occurrences,
+            fee_budget,
+            execute_after,
+            expires_at,
+        )?;
+
+        // Effects first (CEI): persist the exact authorized intent before the
+        // token call. If the transfer fails, Soroban rolls the whole invocation
+        // back, including these writes and the event.
+        let id = schedule::next_intent_id(&env);
+        let params_hash = schedule::params_hash(
+            &env,
+            &sender,
+            &recipient,
+            &token,
+            deposit_amount,
+            start_time,
+            end_time,
+            cancelable,
+            interval,
+            occurrences,
+            fee_budget,
+            execute_after,
+            expires_at,
+        );
+        let intent = ScheduledIntent {
+            id,
+            sender: sender.clone(),
+            recipient: recipient.clone(),
+            token: token.clone(),
+            deposit: deposit_amount,
+            start_time,
+            end_time,
+            cancelable,
+            interval,
+            occurrences_total: occurrences,
+            occurrences_remaining: occurrences,
+            fee_budget,
+            execute_after,
+            expires_at,
+            params_hash,
+            status: IntentStatus::Pending,
+        };
+        schedule::put_intent(&env, &intent);
+        schedule::index_intent(&env, &intent);
+
+        StreamScheduled {
+            intent_id: id,
+            sender: sender.clone(),
+            recipient,
+            token: token.clone(),
+            deposit: deposit_amount,
+            start_time,
+            end_time,
+            cancelable,
+            interval,
+            occurrences,
+            fee_budget,
+            execute_after,
+            expires_at,
+        }
+        .publish(&env);
+
+        // Interaction: pull the whole escrow (deposit + fee budget, for every
+        // occurrence) into the contract. Reentrant token code cannot observe an
+        // unregistered schedule or execute against an intent without state.
+        TokenClient::new(&env, &token).transfer_from(
+            &env.current_contract_address(),
+            &sender,
+            &env.current_contract_address(),
+            &total_escrow,
+        );
+
+        Ok(id)
+    }
+
+    /// Executes the next due occurrence of a scheduled intent, creating the
+    /// stream and paying `keeper` the escrowed per-occurrence fee.
+    ///
+    /// **Permissionless**: any address may call as `keeper`, but `keeper` must
+    /// authorize the call (so the fee cannot be front-run and redirected to a
+    /// copycat). The contract enforces that the intent is pending, is within its
+    /// `[execute_after, expires_at)` window for the next occurrence, and that
+    /// its stored parameters still match the scheduling commitment.
+    ///
+    /// Execution is **once per occurrence**: each call decrements
+    /// `occurrences_remaining`, and a second call for an already-executed
+    /// occurrence (or a completed one-shot) reverts with
+    /// [`StreamError::IntentNotPending`]. Returns the created stream id.
+    pub fn execute_scheduled(
+        env: Env,
+        intent_id: u64,
+        keeper: Address,
+    ) -> Result<u64, StreamError> {
+        keeper.require_auth();
+
+        let mut intent = schedule::get_intent(&env, intent_id)?;
+        if intent.status != IntentStatus::Pending {
+            return Err(surface::reject(Branch::IntentNotPending));
+        }
+
+        // Defensive: the stored parameters must still hash to the commitment
+        // recorded when the sender authorized the intent.
+        if schedule::intent_params_hash(&env, &intent) != intent.params_hash {
+            return Err(surface::reject(Branch::IntentParamsMismatch));
+        }
+
+        let now = env.ledger().timestamp();
+        if now >= intent.expires_at {
+            return Err(surface::reject(Branch::IntentExpired));
+        }
+        let index = intent.executed_count();
+        if now < intent.occurrence_due(index) {
+            return Err(surface::reject(Branch::IntentNotYetExecutable));
+        }
+
+        let (start_time, end_time) = intent.occurrence_window(index);
+
+        // Effects first (CEI): advance the intent before moving any tokens.
+        intent.occurrences_remaining = intent
+            .occurrences_remaining
+            .checked_sub(1)
+            .ok_or(StreamError::MathOverflow)?;
+        if intent.occurrences_remaining == 0 {
+            intent.status = IntentStatus::Executed;
+        }
+        schedule::put_intent(&env, &intent);
+
+        // The stream deposit is already escrowed; only bookkeeping is required.
+        let stream_id = Self::create_stream_internal(
+            &env,
+            intent.sender.clone(),
+            intent.recipient.clone(),
+            intent.token.clone(),
+            intent.deposit,
+            start_time,
+            end_time,
+            intent.cancelable,
+        );
+
+        // Pay the keeper its escrowed fee for this occurrence.
+        let fee_paid = intent.fee_budget;
+        if fee_paid > 0 {
+            TokenClient::new(&env, &intent.token).transfer(
+                &env.current_contract_address(),
+                stream::muxed(&keeper),
+                &fee_paid,
+            );
+        }
+
+        ScheduledStreamExecuted {
+            intent_id,
+            keeper,
+            stream_id,
+            occurrence_index: index,
+            occurrences_remaining: intent.occurrences_remaining,
+            fee_paid,
+        }
+        .publish(&env);
+
+        Ok(stream_id)
+    }
+
+    /// Cancels a pending scheduled intent and refunds the sender the escrow for
+    /// every outstanding occurrence.
+    ///
+    /// Only the intent's sender may cancel (their authorization is required),
+    /// and only **before the execution window opens** (`now < execute_after`).
+    /// Once the window is open, keepers may execute and cancellation is
+    /// disallowed ([`StreamError::IntentNotCancellable`]) to remove a
+    /// cancel/execute race that would otherwise burn keeper gas. After
+    /// `expires_at`, use [`StreamingPayments::reclaim_expired`] instead.
+    pub fn cancel_scheduled(env: Env, sender: Address, intent_id: u64) -> Result<(), StreamError> {
+        sender.require_auth();
+
+        let mut intent = schedule::get_intent(&env, intent_id)?;
+        if intent.status != IntentStatus::Pending {
+            return Err(surface::reject(Branch::IntentNotPending));
+        }
+        if sender != intent.sender {
+            return Err(StreamError::NotAuthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        if now >= intent.expires_at {
+            return Err(surface::reject(Branch::IntentExpired));
+        }
+        if now >= intent.execute_after {
+            return Err(surface::reject(Branch::IntentNotCancellable));
+        }
+
+        let refund = intent.remaining_escrow()?;
+
+        // Effects first (CEI).
+        intent.status = IntentStatus::Cancelled;
+        schedule::put_intent(&env, &intent);
+
+        if refund > 0 {
+            TokenClient::new(&env, &intent.token).transfer(
+                &env.current_contract_address(),
+                stream::muxed(&intent.sender),
+                &refund,
+            );
+        }
+
+        ScheduledIntentCancelled {
+            intent_id,
+            sender: intent.sender.clone(),
+            refund,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Reclaims a pending intent that passed `expires_at` without being fully
+    /// executed, refunding the sender the escrow for every outstanding
+    /// occurrence.
+    ///
+    /// **Permissionless**: anyone may trigger the refund (the funds always go
+    /// to the sender), so abandoned intents cannot lock capital indefinitely.
+    /// Reverts with [`StreamError::IntentExpired`]-style semantics via
+    /// [`StreamError::IntentNotExpired`] if called too early, and with
+    /// [`StreamError::IntentNotPending`] if the intent is terminal.
+    pub fn reclaim_expired(env: Env, intent_id: u64) -> Result<(), StreamError> {
+        let mut intent = schedule::get_intent(&env, intent_id)?;
+        if intent.status != IntentStatus::Pending {
+            return Err(surface::reject(Branch::IntentNotPending));
+        }
+        let now = env.ledger().timestamp();
+        if now < intent.expires_at {
+            return Err(surface::reject(Branch::IntentNotExpired));
+        }
+
+        let refund = intent.remaining_escrow()?;
+
+        // Effects first (CEI).
+        intent.status = IntentStatus::Expired;
+        schedule::put_intent(&env, &intent);
+
+        if refund > 0 {
+            TokenClient::new(&env, &intent.token).transfer(
+                &env.current_contract_address(),
+                stream::muxed(&intent.sender),
+                &refund,
+            );
+        }
+
+        ScheduledIntentExpired {
+            intent_id,
+            sender: intent.sender.clone(),
+            refund,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Read-only view of a scheduled intent's full state.
+    pub fn get_intent(env: Env, intent_id: u64) -> Result<ScheduledIntent, StreamError> {
+        schedule::get_intent(&env, intent_id)
+    }
+
+    /// A page of scheduled-intent ids created by `sender`, in creation order.
+    /// Same pagination and advisory semantics as
+    /// [`StreamingPayments::sender_streams`].
+    pub fn sender_intents(env: Env, sender: Address, offset: u32, limit: u32) -> Vec<u64> {
+        stream::page_stream_ids(&env, &stream::DataKey::SenderIntents(sender), offset, limit)
     }
 
     // ------------------------------------------------------------ treasury --
@@ -762,7 +1238,9 @@ impl StreamingPayments {
     /// withdrawn ([`StreamError::InsufficientTreasuryBalance`]).
     ///
     /// Effects-interactions ordered: `FeeWithdrawn` is emitted and the
-    /// accounting persisted *before* the token transfer.
+    /// accounting persisted *before* the token transfer. A token-side failure
+    /// to pay out returns [`StreamError::TreasuryPayoutFailed`], rolling the
+    /// recorded withdrawal and the event back with it.
     pub fn withdraw_treasury(
         env: Env,
         caller: Address,
@@ -796,12 +1274,15 @@ impl StreamingPayments {
         }
         .publish(&env);
 
-        // Interaction.
-        TokenClient::new(&env, &token).transfer(
-            &env.current_contract_address(),
-            stream::muxed(&recipient),
-            &amount,
-        );
+        // Interaction: a token-side failure maps to its own code and rolls
+        // the recorded withdrawal and the `FeeWithdrawn` event back with it.
+        push(
+            &env,
+            &token,
+            &stream::muxed(&recipient),
+            amount,
+            Branch::TreasuryPayoutFailed,
+        )?;
 
         Ok(())
     }

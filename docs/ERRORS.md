@@ -27,6 +27,19 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 15 | `NotGovernor` | reachable (2 branch(es)) | `accept_governor`, `nominate_governor`, `set_fee_bps`, `withdraw_treasury` | the caller is not the treasury governor; the caller is not the nominated governor |
 | 16 | `NoPendingGovernor` | reachable (1 branch(es)) | `accept_governor` | accept_governor with no nomination pending |
 | 17 | `InsufficientTreasuryBalance` | reachable (1 branch(es)) | `withdraw_treasury` | amount exceeds fees collected minus fees already withdrawn |
+| 18 | `IntentNotFound` | reachable (1 branch(es)) | `cancel_scheduled`, `execute_scheduled`, `get_intent`, `reclaim_expired` | no scheduled intent is stored under the id |
+| 19 | `IntentNotPending` | reachable (1 branch(es)) | `cancel_scheduled`, `execute_scheduled`, `reclaim_expired` | the intent is already executed, cancelled, or expired |
+| 20 | `IntentNotYetExecutable` | reachable (1 branch(es)) | `execute_scheduled` | the next occurrence has not reached execute_after |
+| 21 | `IntentExpired` | reachable (1 branch(es)) | `execute_scheduled` | the intent has reached expires_at |
+| 22 | `IntentNotCancellable` | reachable (1 branch(es)) | `cancel_scheduled` | the execution window opened before cancellation |
+| 23 | `InvalidScheduleParameters` | reachable (1 branch(es)) | `schedule_stream` | schedule parameters are inconsistent or out of bounds |
+| 24 | `IntentParamsMismatch` | reachable (1 branch(es)) | `execute_scheduled` | stored parameters do not match the authorization commitment |
+| 25 | `IntentNotExpired` | reachable (1 branch(es)) | `reclaim_expired` | the intent has not reached expires_at |
+| 26 | `DepositTransferFailed` | reachable (1 branch(es)) | `create_stream`, `create_streams` | the token refuses the deposit (+fee) pull (allowance, balance, or a non-compliant token) |
+| 27 | `TopUpTransferFailed` | reachable (1 branch(es)) | `top_up` | the token refuses the pull of the added funds |
+| 28 | `RecipientPayoutFailed` | reachable (1 branch(es)) | `cancel_stream`, `withdraw`, `withdraw_max` | the token refuses a payout to the recipient |
+| 29 | `SenderRefundFailed` | reachable (1 branch(es)) | `cancel_stream` | the token refuses the refund to the sender |
+| 30 | `TreasuryPayoutFailed` | reachable (1 branch(es)) | `withdraw_treasury` | the token refuses the payout of collected protocol fees |
 
 ## Branch matrix (entrypoint × condition → error)
 
@@ -59,6 +72,19 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `AcceptGovernorNotNominee` | `accept_governor` | `NotGovernor` | 15 | the caller is not the nominated governor | reachable |
 | `WithdrawTreasuryAmountNonPositive` | `withdraw_treasury` | `ZeroAmount` | 9 | treasury withdrawal amount is zero or negative | reachable |
 | `WithdrawTreasuryExceedsBalance` | `withdraw_treasury` | `InsufficientTreasuryBalance` | 17 | amount exceeds fees collected minus fees already withdrawn | reachable |
+| `IntentNotFound` | `get_intent`, `execute_scheduled`, `cancel_scheduled`, `reclaim_expired` | `IntentNotFound` | 18 | no scheduled intent is stored under the id | reachable |
+| `IntentNotPending` | `execute_scheduled`, `cancel_scheduled`, `reclaim_expired` | `IntentNotPending` | 19 | the intent is already executed, cancelled, or expired | reachable |
+| `IntentNotYetExecutable` | `execute_scheduled` | `IntentNotYetExecutable` | 20 | the next occurrence has not reached execute_after | reachable |
+| `IntentExpired` | `execute_scheduled` | `IntentExpired` | 21 | the intent has reached expires_at | reachable |
+| `IntentNotCancellable` | `cancel_scheduled` | `IntentNotCancellable` | 22 | the execution window opened before cancellation | reachable |
+| `ScheduleInvalidParameters` | `schedule_stream` | `InvalidScheduleParameters` | 23 | schedule parameters are inconsistent or out of bounds | reachable |
+| `IntentParamsMismatch` | `execute_scheduled` | `IntentParamsMismatch` | 24 | stored parameters do not match the authorization commitment | reachable |
+| `IntentNotExpired` | `reclaim_expired` | `IntentNotExpired` | 25 | the intent has not reached expires_at | reachable |
+| `CreateDepositTransferFailed` | `create_stream`, `create_streams` | `DepositTransferFailed` | 26 | the token refuses the deposit (+fee) pull (allowance, balance, or a non-compliant token) | reachable |
+| `TopUpTransferFailed` | `top_up` | `TopUpTransferFailed` | 27 | the token refuses the pull of the added funds | reachable |
+| `RecipientPayoutFailed` | `withdraw`, `withdraw_max`, `cancel_stream` | `RecipientPayoutFailed` | 28 | the token refuses a payout to the recipient | reachable |
+| `SenderRefundFailed` | `cancel_stream` | `SenderRefundFailed` | 29 | the token refuses the refund to the sender | reachable |
+| `TreasuryPayoutFailed` | `withdraw_treasury` | `TreasuryPayoutFailed` | 30 | the token refuses the payout of collected protocol fees | reachable |
 
 ## Retired codes
 

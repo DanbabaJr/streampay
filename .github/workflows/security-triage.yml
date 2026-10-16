@@ -1,0 +1,359 @@
+name: Security triage
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  schedule:
+    # Chase un-triaged security reports every 6 hours.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: security-triage-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # Runs when the security-report.yml issue form is filed or edited.
+  triage:
+    name: Classify, label, assign, acknowledge
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage security intake
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+
+            // The security form prefixes titles with "[Security]: "; the
+            // postmortem form with "[Postmortem]: ". Anything else is skipped.
+            const isSecurity = issue.title.startsWith("[Security]");
+            const isPostmortem = issue.title.startsWith("[Postmortem]");
+            if (!isSecurity && !isPostmortem) {
+              core.info(`Issue #${issue.number} is not a security report; skipping.`);
+              return;
+            }
+
+            // --- label catalogue (created on demand; 422 == already exists) --
+            const LABELS = [
+              { name: "security", color: "0052cc", description: "Security intake report" },
+              { name: "needs-triage", color: "fbca04", description: "Awaiting maintainer triage" },
+              { name: "bounty", color: "5319e7", description: "Eligible for a bug-bounty award" },
+              { name: "postmortem", color: "c2e0c6", description: "Blameless postmortem write-up" },
+              { name: "severity:critical", color: "b60205", description: "Critical severity" },
+              { name: "severity:high", color: "d93f0b", description: "High severity" },
+              { name: "severity:medium", color: "fbca04", description: "Medium severity" },
+              { name: "severity:low", color: "0e8a16", description: "Low severity" },
+              { name: "scope:contract", color: "1d76db", description: "Core contract (Rust)" },
+              { name: "scope:frontend", color: "1d76db", description: "Frontend (Next.js)" },
+              { name: "scope:infra", color: "1d76db", description: "TTL sentinel / infrastructure" },
+              { name: "scope:ci", color: "1d76db", description: "CI / GitHub Actions" },
+              { name: "scope:docs", color: "1d76db", description: "Documentation" },
+              { name: "scope:other", color: "1d76db", description: "Other surface" },
+              { name: "repro-missing", color: "e99695", description: "Reproduction steps missing" },
+              { name: "possible-duplicate", color: "cfd3d7", description: "Possible duplicate; needs a human check" },
+            ];
+            for (const label of LABELS) {
+              try {
+                await github.rest.issues.createLabel({ owner, repo, ...label });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            // A postmortem only needs its label ensured; no triage flow.
+            if (isPostmortem) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: ["postmortem"],
+              });
+              core.info(`Ensured labels for postmortem #${issue.number}.`);
+              return;
+            }
+
+            // --- issue-form body parser -------------------------------------
+            // Issue forms render as "### <label>\n\n<value>" blocks.
+            function field(label) {
+              const marker = `### ${label}`;
+              const body = issue.body || "";
+              const at = body.indexOf(marker);
+              if (at === -1) return "";
+              let rest = body.slice(at + marker.length);
+              const next = rest.indexOf("\n### ");
+              if (next !== -1) rest = rest.slice(0, next);
+              const value = rest.trim();
+              return value === "_No response_" ? "" : value;
+            }
+            const firstLine = (v) => (v || "").split("\n")[0].trim();
+
+            const severityRaw = firstLine(field("Severity (self-assessed)"));
+            const scopeRaw = firstLine(field("Affected component"));
+            const reproduction = field("Reproduction");
+            const summary = field("Summary");
+
+            const SEVERITY = ["Critical", "High", "Medium", "Low"];
+            const severity =
+              SEVERITY.find((s) => severityRaw.toLowerCase().startsWith(s.toLowerCase())) || "Medium";
+
+            const SCOPE = {
+              "contract (rust)": "contract",
+              "frontend (next.js)": "frontend",
+              "infra/ttl-sentinel": "infra",
+              "ci / github actions": "ci",
+              "docs": "docs",
+              "other": "other",
+            };
+            const scope = SCOPE[scopeRaw.toLowerCase()] || "other";
+
+            const labels = [
+              "security",
+              "needs-triage",
+              `severity:${severity.toLowerCase()}`,
+              `scope:${scope}`,
+            ];
+            if (severity === "Critical" || severity === "High") labels.push("bounty");
+            if (!reproduction) labels.push("repro-missing");
+
+            // --- duplicate detection (deterministic + reviewable) ------------
+            // Tokenize title+summary, drop stopwords/short words, and flag an
+            // overlap of >= 2 significant tokens against other open security
+            // reports. The bot only ever *flags*; a human confirms in triage.
+            const STOPWORDS = new Set([
+              "this", "that", "with", "from", "have", "were", "been", "they", "them", "will", "would",
+              "could", "should", "into", "than", "then", "when", "where", "while", "which", "your",
+              "yours", "about", "above", "after", "again", "against", "because", "before", "being",
+              "between", "both", "does", "doing", "down", "during", "each", "few", "more", "most",
+              "other", "over", "same", "some", "such", "only", "once", "very", "just", "also", "here",
+              "there", "what", "has", "had", "are", "was", "not", "but", "you", "can", "all", "any",
+              "how", "who", "why", "the", "and", "for", "its", "our", "their", "issue", "report",
+              "security", "stream", "streampay", "contract", "streams", "test", "tests", "code",
+              "bug", "finding", "findings",
+            ]);
+            function tokenize(text) {
+              const matches = (text || "").toLowerCase().match(/[a-z0-9_]{4,}/g) || [];
+              return new Set(matches.filter((t) => !STOPWORDS.has(t)));
+            }
+            const mine = new Set([...tokenize(issue.title), ...tokenize(summary)]);
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const isSecurityIssue = (it) =>
+              !it.pull_request &&
+              (it.labels || []).some((l) => {
+                const name = typeof l === "string" ? l : l.name;
+                return ["security", "needs-triage", "possible-duplicate"].includes(name);
+              });
+
+            const duplicates = [];
+            for (const other of openIssues) {
+              if (other.number === issue.number || !isSecurityIssue(other)) continue;
+              const otherTokens = tokenize(`${other.title} ${other.body || ""}`);
+              let shared = 0;
+              for (const token of mine) if (otherTokens.has(token)) shared++;
+              if (shared >= 2) duplicates.push({ number: other.number, title: other.title, shared });
+            }
+            if (duplicates.length) labels.push("possible-duplicate");
+
+            // --- apply labels & assign ---------------------------------------
+            // Recompute on every edit: drop stale classification labels so a
+            // corrected severity/scope does not accumulate.
+            const CLASSIFIED = /^(severity:|scope:|repro-missing$|possible-duplicate$)/;
+            const existingLabels = (issue.labels || []).map((l) =>
+              typeof l === "string" ? l : l.name
+            );
+            for (const name of existingLabels) {
+              if (!CLASSIFIED.test(name) || labels.includes(name)) continue;
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  name,
+                });
+              } catch (e) {
+                core.warning(`Could not remove stale label ${name}: ${e.message}`);
+              }
+            }
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.number,
+              labels,
+            });
+
+            async function maintainers() {
+              try {
+                const { data } = await github.rest.repos.getContent({
+                  owner,
+                  repo,
+                  path: ".github/CODEOWNERS",
+                });
+                const text = Buffer.from(data.content, "base64").toString("utf8");
+                const match = text.match(/^\*\s+@?([\w-]+)/m);
+                if (match) return [match[1]];
+              } catch (e) {
+                core.warning(`Could not read CODEOWNERS: ${e.message}`);
+              }
+              return [owner];
+            }
+            const owners = await maintainers();
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: issue.number,
+                assignees: owners,
+              });
+            } catch (e) {
+              core.warning(`Could not assign ${owners.join(", ")}: ${e.message}`);
+            }
+
+            // --- SLA acknowledgement (idempotent) ----------------------------
+            const ACK_HOURS = 72;
+            const created = new Date(issue.created_at);
+            const ackBy = new Date(created.getTime() + ACK_HOURS * 3600 * 1000);
+            const MARKER = "<!-- security-triage-bot -->";
+            const ping = owners.map((o) => `@${o}`).join(" ");
+            const duplicateBlock = duplicates.length
+              ? duplicates
+                  .map((d) => `- #${d.number} — ${d.title} (${d.shared} shared terms)`)
+                  .join("\n")
+              : "_No similar open security issues found._";
+
+            const comment = [
+              MARKER,
+              "## Security triage — acknowledged",
+              "",
+              `${ping} — this report has landed in the intake system. Automatic classification:`,
+              "",
+              "| Field | Value |",
+              "|---|---|",
+              `| Severity | \`${severity}\` |`,
+              `| Scope | \`${scope}\` |`,
+              `| Bounty eligible | ${labels.includes("bounty") ? "yes (pending triage)" : "under review"} |`,
+              `| Reproduction | ${reproduction ? "present" : "**missing** (`repro-missing` applied)"} |`,
+              `| Acknowledgement SLA | **${ackBy.toISOString()}** (72h from filing) |`,
+              "",
+              "### Possible duplicates",
+              duplicateBlock,
+              "",
+              "### Triage checklist",
+              "- [ ] Confirm the reproduction actually fails (`repro-missing` if not).",
+              "- [ ] Confirm severity/scope against [`docs/BOUNTY.md`](../blob/main/docs/BOUNTY.md) sections 2-4.",
+              "- [ ] Confirm the candidate duplicate(s) above, then close or clear `possible-duplicate`.",
+              "- [ ] Assign the final bounty tier, then remove `needs-triage`.",
+              "",
+              "_Automated by [`.github/workflows/security-triage.yml`](../blob/main/.github/workflows/security-triage.yml); policy in [`docs/BOUNTY.md`](../blob/main/docs/BOUNTY.md)._",
+            ].join("\n");
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => (c.body || "").includes(MARKER));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: comment,
+              });
+              core.info(`Updated triage comment on #${issue.number}.`);
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: comment,
+              });
+              core.info(`Posted triage comment on #${issue.number}.`);
+            }
+
+  # Runs on a schedule: re-pings maintainers for reports past the 72h SLA.
+  sla-sweep:
+    name: SLA breach sweep
+    if: github.event_name != 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping maintainers on overdue reports
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ACK_HOURS = 72;
+            const MARKER = "<!-- security-sla-breach -->";
+
+            async function maintainers() {
+              try {
+                const { data } = await github.rest.repos.getContent({
+                  owner,
+                  repo,
+                  path: ".github/CODEOWNERS",
+                });
+                const text = Buffer.from(data.content, "base64").toString("utf8");
+                const match = text.match(/^\*\s+@?([\w-]+)/m);
+                if (match) return [match[1]];
+              } catch (e) {
+                core.warning(`Could not read CODEOWNERS: ${e.message}`);
+              }
+              return [owner];
+            }
+            const owners = await maintainers();
+            const ping = owners.map((o) => `@${o}`).join(" ");
+            const now = Date.now();
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              labels: "needs-triage",
+              per_page: 100,
+            });
+
+            let breached = 0;
+            for (const it of issues) {
+              if (it.pull_request) continue;
+              const ageHours = (now - new Date(it.created_at).getTime()) / 36e5;
+              if (ageHours < ACK_HOURS) continue;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: it.number,
+                per_page: 100,
+              });
+              if (comments.some((c) => (c.body || "").includes(MARKER))) continue;
+
+              breached++;
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: it.number,
+                body: [
+                  MARKER,
+                  `## SLA breach — ${Math.floor(ageHours)}h without triage`,
+                  "",
+                  `${ping} this security report has exceeded the **72h acknowledgement SLA** (filed ${it.created_at}).`,
+                  "Please triage it or comment on the blocker so the reporter is not left waiting.",
+                  "",
+                  "_Tracked by [`docs/BOUNTY.md`](../blob/main/docs/BOUNTY.md) section 5._",
+                ].join("\n"),
+              });
+            }
+            core.info(`SLA sweep complete: ${breached} overdue report(s), ${issues.length} open un-triaged.`);

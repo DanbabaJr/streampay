@@ -13,6 +13,7 @@ import {
   Networks,
   rpc,
   scValToNative,
+  StrKey,
   TransactionBuilder,
   Contract,
   xdr,
@@ -39,6 +40,10 @@ function contract(): Contract {
 }
 
 export interface StreamArgs {
+  /**
+   * Token contract id (`C…`), or the `native` sentinel for native XLM —
+   * resolved through [`tokenContractId`] before any contract call.
+   */
   token: string;
   recipient: string;
   /** Deposit in smallest token units (stroops for classic assets), as a string. */
@@ -83,6 +88,65 @@ function u32(v: number) {
  */
 export const NETWORK_LABEL = NETWORK === Networks.PUBLIC ? "public" : "testnet";
 
+/**
+ * Sentinel the create form submits for its "Native XLM" asset choice.
+ * [`tokenContractId`] resolves it to the active network's Stellar Asset
+ * Contract: on Soroban, native XLM moves through its SAC exactly like any
+ * other SEP-41 token (CAP-46-6), so XLM streams need no wrapped asset.
+ */
+export const NATIVE_XLM = "native";
+
+/**
+ * Well-known SAC contract ids for native XLM, per network — the output of
+ * `stellar contract id asset --network <net> --asset native`. The address is
+ * derived from the network passphrase + asset, so it is stable per network.
+ */
+const NATIVE_XLM_SAC: Record<string, string> = {
+  testnet: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+  public: "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+};
+
+/**
+ * Resolves the create form's asset choice to a token contract id:
+ *
+ * - `"native"` → the active network's native XLM Stellar Asset Contract
+ *   (overridable with `NEXT_PUBLIC_NATIVE_XLM_CONTRACT_ID` for other
+ *   networks),
+ * - anything else → validated as a `C…` contract id and returned unchanged.
+ *
+ * Throws for a malformed contract id so a typo fails before a transaction is
+ * built instead of surfacing as an opaque simulation error.
+ */
+export function tokenContractId(asset: string): string {
+  if (asset !== NATIVE_XLM) {
+    if (!StrKey.isValidContract(asset)) {
+      throw new Error(
+        `"${asset}" is not a token contract id (expected a C… address).`
+      );
+    }
+    return asset;
+  }
+  const override = process.env.NEXT_PUBLIC_NATIVE_XLM_CONTRACT_ID;
+  if (override) return override;
+  const sac = NATIVE_XLM_SAC[NETWORK_LABEL];
+  if (!sac) {
+    throw new Error(`Native XLM contract id unknown on "${NETWORK_LABEL}".`);
+  }
+  return sac;
+}
+
+/**
+ * True when an on-chain stream's `token` field is native XLM on the active
+ * network (used to label streams in the UI).
+ */
+export function isNativeXlm(token: string): boolean {
+  const override = process.env.NEXT_PUBLIC_NATIVE_XLM_CONTRACT_ID;
+  return (
+    token === NATIVE_XLM_SAC[NETWORK_LABEL] ||
+    (Boolean(override) && token === override)
+  );
+}
+
 /** Map a StreamError code (contract errors surface as `Error(Contract, #N)`). */
 const STREAM_ERRORS: Record<number, string> = {
   1: "StreamNotFound",
@@ -104,6 +168,19 @@ const STREAM_ERRORS: Record<number, string> = {
   17: "InsufficientTreasuryBalance",
   18: "MetadataTagTooLong",
   19: "MetadataLimitReached",
+  18: "IntentNotFound",
+  19: "IntentNotPending",
+  20: "IntentNotYetExecutable",
+  21: "IntentExpired",
+  22: "IntentNotCancellable",
+  23: "InvalidScheduleParameters",
+  24: "IntentParamsMismatch",
+  25: "IntentNotExpired",
+  26: "DepositTransferFailed",
+  27: "TopUpTransferFailed",
+  28: "RecipientPayoutFailed",
+  29: "SenderRefundFailed",
+  30: "TreasuryPayoutFailed",
 };
 
 /** Rewrites raw simulation/tx error text into a readable StreamError name. */
@@ -178,17 +255,76 @@ async function send<T>(
   throw new Error("Timed out waiting for transaction inclusion");
 }
 
+/** Reads `allowance(from → spender)` from a SEP-41 token (read-only). */
+async function readAllowance(
+  token: string,
+  from: string,
+  spender: string
+): Promise<bigint | null> {
+  const retval = await simulateRead(token, "allowance", [
+    scAddr(from),
+    scAddr(spender),
+  ]);
+  if (!retval) return null;
+  try {
+    return BigInt(scValToNative(retval) as bigint);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Makes sure the streaming contract may pull `amount` of `token` from
+ * `sender` before a create/top-up is simulated. SAC allowances are exact and
+ * decrease with every pull, so this signs a `token.approve` transaction with
+ * Freighter **only when the current allowance is short**.
+ *
+ * A token that does not answer `allowance` (not SEP-41 shaped) or an RPC
+ * hiccup returns without approving: the contract call that follows then
+ * surfaces its own typed error (`DepositTransferFailed` / …).
+ */
+async function ensureAllowance(
+  sender: string,
+  token: string,
+  amount: string
+): Promise<void> {
+  const current = await readAllowance(token, sender, CONTRACT_ID);
+  if (current === null || current >= BigInt(amount)) return;
+
+  const server = new rpc.Server(RPC_URL);
+  const { sequence } = await server.getLatestLedger();
+  // ~10 days of headroom at ~5 s/ledger; the pull happens in the very next
+  // transaction.
+  const liveUntilLedger = sequence + 172_800;
+  await send(
+    sender,
+    new Contract(token).call(
+      "approve",
+      scAddr(sender),
+      scAddr(CONTRACT_ID),
+      i128(amount),
+      u32(liveUntilLedger)
+    ),
+    () => undefined
+  );
+}
+
 export async function createStream(
   sender: string,
   args: StreamArgs
 ): Promise<bigint> {
+  const token = tokenContractId(args.token); // "native" → the network's XLM SAC
   const start = Math.floor(Date.now() / 1000) + 1;
   const end = start + Math.ceil(Number(args.days) * 86_400);
+  // The contract pulls the deposit through a token allowance — make sure it
+  // is in place before simulation (one extra Freighter signature on the
+  // first stream with a given asset).
+  await ensureAllowance(sender, token, args.deposit);
   const op = contract().call(
     "create_stream",
     scAddr(sender),
     scAddr(args.recipient),
-    scAddr(args.token),
+    scAddr(token),
     i128(args.deposit),
     u64(start),
     u64(end),
@@ -281,6 +417,11 @@ export async function topUpStream(
   streamId: string,
   amount: string
 ): Promise<void> {
+  // Top-ups pull through the same token allowance as the deposit. If the
+  // stream cannot be read, skip the pre-check and let `top_up` simulation
+  // surface the contract's own error (e.g. StreamNotFound).
+  const stream = await readStream(streamId).catch(() => null);
+  if (stream) await ensureAllowance(sender, stream.token, amount);
   await send(
     sender,
     contract().call("top_up", u64(streamId), i128(amount)),
@@ -299,19 +440,22 @@ export async function cancelStream(
   );
 }
 
-/** Read-only contract call: simulated, never signed, return value decoded. */
+/** Read-only contract call on any contract: simulated, never signed. */
 async function simulateRead(
+  contractId: string,
   method: string,
   args: xdr.ScVal[]
 ): Promise<xdr.ScVal | null> {
-  if (!CONTRACT_ID) return null;
+  // Reads run on whichever contract the caller names (the streaming contract
+  // or, for the allowance pre-check, a token).
+  if (!contractId) return null;
   try {
     const server = new rpc.Server(RPC_URL);
     const tx = new TransactionBuilder(DUMMY_SOURCE, {
       fee: "100",
       networkPassphrase: NETWORK,
     })
-      .addOperation(contract().call(method, ...args))
+      .addOperation(new Contract(contractId).call(method, ...args))
       .setTimeout(30)
       .build();
     const sim = await server.simulateTransaction(tx);
@@ -324,7 +468,7 @@ async function simulateRead(
 
 /** Read-only view of one stream. */
 export async function readStream(streamId: string): Promise<StreamView> {
-  const retval = await simulateRead("get_stream", [u64(streamId)]);
+  const retval = await simulateRead(CONTRACT_ID, "get_stream", [u64(streamId)]);
   if (!retval) {
     throw new Error(`Stream #${streamId} not found or RPC unavailable`);
   }
@@ -345,7 +489,7 @@ export async function readStream(streamId: string): Promise<StreamView> {
 
 /** Accrued-but-unwithdrawn balance of a stream at the current ledger time. */
 export async function readAvailable(streamId: string): Promise<bigint> {
-  const retval = await simulateRead("available", [u64(streamId)]);
+  const retval = await simulateRead(CONTRACT_ID, "available", [u64(streamId)]);
   if (!retval) {
     throw new Error(`Stream #${streamId} not found or RPC unavailable`);
   }
@@ -433,7 +577,7 @@ async function readStreamIdsPage(
   address: string,
   offset: number
 ): Promise<string[]> {
-  const retval = await simulateRead(view, [
+  const retval = await simulateRead(CONTRACT_ID, view, [
     scAddr(address),
     u32(offset),
     u32(MAX_PAGE_SIZE),

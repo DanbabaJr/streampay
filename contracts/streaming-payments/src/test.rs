@@ -24,7 +24,7 @@ use proptest::{
     test_runner::{Config as ProptestConfig, RngSeed, TestCaseError, TestRunner},
 };
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
+    contract, contracterror, contractimpl, contracttype,
     testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Event as _, IntoVal, MuxedAddress, String as SdkString,
@@ -3031,4 +3031,583 @@ fn run_fee_property(seed: u64, steps: usize) {
             );
         }
     }
+}
+
+// ----------------------------------------- non-native (token) assets ------
+//
+// Tokenized assets (USDC-style) are a first-class path, not an incidental
+// one: every money movement is exercised against a *registered* Stellar Asset
+// Contract (the fixture's token is one, registered via
+// `register_stellar_asset_contract_v2`), and each token-side failure must
+// surface as its own `StreamError` code (18–22) — never the token's own error
+// number, which lives in the same `Error(Contract, #N)` namespace.
+
+/// Full lifecycle on a registered Stellar Asset Contract: create → top-up →
+/// withdraw → withdraw_max → cancel, asserting token balances at every step
+/// and that the total minted supply is conserved (contract holds exactly
+/// `deposit − withdrawn` at all times).
+#[test]
+fn full_lifecycle_on_registered_stellar_asset() {
+    let f = Fixture::setup(); // registers a SAC and funds the sender
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);
+
+    // --- create: deposit pulled from the sender into the contract ---
+    assert_eq!(f.client.get_stream(&id).token, f.token);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        DEPOSIT // 2 * DEPOSIT minted − DEPOSIT pulled
+    );
+
+    // --- top-up after 2 days of the 10-day window ---
+    f.advance_time(3 * DAY);
+    f.client.mock_all_auths().top_up(&id, &(DEPOSIT / 2));
+    let deposit = DEPOSIT + DEPOSIT / 2; // 1.5 ×
+    assert_eq!(f.client.get_stream(&id).deposit, deposit);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        deposit
+    );
+    assert_eq!(f.client.available(&id), deposit * 2 / 10); // 0.3 ×
+
+    // --- partial withdraw of accrued funds ---
+    let first = DEPOSIT / 10;
+    f.client.mock_all_auths().withdraw(&id, &first);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        first
+    );
+
+    // --- withdraw_max drains everything accrued so far ---
+    f.advance_time(2 * DAY); // 4 of 10 days elapsed
+    let accrued = deposit * 4 / 10;
+    assert_eq!(f.client.available(&id), accrued - first);
+    let paid = f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(paid, accrued - first);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        accrued
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        deposit - accrued
+    );
+
+    // --- cancel splits the remainder across both legs (both > 0) ---
+    f.advance_time(3 * DAY); // 7 of 10 days elapsed
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+    let streamed = deposit * 7 / 10; // 1.05 ×
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Cancelled);
+    // Recipient leg: accrued-but-unwithdrawn = streamed − withdrawn.
+    // Sender leg: deposit − streamed. Recorded `withdrawn` = everything the
+    // recipient has ever received.
+    assert_eq!(stream.withdrawn, streamed);
+
+    let token = TokenClient::new(&f.env, &f.token);
+    assert_eq!(token.balance(&f.recipient), streamed);
+    // Sender: un-deposited headroom (2× minted − 1.5× deposited) + refund
+    // (deposit − streamed) — i.e. exactly `2 × DEPOSIT − streamed`.
+    assert_eq!(token.balance(&f.sender), 2 * DEPOSIT - streamed);
+    assert_eq!(token.balance(&f.client.address), 0);
+    // Conservation: every unit of the 2 × minted supply is accounted for.
+    assert_eq!(
+        token.balance(&f.recipient) + token.balance(&f.sender) + token.balance(&f.client.address),
+        2 * DEPOSIT
+    );
+}
+
+/// A registered asset with balance but no allowance: the failed pull is
+/// reported as `DepositTransferFailed` (not the SAC's own error code), and
+/// nothing is persisted — not even a consumed stream id or an event.
+#[test]
+fn create_stream_without_allowance_reports_deposit_transfer_failed() {
+    let f = Fixture::setup();
+    let now = f.env.ledger().timestamp();
+    let sender = Address::generate(&f.env);
+    StellarAssetClient::new(&f.env, &f.token).mint(&sender, &DEPOSIT);
+    // …but `approve` was never called for this sender.
+
+    let try_create = |sender: &Address| {
+        f.client.mock_all_auths().try_create_stream(
+            sender,
+            &f.recipient,
+            &f.token,
+            &DEPOSIT,
+            &(now + DAY),
+            &(now + 11 * DAY),
+            &false,
+        )
+    };
+
+    let err = try_create(&sender).unwrap_err().unwrap();
+    assert_eq!(err, StreamError::DepositTransferFailed);
+    // No stream, no event, no consumed id — the failed pull rolled back.
+    assert!(f.client.mock_all_auths().try_get_stream(&1).is_err());
+    assert!(f
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&f.client.address)
+        .events()
+        .is_empty());
+
+    // Once approved, the very same call succeeds and hands out id 1.
+    StellarAssetClient::new(&f.env, &f.token).approve(
+        &sender,
+        &f.client.address,
+        &DEPOSIT,
+        &1_000_000u32,
+    );
+    assert_eq!(try_create(&sender).unwrap().unwrap(), 1);
+}
+
+/// Allowance but no balance is a token-side failure too: same distinct code.
+#[test]
+fn create_stream_without_balance_reports_deposit_transfer_failed() {
+    let f = Fixture::setup();
+    let now = f.env.ledger().timestamp();
+    let broke = Address::generate(&f.env); // no tokens, but a full allowance
+    StellarAssetClient::new(&f.env, &f.token).approve(
+        &broke,
+        &f.client.address,
+        &DEPOSIT,
+        &1_000_000u32,
+    );
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_create_stream(
+            &broke,
+            &f.recipient,
+            &f.token,
+            &DEPOSIT,
+            &(now + DAY),
+            &(now + 11 * DAY),
+            &false,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DepositTransferFailed);
+    assert!(f.client.mock_all_auths().try_get_stream(&1).is_err());
+}
+
+/// A top-up the sender's balance cannot cover fails with its own code and
+/// leaves `deposit` and the contract's balance untouched; a retry within the
+/// balance then succeeds.
+#[test]
+fn top_up_beyond_balance_reports_top_up_transfer_failed() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false); // sender keeps DEPOSIT
+
+    // Allowance (10 × DEPOSIT) still covers it — this fails on balance only.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_top_up(&id, &(2 * DEPOSIT))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::TopUpTransferFailed);
+    assert_eq!(f.client.get_stream(&id).deposit, DEPOSIT);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT
+    );
+
+    // Recovery: a top-up the balance can cover succeeds.
+    f.client.mock_all_auths().top_up(&id, &DEPOSIT);
+    assert_eq!(f.client.get_stream(&id).deposit, 2 * DEPOSIT);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        2 * DEPOSIT
+    );
+}
+
+// ------------------------------------------------ refusing transfers ------
+
+/// A token that refuses `transfer` (payouts) and/or `transfer_from` (pulls) on
+/// demand — the moral equivalent of a frozen/blacklisted asset, and the
+/// "token that refuses transfers" the non-native path must handle.
+///
+/// Its error code deliberately collides with `StreamError::NothingToWithdraw`
+/// (13): if a raw token error ever leaked through StreamPay, these tests would
+/// observe `#13` ("nothing to withdraw") instead of the dedicated code — the
+/// exact misdiagnosis distinct codes exist to prevent.
+#[contract]
+pub(crate) struct RefusingToken;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum TokenRefuseError {
+    /// Deliberately equals `StreamError::NothingToWithdraw` (13).
+    Refused = 13,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RefusingKey {
+    RefusePush,
+    RefusePull,
+}
+
+#[contractimpl]
+impl RefusingToken {
+    /// Refuses outgoing payouts (`transfer`), incoming pulls
+    /// (`transfer_from`), both, or neither.
+    pub fn set_refuse(env: Env, push: bool, pull: bool) {
+        env.storage()
+            .temporary()
+            .set(&RefusingKey::RefusePush, &push);
+        env.storage()
+            .temporary()
+            .set(&RefusingKey::RefusePull, &pull);
+    }
+
+    fn refuses(env: &Env, key: &RefusingKey) -> bool {
+        env.storage().temporary().get(key).unwrap_or(false)
+    }
+
+    pub fn transfer(
+        env: Env,
+        _from: Address,
+        _to: MuxedAddress,
+        _amount: i128,
+    ) -> Result<(), TokenRefuseError> {
+        if Self::refuses(&env, &RefusingKey::RefusePush) {
+            return Err(TokenRefuseError::Refused);
+        }
+        Ok(())
+    }
+
+    pub fn transfer_from(
+        env: Env,
+        _spender: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+    ) -> Result<(), TokenRefuseError> {
+        if Self::refuses(&env, &RefusingKey::RefusePull) {
+            return Err(TokenRefuseError::Refused);
+        }
+        Ok(())
+    }
+
+    // --- read-only SEP-41 surface. Balances are fictional: these tests
+    // assert StreamPay's own state, and real balance conservation is covered
+    // by the Stellar Asset Contract tests above. ---
+    pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        i128::MAX
+    }
+
+    pub fn approve(
+        _env: Env,
+        _from: Address,
+        _spender: Address,
+        _amount: i128,
+        _live_until_ledger: u32,
+    ) {
+    }
+
+    pub fn balance(_env: Env, _id: Address) -> i128 {
+        0
+    }
+
+    pub fn burn(_env: Env, _from: Address, _amount: i128) {}
+
+    pub fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {}
+
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn name(env: Env) -> SdkString {
+        SdkString::from_str(&env, "Refusing Token")
+    }
+
+    pub fn symbol(env: Env) -> SdkString {
+        SdkString::from_str(&env, "REFUSE")
+    }
+}
+
+/// Test driver for streams funded by the [`RefusingToken`]. Shared with the
+/// error-surface matrix (`error_surface_test.rs`), whose probes need a token
+/// that refuses a specific leg.
+pub(crate) struct RefusingFixture {
+    pub(crate) env: Env,
+    pub(crate) client: Client<'static>,
+    pub(crate) token: Address,
+    pub(crate) token_client: RefusingTokenClient<'static>,
+    pub(crate) sender: Address,
+    pub(crate) recipient: Address,
+    pub(crate) governor: Address,
+}
+
+impl RefusingFixture {
+    pub(crate) fn setup() -> Self {
+        Self::setup_with_snapshot(true)
+    }
+
+    /// Like [`RefusingFixture::setup`], but disables the SDK's test-snapshot
+    /// capture: the error-surface matrix asserts through the branch trace, so a
+    /// snapshot file per probe would be pure noise.
+    pub(crate) fn setup_quiet() -> Self {
+        Self::setup_with_snapshot(false)
+    }
+
+    fn setup_with_snapshot(capture_snapshots: bool) -> Self {
+        let mut env = Env::default();
+        env.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: capture_snapshots,
+        });
+        env.mock_all_auths();
+        let token = env.register(RefusingToken, ());
+        let token_client = RefusingTokenClient::new(&env, &token);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let governor = Address::generate(&env);
+        // The constructor binds the treasury governor at "deploy" time.
+        let contract_id = env.register(StreamingPayments, (governor.clone(),));
+        let client = Client::new(&env, &contract_id);
+        RefusingFixture {
+            env,
+            client,
+            token,
+            token_client,
+            sender,
+            recipient,
+            governor,
+        }
+    }
+
+    pub(crate) fn create(&self, deposit: i128, start_in: u64, duration: u64) -> u64 {
+        let now = self.env.ledger().timestamp();
+        self.client.mock_all_auths().create_stream(
+            &self.sender,
+            &self.recipient,
+            &self.token,
+            &deposit,
+            &(now + start_in),
+            &(now + start_in + duration),
+            &true,
+        )
+    }
+
+    pub(crate) fn refuse(&self, push: bool, pull: bool) {
+        self.token_client.set_refuse(&push, &pull);
+    }
+
+    pub(crate) fn advance_time(&self, seconds: u64) {
+        self.env.ledger().with_mut(|li| li.timestamp += seconds);
+    }
+}
+
+/// Creating a stream on an asset that refuses the pull fails with
+/// `DepositTransferFailed`, consumes no id, and emits nothing — then works
+/// (still at id 1) once the asset accepts transfers again.
+#[test]
+fn create_stream_against_refusing_token_reports_deposit_transfer_failed() {
+    let f = RefusingFixture::setup();
+    f.refuse(false, true); // refuses incoming pulls
+    let now = f.env.ledger().timestamp();
+
+    let try_create = || {
+        f.client.mock_all_auths().try_create_stream(
+            &f.sender,
+            &f.recipient,
+            &f.token,
+            &DEPOSIT,
+            &(now + DAY),
+            &(now + 11 * DAY),
+            &true,
+        )
+    };
+
+    let err = try_create().unwrap_err().unwrap();
+    // The token's own error is `Refused = 13` (NothingToWithdraw): seeing
+    // StreamPay's #18 proves the raw token code did not leak.
+    assert_eq!(err, StreamError::DepositTransferFailed);
+    assert!(f.client.mock_all_auths().try_get_stream(&1).is_err());
+    assert!(f
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&f.client.address)
+        .events()
+        .is_empty());
+
+    f.refuse(false, false);
+    assert_eq!(try_create().unwrap().unwrap(), 1); // id counter never advanced
+}
+
+/// A top-up refused by the asset fails with `TopUpTransferFailed` and keeps
+/// `deposit` untouched; re-enabling transfers lets the same top-up through.
+#[test]
+fn top_up_against_refusing_token_reports_top_up_transfer_failed() {
+    let f = RefusingFixture::setup();
+    let id = f.create(DEPOSIT, DAY, 10 * DAY);
+
+    f.refuse(false, true); // stops accepting incoming transfers
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_top_up(&id, &(DEPOSIT / 2))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::TopUpTransferFailed);
+    assert_eq!(f.client.get_stream(&id).deposit, DEPOSIT);
+
+    f.refuse(false, false);
+    f.client.mock_all_auths().top_up(&id, &(DEPOSIT / 2));
+    assert_eq!(f.client.get_stream(&id).deposit, DEPOSIT + DEPOSIT / 2);
+}
+
+/// A payout refused by the asset fails with `RecipientPayoutFailed` and rolls
+/// back *all* effects: `withdrawn`, status, accrual, and the event log. Both
+/// withdrawal paths hit it; a re-enabled asset pays the full amount.
+#[test]
+fn withdraw_against_refusing_token_reports_recipient_payout_failed() {
+    let f = RefusingFixture::setup();
+    let id = f.create(DEPOSIT, 0, 10 * DAY); // starts now
+    f.advance_time(DAY); // 1/10 accrued
+    let _ = f.env.events().all(); // drain StreamCreated
+
+    f.refuse(true, false); // asset stops paying out
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &(DEPOSIT / 10))
+        .unwrap_err()
+        .unwrap();
+    // Token's own code is 13 (NothingToWithdraw) — StreamPay reports 20.
+    assert_eq!(err, StreamError::RecipientPayoutFailed);
+
+    // Effects written before the transfer were rolled back with it…
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.withdrawn, 0);
+    assert_eq!(stream.status, StreamStatus::Active);
+    assert_eq!(f.client.available(&id), DEPOSIT / 10);
+    // …and the failed attempt emitted no event.
+    assert!(f
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&f.client.address)
+        .events()
+        .is_empty());
+
+    // withdraw_max hits the same wall with the same code, equally atomic.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_max(&id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::RecipientPayoutFailed);
+    assert_eq!(f.client.get_stream(&id).withdrawn, 0);
+
+    // Re-enabling the asset lets the claim through, in full.
+    f.refuse(false, false);
+    assert_eq!(f.client.mock_all_auths().withdraw_max(&id), DEPOSIT / 10);
+    assert_eq!(f.client.get_stream(&id).withdrawn, DEPOSIT / 10);
+}
+
+/// Cancellation reports *which* leg the asset refused — the recipient's
+/// accrued share or the sender's refund — and rolls the whole cancellation
+/// back so the stream stays `Active` with `withdrawn` restored.
+#[test]
+fn cancel_against_refusing_token_reports_the_failing_leg() {
+    let f = RefusingFixture::setup();
+    f.refuse(true, false); // asset pays out nothing
+
+    // Accrued > 0 → the recipient leg runs first and fails.
+    let id = f.create(DEPOSIT, DAY, 10 * DAY);
+    f.advance_time(2 * DAY); // 1 of 10 days elapsed
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_cancel_stream(&f.sender, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::RecipientPayoutFailed);
+    let stream = f.client.get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Active); // cancellation undone
+    assert_eq!(stream.withdrawn, 0);
+
+    // Nothing accrued → the recipient leg is skipped, the refund leg fails.
+    let not_started = f.create(DEPOSIT, DAY, 10 * DAY);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_cancel_stream(&f.sender, &not_started)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::SenderRefundFailed);
+    assert_eq!(
+        f.client.get_stream(&not_started).status,
+        StreamStatus::Active
+    );
+
+    // Re-enabled asset: both streams cancel normally afterwards.
+    f.refuse(false, false);
+    f.client
+        .mock_all_auths()
+        .cancel_stream(&f.sender, &not_started);
+    assert_eq!(
+        f.client.get_stream(&not_started).status,
+        StreamStatus::Cancelled
+    );
+    assert_eq!(f.client.get_stream(&not_started).withdrawn, 0); // nothing accrued
+}
+
+/// A token that returns a non-`void` value from its transfer functions: not
+/// SEP-41 shaped. The failed return-value conversion must be reported as a
+/// transfer failure — not a panic and not a raw host error.
+#[contract]
+struct NonCompliantToken;
+
+#[contractimpl]
+impl NonCompliantToken {
+    pub fn transfer(_env: Env, _from: Address, _to: MuxedAddress, _amount: i128) -> bool {
+        true
+    }
+
+    pub fn transfer_from(
+        _env: Env,
+        _spender: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+    ) -> bool {
+        true
+    }
+}
+
+#[test]
+fn non_sep41_token_return_reports_transfer_failure() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = env.register(NonCompliantToken, ());
+    let contract_id = env.register(StreamingPayments, (Address::generate(&env),));
+    let client = Client::new(&env, &contract_id);
+    let now = env.ledger().timestamp();
+
+    let err = client
+        .mock_all_auths()
+        .try_create_stream(
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &token,
+            &DEPOSIT,
+            &(now + DAY),
+            &(now + 11 * DAY),
+            &false,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DepositTransferFailed);
 }

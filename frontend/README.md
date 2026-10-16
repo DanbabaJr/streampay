@@ -13,6 +13,7 @@ streams you didn't create in this session.
 | `/` | Connect, create form, stream list with per-row actions and a **Discover on-chain** button (scans the contract's `recipient_streams` / `sender_streams` indexes for your address) |
 | `/stream/[id]` | Stream detail: progress bar, live `available` poll (15 s), withdraw form with over-withdrawal guard, **Withdraw max** (`withdraw_max`), cancel, and a metadata attestation list plus an attach form for a connected party (`attach_metadata`). Read-only-safe without a wallet; contract errors decode to `StreamError` names |
 | `/` | Connect, single and CSV batch creation forms, stream list with per-row actions and a **Discover on-chain** button (scans the contract's `recipient_streams` / `sender_streams` indexes for your address) |
+| `/` | Connect, single and CSV batch creation forms (asset selector: **native XLM** or an entered token contract id), stream list with per-row actions and a **Discover on-chain** button (scans the contract's `recipient_streams` / `sender_streams` indexes for your address) |
 | `/stream/[id]` | Stream detail: progress bar, live `available` poll (15 s), withdraw form with over-withdrawal guard, **Withdraw max** (`withdraw_max`), cancel. Read-only-safe without a wallet; contract errors decode to `StreamError` names |
 
 ## Setup
@@ -26,8 +27,15 @@ npm run dev                  # http://localhost:3000
 
 Requires the [Freighter](https://www.freighter.app/) browser extension and a
 funded account on the configured network (default: testnet — use the
-[friendbot](https://developers.stellar.org/docs/dev-tools/tutorials/friendbot))
-plus a deployed token contract id (any SAC, e.g. a custom USDC testnet asset).
+[friendbot](https://developers.stellar.org/docs/dev-tools/tutorials/friendbot)).
+Pick an asset on the create form:
+
+- **Native XLM** — resolved to the network's Stellar Asset Contract
+  (`stellar contract id asset --asset native`); override with
+  `NEXT_PUBLIC_NATIVE_XLM_CONTRACT_ID` for other networks.
+- **Token contract (USDC-style)** — the asset's `C…` SAC id, e.g. a custom
+  testnet asset.
+
 For a one-command deployed contract + demo stream, see
 [`../docs/DEMO.md`](../docs/DEMO.md).
 
@@ -42,6 +50,15 @@ For a one-command deployed contract + demo stream, see
   invoice); the contract never stores the document. Verify a local file against
   an attested hash with [`../scripts/verify_attestation.sh`](../scripts/verify_attestation.sh)
   — see [`../docs/VERIFYING_ATTESTATIONS.md`](../docs/VERIFYING_ATTESTATIONS.md).
+- Create/top-up first read the token's `allowance` and ask Freighter to sign
+  a `token.approve` **only when it is short** — so a first stream with a new
+  asset costs one extra signature instead of failing at simulation.
+- Read-only calls (`get_stream`, `available`, the index views, `allowance`)
+  simulate against the RPC without signing.
+- Contract errors decode to `StreamError` names, including the scheduled-intent
+  codes (18–25) and the transfer-failure codes: `DepositTransferFailed` (26),
+  `TopUpTransferFailed` (27), `RecipientPayoutFailed` (28),
+  `SenderRefundFailed` (29), `TreasuryPayoutFailed` (30).
 - Amounts are **smallest token units** (stroops for classic assets).
 - The batch form accepts `address,rate,duration` CSV rows. Rate is an integer
   in smallest token units per second; duration is integer seconds. Each

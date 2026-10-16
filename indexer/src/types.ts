@@ -13,15 +13,16 @@ export interface DecodedEvent {
 
 export interface RpcEvent {
   id: string;
-  pagingToken: string;
+  pagingToken?: string;
   ledger: number;
   ledgerClosedAt: string;
   contractId: string;
-  topic: string[];
-  value: string;
+  topic: (string | unknown)[];
+  value: string | unknown;
 }
 
 export interface Stream {
+  id?: string;
   streamId: string;
   sender: string | null;
   recipient: string | null;
@@ -32,6 +33,9 @@ export interface Stream {
   endTime: string | null;
   cancelable: boolean | null;
   status: string;
+  cancelled_by?: string | null;
+  recipient_amount?: string | null;
+  sender_amount?: string | null;
   lastLedger: number;
   updatedAt: string;
 }

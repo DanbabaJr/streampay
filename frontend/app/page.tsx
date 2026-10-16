@@ -139,7 +139,7 @@ export default function Home() {
             toast.success(`Stream #${id} created.`);
             await refresh(String(id));
           } catch (e) {
-            toast.error(String(e));
+            toast.error(describeError(e));
           }
         }}
       />

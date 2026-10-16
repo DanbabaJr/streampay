@@ -1,0 +1,103 @@
+name: Postmortem
+description: Blameless write-up for a security finding, incident, or rollback.
+title: "[Postmortem]: "
+labels: ["postmortem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Blameless postmortem. Start from
+        [`docs/POSTMORTEM_TEMPLATE.md`](../blob/main/docs/POSTMORTEM_TEMPLATE.md)
+        and link the resulting document (a PR into `docs/postmortems/` is preferred
+        for permanent records). Reward tiers and the loss model are defined in
+        [docs/BOUNTY.md](../blob/main/docs/BOUNTY.md).
+
+  - type: input
+    id: incident
+    attributes:
+      label: Incident / finding reference
+      description: The security issue, advisory, drill, or promotion issue this covers.
+      placeholder: "#85, GHSA-..., promotion issue #..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+        - Informational
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Two or three sentences a future responder can read cold.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and observed loss
+      description: >
+        Realized vs. potential loss. Report E (escrowed value at risk), R (remediation cost),
+        and MLS exactly as defined in docs/BOUNTY.md §3, with the numbers you measured.
+      placeholder: |
+        E = ... USDC   R = ... USD   MLS = ... USD
+        Funds lost: ...
+        Availability: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Timeline (detect → decide → contain → resolve)
+      description: UTC timestamps and the actor/tool for each step.
+      placeholder: |
+        2026-01-01T00:00Z detected by ...
+        2026-01-01T00:00Z decided ...
+        2026-01-01T00:00Z contained ...
+        2026-01-01T00:00Z resolved ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause
+      description: The underlying cause, not just the trigger. Include the 5 whys if useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: detection
+    attributes:
+      label: Detection and response
+      description: What worked, what was slow, which gate/alert should have caught it sooner.
+    validations:
+      required: true
+
+  - type: textarea
+    id: action-items
+    attributes:
+      label: Action items
+      description: One line per item, each with an owner and a due date; link the tracking issue.
+      placeholder: |
+        - [ ] Add regression test for ... (@owner, by 2026-01-15, #123)
+        - [ ] Add release gate for ... (@owner, by 2026-01-20, #124)
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Links to logs, scripts, tx hashes, or drill output.

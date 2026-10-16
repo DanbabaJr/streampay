@@ -92,6 +92,13 @@ pub enum DataKey {
     /// without knowing the stream ids up front. Advisory, like the stream
     /// indexes above.
     PartyAttestations(Address),
+    /// Next scheduled-intent id to hand out; ids start at 1.
+    NextIntentId,
+    /// The scheduled intent with the given id.
+    Intent(u64),
+    /// Append-only index of scheduled-intent ids created (as sender) by the
+    /// given address. Same advisory semantics as [`DataKey::SenderStreams`].
+    SenderIntents(Address),
     /// Treasury governor address (instance storage; set once by the
     /// contract constructor, later by two-step nomination/acceptance).
     Governor,
@@ -259,7 +266,7 @@ pub fn index_stream(env: &Env, stream: &Stream) {
     );
 }
 
-fn push_to_index(env: &Env, key: &DataKey, id: u64) {
+pub(crate) fn push_to_index(env: &Env, key: &DataKey, id: u64) {
     let mut ids: Vec<u64> = env
         .storage()
         .persistent()

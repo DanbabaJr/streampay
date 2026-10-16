@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://streampay.network/schemas/cli-output-v1.json",
+  "title": "StreamPay CLI output v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schemaVersion", "ok", "command", "status", "network", "contract", "streamIds", "batches"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": { "type": "string" },
+        "status": { "enum": ["simulated", "prepared", "submitted", "nothing-to-claim"] },
+        "network": { "enum": ["testnet", "mainnet"] },
+        "contract": { "type": "string" },
+        "streamIds": { "type": "array", "items": { "type": "string" } },
+        "hasMore": { "type": "boolean" },
+        "transactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["hash", "status"],
+            "properties": { "hash": { "type": "string" }, "status": { "type": "string" } },
+            "additionalProperties": false
+          }
+        },
+        "batches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["operationCount", "simulation"],
+            "properties": {
+              "unsignedXdr": { "type": "string" },
+              "operationCount": { "type": "integer", "minimum": 1 },
+              "simulation": { "$ref": "#/$defs/simulation" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["schemaVersion", "ok", "error"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["schemaVersion", "ok", "help"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "help": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["schemaVersion", "ok", "command", "keyFile"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": { "const": "key encrypt" },
+        "keyFile": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "simulation": {
+      "type": "object",
+      "required": ["latestLedger", "minResourceFee", "footprint", "eventXdr", "expectedBalances"],
+      "properties": {
+        "latestLedger": { "type": "integer" },
+        "minResourceFee": { "type": "string" },
+        "returnValue": { "type": ["string", "null"] },
+        "footprint": {
+          "type": "object",
+          "required": ["readOnly", "readWrite"],
+          "properties": {
+            "readOnly": { "type": "array", "items": { "type": "string" } },
+            "readWrite": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "eventXdr": { "type": "array", "items": { "type": "string" } },
+        "expectedBalances": {
+          "type": "object",
+          "required": ["basis", "note", "changes"],
+          "properties": {
+            "basis": { "const": "successful-invocation contract events" },
+            "note": { "type": "string" },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["token", "address", "delta", "derivedFrom"],
+                "properties": {
+                  "token": { "type": "string" },
+                  "address": { "type": "string" },
+                  "delta": { "type": "string", "pattern": "^-?[0-9]+$" },
+                  "derivedFrom": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1998,7 +1998,7 @@
     []
   ],
   "ledger": {
-    "protocol_version": 28,
+    "protocol_version": 29,
     "sequence_number": 0,
     "timestamp": 358,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",

@@ -26,6 +26,14 @@ contract-balance coverage invariant), or bypass an auth check:
 > a PGP key alongside the release artifacts; until then, GitHub private
 > reports are the canonical intake channel.
 
+For **non-exploitable** findings — hardening gaps, defense-in-depth weaknesses,
+or issues that are already disclosed or fixed — use the public
+[security report form](.github/ISSUE_TEMPLATE/security-report.yml). It is
+classified, labeled, and acknowledged automatically by the
+[triage workflow](.github/workflows/security-triage.yml). Reward tiers, scope,
+the loss model behind them, and the triage SLA are documented in
+[`docs/BOUNTY.md`](docs/BOUNTY.md).
+
 We aim to acknowledge within 72 hours and will credit reporters in the
 release notes unless they prefer anonymity. Please give us a reasonable
 window to fix before public disclosure.

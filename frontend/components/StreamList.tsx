@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { StreamView } from "@/lib/stellar";
+import { isNativeXlm, type StreamView } from "@/lib/stellar";
 
 export default function StreamList({
   streams,
@@ -49,7 +49,9 @@ export default function StreamList({
             <td className="mono">
               <Link href={`/stream/${s.id}`}>#{s.id}</Link>
             </td>
-            <td className="mono">{s.token.slice(0, 10)}…</td>
+            <td className="mono" title={s.token}>
+              {isNativeXlm(s.token) ? "XLM" : `${s.token.slice(0, 10)}…`}
+            </td>
             <td className="mono">{s.recipient.slice(0, 8)}…</td>
             <td className="mono">{s.deposit}</td>
             <td className="mono">{s.withdrawn}</td>
