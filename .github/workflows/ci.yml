@@ -148,3 +148,46 @@ jobs:
       # cargo-audit, so one gate owns the ignore policy (see deny.toml).
       - name: cargo-deny (advisories, licenses, bans, sources)
         uses: EmbarkStudios/cargo-deny-action@v2
+
+  devcontainer-verify:
+    name: Devcontainer — wasm build smoke test
+    runs-on: ubuntu-latest
+    # Verify that the wasm build works inside the exact toolchain the
+    # devcontainer ships, using the same pinned stellar-cli version.
+    # This job catches any drift between the container setup and the contract
+    # build requirements before a contributor hits it locally.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (mirrors devcontainer feature)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-devcontainer-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-devcontainer-
+
+      # Pin must stay in sync with STELLAR_CLI_VERSION in devcontainer.json
+      # and the version used in the contract / release jobs above.
+      - name: Install stellar-cli v28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Wasm build (devcontainer path)
+        working-directory: contracts/streaming-payments
+        run: stellar contract build
+
+      - name: Assert wasm artifact is present and non-empty
+        run: |
+          wasm=target/wasm32v1-none/release/streampay_contract.wasm
+          [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
+          echo "OK: $(ls -sh "$wasm")"

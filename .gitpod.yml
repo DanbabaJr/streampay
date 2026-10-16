@@ -1,0 +1,53 @@
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+  - name: setup
+    # init runs during prebuild so the environment is warm on workspace open.
+    # Sequencing: stellar-cli install → wasm build → node deps → sandbox → seed.
+    init: |
+      # ---- stellar-cli (pinned, matches CI) ----
+      STELLAR_CLI_VERSION="28.1.0"
+      ARCH="$(uname -m)"
+      TARBALL="stellar-cli-${STELLAR_CLI_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz"
+      curl -fsSL \
+        "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/${TARBALL}" \
+        | tar xz -C /tmp
+      sudo install /tmp/stellar /usr/local/bin/stellar
+      stellar --version
+
+      # ---- rust target + wasm smoke test ----
+      rustup target add wasm32v1-none
+      rustup component add rustfmt clippy
+      (cd contracts/streaming-payments && stellar contract build)
+      echo "wasm build OK"
+
+      # ---- node deps ----
+      npm ci
+      (cd frontend && npm ci)
+
+      # ---- local sandbox ----
+      stellar network add local \
+        --rpc-url http://localhost:8000/soroban/rpc \
+        --network-passphrase "Standalone Network ; February 2017" 2>/dev/null || true
+      stellar network container start local --image stellar/quickstart:testing
+      sleep 10
+      bash scripts/seed-local.sh
+    command: echo "environment ready — open the frontend terminal and run: cd frontend && npm run dev"
+
+  - name: frontend
+    # Starts the dev server; opens in the browser automatically.
+    command: |
+      # Wait for the wasm + seed setup to finish (init may still be running on
+      # first open before a prebuild exists).
+      until [ -f frontend/.env.local ]; do sleep 2; done
+      cd frontend && npm run dev
+    openIn: browser
+
+ports:
+  - port: 3000
+    onOpen: open-browser
+    visibility: public
+  - port: 8000
+    onOpen: ignore
+    visibility: private

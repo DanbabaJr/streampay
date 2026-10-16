@@ -20,6 +20,8 @@
 //!    genuinely overflows `u128` (degenerate inputs return `Ok(0)`).
 //! 5. Monotonicity: `streamed_at(d, dur, e)` <= `streamed_at(d, dur, e+1)`
 //!    whenever both sides succeed.
+//! 6. Full-duration exactness: `streamed_at(d, dur, dur) == d` for admissible
+//!    `(d, dur)` pairs where the product fits in `u128`.
 
 #![no_main]
 
@@ -64,6 +66,17 @@ fuzz_target!(|input: (i128, u64, u64)| {
                     assert!(
                         r >= result,
                         "accrual decreased from {result} to {r} at next tick"
+                    );
+                }
+            }
+
+            // Full duration property: streamed_at(d, dur, dur) == d for admissible (deposit, duration)
+            if deposit > 0 && duration > 0 {
+                if (deposit as u128).checked_mul(duration as u128).is_some() {
+                    assert_eq!(
+                        streamed_at(deposit, duration, duration),
+                        Ok(deposit),
+                        "streamed_at(d, dur, dur) != d for {deposit}/{duration}"
                     );
                 }
             }

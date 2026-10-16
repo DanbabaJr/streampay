@@ -106,25 +106,14 @@ negative deposits and zero duration — the function must return `Ok(0)` or
 
 ---
 
-## 5. Multi-token batch stream creation
+## 5. Multi-token batch stream creation — implemented
 
-**Difficulty: hard** · Contract, Rust
-
-Payers (e.g. a DAO treasury) often create many streams at once. Add
-`create_streams_batch(entries: Vec<BatchEntry>) -> Result<Vec<Result<u64,
-StreamError>>, StreamError>` where `BatchEntry` bundles the per-stream params.
-
-**Description:** Semantics must be all-or-nothing per entry but
-best-effort overall: each entry validates and pulls its own deposit; failures
-are reported per-entry without aborting siblings. Watch the Soroban
-instruction budget — measure with `soroban-env-host` cost logs and document
-the tested max batch size. Consider a `MIN_BATCH`/`MAX_BATCH` bound.
-
-**Acceptance criteria:**
-- [ ] Per-entry isolation proven by tests (entry 3 failing doesn't roll back entries 1–2).
-- [ ] `BatchEntry` is a `#[contracttype]`; batch event emitted (or per-entry `StreamCreated` reused).
-- [ ] Instruction-cost measurement documented in ARCHITECTURE.md with the max supported batch size.
-- [ ] Clippy/fmt/test gates all green.
+`create_streams(sender, inputs: Vec<StreamInput>)` creates a complete batch
+atomically. It uses the same per-stream validation and fee rules as
+`create_stream`, groups token pulls and reserves ids in batches, and emits a
+single `StreamsCreated` event with the ids. A failure in any row rolls back
+the full transaction. The frontend payroll CSV form currently uses one token
+for all rows.
 
 ---
 

@@ -1,0 +1,24 @@
+{
+  "rotationLengthDays": 7,
+  "startDate": "2026-10-12T09:00:00Z",
+  "timezone": "UTC",
+  "handoffTime": "09:00",
+  "handoffDay": "Monday",
+  "members": [
+    {
+      "handle": "primary-maintainer",
+      "name": "Primary Maintainer [ROTATION_MEMBER_1]",
+      "email": "maintainer1@example.com"
+    },
+    {
+      "handle": "secondary-maintainer",
+      "name": "Secondary Maintainer [ROTATION_MEMBER_2]",
+      "email": "maintainer2@example.com"
+    },
+    {
+      "handle": "backup-maintainer",
+      "name": "Backup Maintainer [ROTATION_MEMBER_3]",
+      "email": "maintainer3@example.com"
+    }
+  ]
+}

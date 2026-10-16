@@ -212,6 +212,17 @@ pub fn next_stream_id(env: &Env) -> u64 {
     id
 }
 
+/// Reserves a contiguous range of stream ids with one persistent write.
+pub fn reserve_stream_ids(env: &Env, count: u32) -> Result<u64, StreamError> {
+    let key = DataKey::NextStreamId;
+    let first: u64 = env.storage().persistent().get(&key).unwrap_or(1);
+    let next = first
+        .checked_add(count as u64)
+        .ok_or(StreamError::MathOverflow)?;
+    env.storage().persistent().set(&key, &next);
+    Ok(first)
+}
+
 /// Loads a stream, or returns [`StreamError::StreamNotFound`].
 pub fn get_stream(env: &Env, id: u64) -> Result<Stream, StreamError> {
     env.storage()
@@ -231,7 +242,8 @@ pub fn put_stream(env: &Env, stream: &Stream) {
 
 /// Appends a stream's id to both parties' address indexes.
 ///
-/// Called once, from `create_stream`, right after the stream is persisted.
+/// Called after each stream created by `create_stream` or `create_streams`
+/// is persisted.
 /// Cancel/deplete/top-up flows intentionally do not touch the indexes: they
 /// are append-only discovery aids keyed by *creation*, not by lifecycle.
 pub fn index_stream(env: &Env, stream: &Stream) {

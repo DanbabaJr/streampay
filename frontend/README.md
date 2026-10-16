@@ -12,6 +12,8 @@ streams you didn't create in this session.
 |---|---|
 | `/` | Connect, create form, stream list with per-row actions and a **Discover on-chain** button (scans the contract's `recipient_streams` / `sender_streams` indexes for your address) |
 | `/stream/[id]` | Stream detail: progress bar, live `available` poll (15 s), withdraw form with over-withdrawal guard, **Withdraw max** (`withdraw_max`), cancel, and a metadata attestation list plus an attach form for a connected party (`attach_metadata`). Read-only-safe without a wallet; contract errors decode to `StreamError` names |
+| `/` | Connect, single and CSV batch creation forms, stream list with per-row actions and a **Discover on-chain** button (scans the contract's `recipient_streams` / `sender_streams` indexes for your address) |
+| `/stream/[id]` | Stream detail: progress bar, live `available` poll (15 s), withdraw form with over-withdrawal guard, **Withdraw max** (`withdraw_max`), cancel. Read-only-safe without a wallet; contract errors decode to `StreamError` names |
 
 ## Setup
 
@@ -41,6 +43,16 @@ For a one-command deployed contract + demo stream, see
   an attested hash with [`../scripts/verify_attestation.sh`](../scripts/verify_attestation.sh)
   — see [`../docs/VERIFYING_ATTESTATIONS.md`](../docs/VERIFYING_ATTESTATIONS.md).
 - Amounts are **smallest token units** (stroops for classic assets).
+- The batch form accepts `address,rate,duration` CSV rows. Rate is an integer
+  in smallest token units per second; duration is integer seconds. Each
+  deposit is computed as `rate × duration`, uses the shared token selected in
+  the form, and starts immediately. The contract creates all rows atomically
+  in one transaction; approve the total deposits plus any configured fees.
+- Practical batch size is limited by the network's transaction resource budget;
+  an oversized batch fails simulation without creating a partial batch.
+- A batch emits one `StreamsCreated` event with all ids (rather than a
+  `StreamCreated` event per row); when fees are enabled, each charged stream
+  still emits its individual `FeeCharged` event.
 - The stream list persists per-address cache in `localStorage` (scoped by
   network); on-chain indexes are the source for discovery, cache is only a
   convenience.

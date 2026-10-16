@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streampay-indexer
+  namespace: streampay-observability
+  labels:
+    app: streampay-indexer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: streampay-indexer
+  template:
+    metadata:
+      labels:
+        app: streampay-indexer
+    spec:
+      containers:
+        - name: indexer
+          image: streampay/indexer:latest
+          ports:
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: PORT
+              value: "9090"
+            - name: RPC_URL
+              value: "https://soroban-testnet.stellar.org"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexer-service
+  namespace: streampay-observability
+spec:
+  selector:
+    app: streampay-indexer
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
+      name: http-metrics

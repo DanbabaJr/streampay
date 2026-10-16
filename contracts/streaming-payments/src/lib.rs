@@ -10,6 +10,7 @@
 //! # Entry points
 //!
 //! - [`StreamingPayments::create_stream`] — open a stream and pull the deposit
+//! - [`StreamingPayments::create_streams`] — atomically create a batch of streams
 //! - [`StreamingPayments::withdraw`] — recipient claims accrued funds
 //! - [`StreamingPayments::withdraw_max`] — recipient claims *all* accrued
 //!   funds in one atomic call
@@ -55,12 +56,14 @@ mod test_client;
 mod treasury;
 
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token::TokenClient, Address, Env, Vec};
 
 use surface::Branch;
 
 pub use errors::StreamError;
 pub use events::{
     FeeCharged, FeeWithdrawn, MetadataAttached, StreamCancelled, StreamCreated, StreamToppedUp,
+    FeeCharged, FeeWithdrawn, StreamCancelled, StreamCreated, StreamToppedUp, StreamsCreated,
     Withdrawn,
 };
 pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
@@ -68,6 +71,18 @@ pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{streamed_at, Stream, StreamStatus, MAX_DURATION_SECONDS, MAX_PAGE_SIZE};
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
+
+/// Parameters for one stream in a [`StreamingPayments::create_streams`] call.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamInput {
+    pub recipient: Address,
+    pub token: Address,
+    pub deposit_amount: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub cancelable: bool,
+}
 
 /// The StreamPay streaming-payments contract.
 #[contract]
@@ -123,26 +138,8 @@ impl StreamingPayments {
     ) -> Result<u64, StreamError> {
         sender.require_auth();
 
-        if deposit_amount <= 0 {
-            return Err(surface::reject(Branch::CreateDepositNonPositive));
-        }
         let now = env.ledger().timestamp();
-        if start_time < now {
-            return Err(surface::reject(Branch::CreateStartTimeInPast));
-        }
-        if end_time <= start_time {
-            return Err(surface::reject(Branch::CreateInvalidTimeRange));
-        }
-        // MUTANT-SUPPRESS: replace - with + is acceptable because create_stream
-        // enforces end_time > start_time at lines 89-90. The mutation would
-        // produce an absurdly large duration that would immediately fail
-        // MAX_DURATION_SECONDS validation (line 93). This is an unreachable
-        // code path given the contract's invariants.
-        let duration = end_time - start_time;
-        if duration > MAX_DURATION_SECONDS {
-            return Err(surface::reject(Branch::CreateDurationTooLong));
-        }
-        stream::validate_capacity(deposit_amount, duration)?;
+        Self::validate_stream_creation(now, deposit_amount, start_time, end_time)?;
 
         // Protocol fee, computed at the deposit boundary only. The accrual
         // math (`deposit`, `streamed_at`, cancel splits) never sees it.
@@ -207,6 +204,164 @@ impl StreamingPayments {
         }
 
         Ok(id)
+    }
+
+    fn validate_stream_creation(
+        now: u64,
+        deposit_amount: i128,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<(), StreamError> {
+        if deposit_amount <= 0 {
+            return Err(surface::reject(Branch::CreateDepositNonPositive));
+        }
+        if start_time < now {
+            return Err(surface::reject(Branch::CreateStartTimeInPast));
+        }
+        if end_time <= start_time {
+            return Err(surface::reject(Branch::CreateInvalidTimeRange));
+        }
+        // The ordered range check above makes this subtraction safe.
+        let duration = end_time - start_time;
+        if duration > MAX_DURATION_SECONDS {
+            return Err(surface::reject(Branch::CreateDurationTooLong));
+        }
+        stream::validate_capacity(deposit_amount, duration)
+    }
+
+    /// Creates multiple streams atomically, authorizing the sender once and
+    /// grouping deposits into one token pull per token. Every item uses the
+    /// same validation and fee rules as `create_stream`; if any item is
+    /// invalid, the entire transaction (including transfers and state writes)
+    /// is rolled back. An empty input returns an empty vector without auth.
+    ///
+    /// Emits one `StreamsCreated` event containing all ids; individual
+    /// `FeeCharged` events are still emitted when fees apply.
+    pub fn create_streams(
+        env: Env,
+        sender: Address,
+        inputs: Vec<StreamInput>,
+    ) -> Result<Vec<u64>, StreamError> {
+        let mut ids = Vec::new(&env);
+        let count = inputs.len();
+        if count == 0 {
+            return Ok(ids);
+        }
+
+        sender.require_auth();
+
+        let now = env.ledger().timestamp();
+        let fee_bps = treasury::current_fee_bps(&env);
+        let mut pull_totals: Vec<(Address, i128)> = Vec::new(&env);
+        let mut fees = Vec::new(&env);
+        let mut index = 0;
+        while index < count {
+            let input = inputs.get(index).ok_or(StreamError::MathOverflow)?;
+            Self::validate_stream_creation(
+                now,
+                input.deposit_amount,
+                input.start_time,
+                input.end_time,
+            )?;
+
+            let fee = treasury::fee_amount(input.deposit_amount, fee_bps)?;
+            let pull_amount = input
+                .deposit_amount
+                .checked_add(fee)
+                .ok_or(StreamError::MathOverflow)?;
+            let mut token_index = 0;
+            let mut found = false;
+            while token_index < pull_totals.len() {
+                let (token, total) = pull_totals
+                    .get(token_index)
+                    .ok_or(StreamError::MathOverflow)?;
+                if token == input.token {
+                    pull_totals.set(
+                        token_index,
+                        (
+                            token,
+                            total
+                                .checked_add(pull_amount)
+                                .ok_or(StreamError::MathOverflow)?,
+                        ),
+                    );
+                    found = true;
+                    break;
+                }
+                token_index += 1;
+            }
+            if !found {
+                pull_totals.push_back((input.token, pull_amount));
+            }
+            fees.push_back(fee);
+            index += 1;
+        }
+
+        let first_id = stream::reserve_stream_ids(&env, count)?;
+        index = 0;
+        while index < count {
+            let id = first_id
+                .checked_add(index as u64)
+                .ok_or(StreamError::MathOverflow)?;
+            ids.push_back(id);
+            index += 1;
+        }
+
+        let contract_address = env.current_contract_address();
+        let mut token_index = 0;
+        while token_index < pull_totals.len() {
+            let (token, amount) = pull_totals
+                .get(token_index)
+                .ok_or(StreamError::MathOverflow)?;
+            TokenClient::new(&env, &token).transfer_from(
+                &contract_address,
+                &sender,
+                &contract_address,
+                &amount,
+            );
+            token_index += 1;
+        }
+
+        let mut index = 0;
+        while index < count {
+            let input = inputs.get(index).ok_or(StreamError::MathOverflow)?;
+            let id = ids.get(index).ok_or(StreamError::MathOverflow)?;
+            let fee = fees.get(index).ok_or(StreamError::MathOverflow)?;
+            let created = Stream {
+                id,
+                sender: sender.clone(),
+                recipient: input.recipient,
+                token: input.token,
+                deposit: input.deposit_amount,
+                withdrawn: 0,
+                start_time: input.start_time,
+                end_time: input.end_time,
+                cancelable: input.cancelable,
+                status: StreamStatus::Active,
+            };
+            stream::put_stream(&env, &created);
+            stream::index_stream(&env, &created);
+            if fee > 0 {
+                treasury::apply_fee(&env, &created.token, id, fee)?;
+                FeeCharged {
+                    stream_id: id,
+                    token: created.token.clone(),
+                    payer: sender.clone(),
+                    amount: fee,
+                    fee_bps,
+                }
+                .publish(&env);
+            }
+            index += 1;
+        }
+
+        StreamsCreated {
+            sender,
+            stream_ids: ids.clone(),
+        }
+        .publish(&env);
+
+        Ok(ids)
     }
 
     /// Withdraws up to `amount` of the accrued-but-unwithdrawn balance and

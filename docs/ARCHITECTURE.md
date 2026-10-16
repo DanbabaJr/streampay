@@ -10,7 +10,7 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 ┌────────────────────────────────────────────────────────────────────┐
 │                        StreamingPayments                           │
 │                                                                    │
-│  lib.rs      entrypoints: create_stream / withdraw / withdraw_max / │
+│  lib.rs      entrypoints: create_stream(s) / withdraw / withdraw_max /│
 │              cancel_stream / top_up / get_stream / available /      │
 │              recipient_streams / sender_streams / attach_metadata / │
 │              stream_attestations / attestation_count /              │
@@ -28,9 +28,10 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 │  treasury.rs protocol-fee math, per-token accounting, governor,    │
 │              verification scan (see §11)                           │
 │  errors.rs   StreamError — stable numeric codes, append-only       │
-│  events.rs   StreamCreated / Withdrawn / StreamCancelled /         │
-│              StreamToppedUp (stream_id as topic), FeeCharged       │
-│              (stream_id as topic), FeeWithdrawn (token as topic)   │
+│  events.rs   StreamCreated / Withdrawn / StreamCancelled /        │
+│              StreamToppedUp / FeeCharged (stream_id topic);        │
+│              StreamsCreated (sender topic), FeeWithdrawn          │
+│              (token topic)                                         │
 └──────────────────────────┬─────────────────────────────────────────┘
                            │ token interface (SAC-compatible)
                            ▼
@@ -73,10 +74,46 @@ Instead, discovery is **per-address**: `create_stream` appends the new id to
 the sender's and the recipient's own index lists — each bounded by that one
 user's activity, written only at creation, and paginated on read
 (`recipient_streams` / `sender_streams`, `limit` clamped to
-`MAX_PAGE_SIZE = 50`). The indexes are *advisory*: never authorize against
-them; the `Stream` entry is the source of truth, and `StreamCreated` events
-remain the complete audit trail (an external indexer can still rebuild or
-cross-check the lists).
+`MAX_PAGE_SIZE = 50`). `create_streams` reserves its contiguous id range with
+one counter write and groups token pulls by token; stream records and address
+indexes remain per stream. The indexes are *advisory*: never authorize against
+them; the `Stream` entry is the source of truth. A single-stream call emits
+`StreamCreated`; a batch emits one `StreamsCreated` event listing its ids.
+Fee-enabled batches retain one `FeeCharged` event per charged stream, keeping
+the fee ledger independently auditable.
+
+### Storage layout decision & read/write profiling
+
+A gas optimization evaluation (`scripts/benchmark_storage.sh`, benchmark harness at `contracts/streaming-payments/examples/storage_benchmark.rs`) profiled resource consumption across stream lifecycle operations and evaluated splitting hot mutable fields (`withdrawn`, `status`) from cold immutable fields (`sender`, `recipient`, `token`, `deposit`, `start_time`, `end_time`, `cancelable`).
+
+#### Lifecycle Resource Costs (Monolithic Layout)
+
+| Operation | Type | Storage Footprint | CPU Instructions | Memory (Bytes) |
+|---|---|---|---:|---:|
+| `create_stream` | Write | 1 Stream + 2 Indexes | 509,718 | 201,404 |
+| `get_stream` | Read | 1 Stream Entry | 61,239 | 38,379 |
+| `available` | Read | 1 Stream Entry | 54,361 | 37,727 |
+| `withdraw` | RMW | 1 Stream Entry | 333,895 | 135,533 |
+| `top_up` | RMW | 1 Stream Entry | 419,382 | 159,563 |
+| `cancel_stream` | RMW | 1 Stream Entry | 504,711 | 167,915 |
+| `withdraw_max` | RMW | 1 Stream Entry | 330,953 | 131,167 |
+
+#### Architecture Comparison: Monolithic vs Split (Hot/Cold)
+
+| Storage Pattern | Entry Count | Keys Written/Read | CPU Instructions | Memory (Bytes) |
+|---|:---:|:---:|---:|---:|
+| Monolithic `Stream` Write | 1 | 1 key | 54,004 | 39,817 |
+| Split (Cold + Hot) Write | 2 | 2 keys | 90,988 *(+68.5%)* | 57,315 |
+| Monolithic `Stream` Read | 1 | 1 key | 45,094 | 34,207 |
+| Split Read (Both: required by `withdraw`/`cancel`) | 2 | 2 keys | 71,030 *(+57.5%)* | 47,314 |
+| Split Read (Hot-only: status check) | 1 | 1 key | 39,009 | 25,013 |
+
+#### Storage Layout Decision & Negative Result
+
+1. **Monolithic Layout Retained:** Stream state remains in a single `DataKey::Stream(u64)` persistent entry (~188 bytes XDR).
+2. **Negative Result for Hot/Cold Splitting:** In Soroban's storage and metering architecture, ledger entry overhead, storage keys, and per-entry footprint fees heavily outweigh minor payload byte differences. Every mutating entrypoint (`withdraw`, `withdraw_max`, `cancel_stream`, `top_up`) strictly requires both configuration fields (token, deposit, window, recipient/sender authorization) and state fields (`withdrawn`, `status`). Splitting state forces two ledger reads and one write across two keys, incurring a **+57.5% CPU read penalty** and a **+68.5% CPU write penalty** without saving gas on any mutation path.
+3. **Double-Read Elimination:** The contract avoids double reads in `withdraw`: `authorize_withdrawal` loads `s` once and passes `&mut s` directly to `pay_out`, preventing redundant re-reads.
+
 
 **Attestations** follow the same pattern. `attach_metadata` appends one
 `Attestation` (a 32-byte content hash, a byte length bounded `tag`, an attester,
@@ -131,6 +168,7 @@ nothing has accrued, at `now ≥ end_time` the full duration has elapsed.
 | Action | who may call | auth consumed |
 |---|---|---|
 | `create_stream` | anyone; `sender` must authorize | sender |
+| `create_streams` | anyone; `sender` must authorize once for the batch | sender |
 | `withdraw` | recipient only | recipient |
 | `cancel_stream` | sender always; recipient iff `cancelable` | caller |
 | `top_up` | sender only | sender |
@@ -154,9 +192,9 @@ happen **before** the token transfers:
   emit `Withdrawn`, *then* `token.transfer`.
 - `cancel_stream`: set `Cancelled`, record the payout as withdrawn, emit
   `StreamCancelled`, *then* the two transfers.
-- `create_stream` / `top_up`: pull tokens first, persist after — if a
-  reentrant callback abused the transfer-in, the persisted state still
-  reconciles with the balance (invariant below).
+- `create_stream` / `create_streams` / `top_up`: pull tokens before persisting
+  stream records — if a reentrant callback abused the transfer-in, the
+  persisted state still reconciles with the balance (invariant below).
 
 Additionally, `withdraw` and `cancel_stream` re-read `status` after auth: a
 malicious token contract that reenters `withdraw` during its own transfer
@@ -289,6 +327,12 @@ or off-chain UX.
   append-not-overwrite on repeated attestation, oversized-tag and per-stream-cap
   rejection, non-party / unknown-stream / missing-auth rejection, event payload,
   and the paginated per-stream and per-party reads.
+  a Soroban host: bounds (`0 <= result <= deposit`), exact floor-ratio
+  reference comparison, monotonicity in elapsed time, full-duration exactness
+  (`streamed_at(d, dur, dur) == d` for admissible pairs), and no panics for
+  arbitrary inputs (including negative deposits and zero duration where
+  the function returns `Ok(0)` or `Err(MathOverflow)`). CI runs a scheduled
+  session (`fuzz.yml`, non-blocking); any crash becomes a regression unit test.
 - **Error surface** (`error_surface_test.rs`): the branch registry in
   `surface.rs` is walked by generated tests — one probe per branch asserts the
   exact branch fires its declared code — plus coverage tests proving no code is
@@ -316,8 +360,10 @@ or off-chain UX.
   budget, likely `try_create_batch` with per-item results.
 - Gas optimization pass on storage reads — `cancel_stream` does one
   read-modify-write; a `Stream` split into hot/cold fields could shave bytes.
-- Event indexer service — TypeScript worker polling `getEvents` per topic
-  `stream_id`, materializing stream history for the UI.
+- Event indexer & reconciler services — TypeScript workers polling `getEvents` per topic
+  `stream_id`, materializing stream history for the UI, and continuously auditing on-chain truth.
+  Instrumented with Prometheus metrics, Grafana dashboards, and alert rules (see [`infra/observability`](../infra/observability/README.md)
+  and [`docs/RUNBOOK.md`](./RUNBOOK.md)).
 - Contract-side TTL maintenance — extend `NextStreamId`, the instance entry and
   the code entry from inside the contract (or from the deploy path) instead of
   relying on the external sentinel. Costs rent on the write path but removes

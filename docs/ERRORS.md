@@ -13,13 +13,15 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 3 | `NotStreamRecipient` | **retired** (unreachable) | — | Reserved role check from the original draft. Recipient-only actions require the recipient's authorization (`require_auth`) and use `NotAuthorized` (#12) for business-rule rejections, so this variant is never returned. Retained for wire compatibility. |
 | 4 | `StreamNotCancellable` | reachable (1 branch(es)) | `cancel_stream` | the recipient calls cancel_stream on a stream created non-cancelable |
 | 5 | `StreamNotActive` | reachable (1 branch(es)) | `cancel_stream`, `top_up`, `withdraw`, `withdraw_max` | the stream status is Cancelled or Depleted |
-| 6 | `StartTimeInPast` | reachable (1 branch(es)) | `create_stream` | start_time is before the current ledger timestamp |
-| 7 | `InvalidTimeRange` | reachable (1 branch(es)) | `create_stream` | end_time is not strictly after start_time (zero or negative duration) |
-| 8 | `DurationTooLong` | reachable (1 branch(es)) | `create_stream` | duration exceeds MAX_DURATION_SECONDS (100 years) |
-| 9 | `ZeroAmount` | reachable (4 branch(es)) | `create_stream`, `top_up`, `withdraw`, `withdraw_treasury` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative; treasury withdrawal amount is zero or negative |
+| 6 | `StartTimeInPast` | reachable (1 branch(es)) | `create_stream`, `create_streams` | start_time is before the current ledger timestamp |
+| 7 | `InvalidTimeRange` | reachable (1 branch(es)) | `create_stream`, `create_streams` | end_time is not strictly after start_time (zero or negative duration) |
+| 8 | `DurationTooLong` | reachable (1 branch(es)) | `create_stream`, `create_streams` | duration exceeds MAX_DURATION_SECONDS (100 years) |
+| 9 | `ZeroAmount` | reachable (4 branch(es)) | `create_stream`, `create_streams`, `top_up`, `withdraw`, `withdraw_treasury` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative; treasury withdrawal amount is zero or negative |
 | 10 | `AmountExceedsAvailable` | reachable (1 branch(es)) | `withdraw` | amount exceeds the accrued-but-unwithdrawn balance |
 | 11 | `MathOverflow` | reachable (6 branch(es)) | `available`, `cancel_stream`, `create_stream`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128 |
 | 12 | `NotAuthorized` | reachable (2 branch(es)) | `attach_metadata`, `cancel_stream` | the caller is neither the sender nor the recipient; the attester is neither the stream's sender nor its recipient |
+| 11 | `MathOverflow` | reachable (6 branch(es)) | `available`, `cancel_stream`, `create_stream`, `create_streams`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128 |
+| 12 | `NotAuthorized` | reachable (1 branch(es)) | `cancel_stream` | the caller is neither the sender nor the recipient |
 | 13 | `NothingToWithdraw` | reachable (1 branch(es)) | `withdraw_max` | nothing has accrued yet, or everything accrued was already withdrawn |
 | 18 | `MetadataTagTooLong` | reachable (1 branch(es)) | `attach_metadata` | the tag exceeds MAX_TAG_LEN (32) bytes |
 | 19 | `MetadataLimitReached` | reachable (1 branch(es)) | `attach_metadata` | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations |
@@ -32,10 +34,10 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 
 | Branch | Entrypoint(s) | Error | Code | Condition | Reachability |
 | --- | --- | --- | ---: | --- | --- |
-| `CreateDepositNonPositive` | `create_stream` | `ZeroAmount` | 9 | deposit_amount is zero or negative | reachable |
-| `CreateStartTimeInPast` | `create_stream` | `StartTimeInPast` | 6 | start_time is before the current ledger timestamp | reachable |
-| `CreateInvalidTimeRange` | `create_stream` | `InvalidTimeRange` | 7 | end_time is not strictly after start_time (zero or negative duration) | reachable |
-| `CreateDurationTooLong` | `create_stream` | `DurationTooLong` | 8 | duration exceeds MAX_DURATION_SECONDS (100 years) | reachable |
+| `CreateDepositNonPositive` | `create_stream`, `create_streams` | `ZeroAmount` | 9 | deposit_amount is zero or negative | reachable |
+| `CreateStartTimeInPast` | `create_stream`, `create_streams` | `StartTimeInPast` | 6 | start_time is before the current ledger timestamp | reachable |
+| `CreateInvalidTimeRange` | `create_stream`, `create_streams` | `InvalidTimeRange` | 7 | end_time is not strictly after start_time (zero or negative duration) | reachable |
+| `CreateDurationTooLong` | `create_stream`, `create_streams` | `DurationTooLong` | 8 | duration exceeds MAX_DURATION_SECONDS (100 years) | reachable |
 | `WithdrawAmountNonPositive` | `withdraw` | `ZeroAmount` | 9 | withdraw amount is zero or negative | reachable |
 | `WithdrawAmountExceedsAvailable` | `withdraw` | `AmountExceedsAvailable` | 10 | amount exceeds the accrued-but-unwithdrawn balance | reachable |
 | `WithdrawMaxNothingToWithdraw` | `withdraw_max` | `NothingToWithdraw` | 13 | nothing has accrued yet, or everything accrued was already withdrawn | reachable |
@@ -48,7 +50,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `AttachMetadataLimitReached` | `attach_metadata` | `MetadataLimitReached` | 19 | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations | reachable |
 | `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
 | `StreamNotActive` | `withdraw`, `withdraw_max`, `cancel_stream`, `top_up` | `StreamNotActive` | 5 | the stream status is Cancelled or Depleted | reachable |
-| `CapacityOverflow` | `create_stream`, `top_up` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |
+| `CapacityOverflow` | `create_stream`, `create_streams`, `top_up` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |
 | `RateProductOverflow` | `streamed_at`, `available`, `withdraw`, `withdraw_max`, `cancel_stream` | `MathOverflow` | 11 | deposit * elapsed would overflow u128 | reachable |
 | `AvailableBalanceOverflow` | `available`, `withdraw`, `withdraw_max` | `MathOverflow` | 11 | withdrawn exceeds streamed (an invariant-violating stored stream) | defensive (unreachable) |
 | `CancelSplitOverflow` | `cancel_stream` | `MathOverflow` | 11 | the cancel pro-rata split would underflow | defensive (unreachable) |

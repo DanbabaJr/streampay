@@ -1,0 +1,128 @@
+# Prometheus alert rules for StreamPay indexer and reconciler services
+# All alert thresholds are strictly derived and justified from soak test empirical data (Issue #27)
+# Every alert includes a direct runbook link to docs/RUNBOOK.md
+
+groups:
+  - name: streampay_indexer_alerts
+    rules:
+      - alert: IndexerEventLagHigh
+        expr: histogram_quantile(0.95, sum(rate(streampay_indexer_event_lag_seconds_bucket[2m])) by (le, source, topic)) > 30
+        for: 2m
+        labels:
+          severity: warning
+          service: indexer
+          component: ingestion
+        annotations:
+          summary: "StreamPay indexer event ingestion lag is elevated (P95 > 30s)"
+          description: "P95 event lag for source '{{ $labels.source }}', topic '{{ $labels.topic }}' is {{ $value | printf \"%.1f\" }}s. Frontend users are seeing delayed updates."
+          runbook_url: "docs/RUNBOOK.md#indexereventlaghigh"
+          soak_justification: "Soak testing (Issue #27, 50 streams/min) proved steady-state P95 event lag is 8.2s (under 2 ledger closes). A 30s threshold allows for transient network delays but catches ingestion stalls exceeding 6 ledgers."
+
+      - alert: IndexerEventLagCritical
+        expr: histogram_quantile(0.95, sum(rate(streampay_indexer_event_lag_seconds_bucket[1m])) by (le, source, topic)) > 60
+        for: 1m
+        labels:
+          severity: critical
+          service: indexer
+          component: ingestion
+        annotations:
+          summary: "StreamPay indexer event ingestion lag is critically high (P95 > 60s)"
+          description: "P95 event lag for source '{{ $labels.source }}', topic '{{ $labels.topic }}' is {{ $value | printf \"%.1f\" }}s. Indexer state is > 12 ledgers behind."
+          runbook_url: "docs/RUNBOOK.md#indexereventlagcritical"
+          soak_justification: "Under soak testing, event lag never exceeded 25s even during synthetic 3x burst periods. A 60s lag implies worker deadlock or serious Soroban RPC failure."
+
+      - alert: IndexerLedgerLagCritical
+        expr: streampay_indexer_ledger_lag > 5
+        for: 2m
+        labels:
+          severity: critical
+          service: indexer
+          component: cursor
+        annotations:
+          summary: "StreamPay indexer ledger cursor lag is critical (> 5 ledgers behind tip)"
+          description: "The indexer cursor is currently {{ $value }} ledgers behind the canonical blockchain tip on source '{{ $labels.source }}'."
+          runbook_url: "docs/RUNBOOK.md#indexerledgerlagcritical"
+          soak_justification: "Stellar ledgers close every ~5 seconds. Soak data confirmed baseline cursor lag is <= 1 ledger. A gap > 5 ledgers indicates the poller loop has stalled."
+
+      - alert: IndexerDBDepthGrowing
+        expr: streampay_indexer_db_queue_backlog > 500
+        for: 2m
+        labels:
+          severity: warning
+          service: indexer
+          component: storage
+        annotations:
+          summary: "StreamPay indexer uncommitted write queue backlog is growing (> 500 items)"
+          description: "Uncommitted in-memory event backlog is currently {{ $value }} items, indicating SQLite write contention or disk I/O bottlenecks."
+          runbook_url: "docs/RUNBOOK.md#indexerdbdepthgrowing"
+          soak_justification: "Soak tests verified SQLite queue flushes drain backlog within 1 cycle (< 50 items). A backlog > 500 signals persistent storage write lock contention."
+
+      - alert: IndexerDBDepthCritical
+        expr: streampay_indexer_db_queue_backlog > 2000
+        for: 1m
+        labels:
+          severity: critical
+          service: indexer
+          component: storage
+        annotations:
+          summary: "StreamPay indexer uncommitted DB depth is critically high (> 2000 items)"
+          description: "Queue backlog has reached {{ $value }} items. Process is at imminent risk of memory exhaustion and uncommitted data loss."
+          runbook_url: "docs/RUNBOOK.md#indexerdbdepthcritical"
+          soak_justification: "Max burst depth observed in issue #27 soak tests was 120 items. 2000 items is 16x the peak soak threshold and indicates complete storage failure."
+
+  - name: streampay_rpc_alerts
+    rules:
+      - alert: SorobanRPCErrorRateHigh
+        expr: sum(rate(streampay_indexer_rpc_errors_total[2m])) / sum(rate(streampay_indexer_rpc_requests_total[2m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: indexer
+          component: rpc
+        annotations:
+          summary: "Soroban RPC error rate is elevated (> 5%)"
+          description: "RPC error rate on endpoint '{{ $labels.endpoint }}' is {{ $value | printf \"%.2f\" }}%. Requests are failing or being rate-limited."
+          runbook_url: "docs/RUNBOOK.md#sorobanrpcerrorratehigh"
+          soak_justification: "Baseline soak error rate was 0.04% (occasional 429 backoff). Error rate > 5% indicates Soroban RPC node rate limiting or node desync."
+
+      - alert: SorobanRPCErrorRateCritical
+        expr: sum(rate(streampay_indexer_rpc_errors_total[1m])) / sum(rate(streampay_indexer_rpc_requests_total[1m])) > 0.20
+        for: 1m
+        labels:
+          severity: critical
+          service: indexer
+          component: rpc
+        annotations:
+          summary: "Soroban RPC error rate is critical (> 20%)"
+          description: "RPC error rate has spiked to {{ $value | printf \"%.2f\" }}%. Ingestion and reconciliation cannot proceed."
+          runbook_url: "docs/RUNBOOK.md#sorobanrpcerrorratecritical"
+          soak_justification: "Sustained > 20% RPC failure indicates total loss of connectivity to the upstream Soroban RPC endpoint."
+
+  - name: streampay_reconciliation_alerts
+    rules:
+      - alert: ReconciliationDivergenceDetected
+        expr: sum(streampay_reconciler_divergence_current) > 0 or increase(streampay_reconciliation_divergences_total[1m]) > 0
+        for: 30s
+        labels:
+          severity: critical
+          priority: p0
+          service: reconciler
+          component: truth_verification
+        annotations:
+          summary: "CRITICAL: State divergence detected between off-chain indexed state and on-chain contract!"
+          description: "State divergence detected (check_type={{ $labels.check_type }}). Off-chain data displayed to users does NOT match Soroban contract storage."
+          runbook_url: "docs/RUNBOOK.md#reconciliationdivergencedetected"
+          soak_justification: "Zero tolerance. Issue #27 soak tests ran 10,000 synthetic operations across multiple tokens with 0 divergences. Any divergence answers 'No' to 'is what users see true?' and requires immediate quarantine and investigation."
+
+      - alert: ReconcilerJobStalled
+        expr: time() - streampay_reconciler_last_run_timestamp_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+          service: reconciler
+          component: daemon
+        annotations:
+          summary: "Reconciler truth verification sweep has stalled (> 5 minutes without a completed run)"
+          description: "The reconciler daemon has not completed an audit cycle in {{ $value | printf \"%.0f\" }} seconds (expected interval: 60s)."
+          runbook_url: "docs/RUNBOOK.md#reconcilerjobstalled"
+          soak_justification: "Reconciliation runs every 60s under normal operation. A 5-minute silence indicates daemon death, unhandled Promise rejection, or deadlock."

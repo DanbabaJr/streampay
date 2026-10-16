@@ -1,0 +1,22 @@
+{
+  "name": "streampay-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event indexer service for StreamPay Soroban contract with Prometheus metrics",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "dev": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

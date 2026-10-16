@@ -42,7 +42,7 @@ A stream is a half-open window `[start_time, end_time)`. At any ledger timestamp
 ┌─────────────────────────────────────────────────────────────┐
 │                  StreamingPayments (Soroban)                 │
 │                                                              │
-│  create_stream ─┐   withdraw ─┐   top_up ─┐   cancel_stream  │
+│  create_stream(s)┐  withdraw ─┐   top_up ─┐   cancel_stream  │
 │                 │             │            │        │        │
 │            ┌────┴─────────────┴────────────┴────────┴────┐   │
 │            │  Stream { sender, recipient, token,         │   │
@@ -59,11 +59,14 @@ Deep dive (storage model, checked math, reentrancy, TTL strategy, design decisio
 
 Incident response drills and procedures: [`docs/INCIDENT_RUNBOOK.md`](./docs/INCIDENT_RUNBOOK.md).
 
+Metrics, alerting stack, and operational diagnosis: [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) and [`infra/observability`](./infra/observability/README.md).
+
 ## Contract API
 
 | Function | Caller | Moves tokens | Emits |
 |---|---|---|---|
 | `create_stream(sender, recipient, token, deposit, start, end, cancelable) → u64` | anyone (sender auth required) | pulls deposit in | `StreamCreated` |
+| `create_streams(sender, inputs: Vec<StreamInput>) → Vec<u64>` | anyone (sender auth required) | one pull per token | `StreamsCreated`; `FeeCharged` per charged stream |
 | `withdraw(stream_id, amount)` | recipient | pays out ≤ accrued | `Withdrawn` |
 | `withdraw_max(stream_id) → i128` | recipient | pays out all accrued, atomically | `Withdrawn` |
 | `cancel_stream(caller, stream_id)` | sender; recipient iff `cancelable` | pro-rata split, atomic | `StreamCancelled` |
@@ -94,8 +97,15 @@ of the document they hold and compares. See
 | `verify_treasury(token, start_id, count) → FeeScan` | — (read-only) | — | — |
 | `total_streams() → u64` | — (read-only) | — | — |
 
-`create_stream` also emits `FeeCharged` when a protocol fee applies — see
-[Protocol fees](#protocol-fees-optional) below.
+`create_stream` emits `FeeCharged` when a protocol fee applies. `create_streams`
+validates and creates the full batch atomically: if one input fails, none of
+the streams or token transfers are committed. Empty batches are no-ops. Each
+batch reserves contiguous ids in one write and groups the deposit pulls by
+token. It emits one `StreamsCreated` event containing the new ids instead of
+individual `StreamCreated` events; fee-enabled batches still emit one
+`FeeCharged` event per charged stream to preserve treasury auditability — see
+[Protocol fees](#protocol-fees-optional) below. Soroban transaction resource
+limits bound the practical maximum batch size.
 
 `recipient_streams` / `sender_streams` are on-chain discovery indexes:
 append-only, creation-ordered stream-id lists per address, paginated
@@ -207,6 +217,10 @@ scripts/                        deploy_testnet.sh + the release/promotion pipeli
 scripts/verify-fees.ts          public fee-ledger audit (anyone can run, no keys)
 deployments/                    append-only promotion records + interface baselines
 infra/ttl-sentinel/             storage TTL + rent sentinel (scan, alerts, optional funded extender)
+infra/observability/            Prometheus + Grafana dashboards + Alertmanager compose/kustomize bundle
+infra/indexer/                  event indexer service with Prometheus metrics & fault injection
+infra/reconciler/               continuous state reconciler and truth verification daemon
+docs/RUNBOOK.md                 operational diagnosis runbook for all alert rules
 docs/ARCHITECTURE.md            design deep-dive
 docs/DEPLOY_PIPELINE.md         sandbox → testnet → mainnet-canary promotion design
 docs/CANARY_RUNBOOK.md          mainnet canary + rollback procedure

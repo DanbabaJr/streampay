@@ -1,0 +1,35 @@
+{
+  "name": "streampay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace-level scripts exposing every workflow step for contributors.",
+  "scripts": {
+    "test":        "cargo test -p streampay-contract --locked",
+    "test:fuzz":   "echo 'Run fuzz targets manually: cd fuzz && cargo +nightly fuzz run <target>'",
+
+    "lint":        "cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings",
+    "lint:fix":    "cargo fmt --all",
+
+    "build":       "npm run build:contract && npm run build:frontend",
+    "build:contract": "cd contracts/streaming-payments && stellar contract build",
+    "build:frontend": "cd frontend && npm run build",
+
+    "deploy":      "bash scripts/deploy_testnet.sh",
+    "deploy:local": "bash scripts/seed-local.sh",
+
+    "seed":        "bash scripts/seed-local.sh",
+
+    "dev":         "cd frontend && npm run dev",
+
+    "typecheck":   "cd frontend && npm run typecheck",
+    "audit":       "cd frontend && npm audit --omit=dev --audit-level=high",
+
+    "errors:check": "cargo run -p streampay-contract --example error_surface_doc && git diff --exit-code docs/ERRORS.md",
+    "errors:regen": "cargo run -p streampay-contract --example error_surface_doc",
+
+    "matrix": "npm run lint && npm run test && npm run build:contract && npm run build:frontend && npm run typecheck && npm run audit && npm run errors:check",
+
+    "ci:contract": "npm run lint && npm run test && npm run build:contract && npm run errors:check",
+    "ci:frontend": "npm run build:frontend && npm run typecheck && npm run audit"
+  }
+}
