@@ -107,12 +107,12 @@ const STREAM_ERRORS: Record<number, string> = {
   11: "MathOverflow",
   12: "NotAuthorized",
   13: "NothingToWithdraw",
-  14: "MetadataTagTooLong",
-  15: "MetadataLimitReached",
   14: "FeeRateTooHigh",
   15: "NotGovernor",
   16: "NoPendingGovernor",
   17: "InsufficientTreasuryBalance",
+  18: "MetadataTagTooLong",
+  19: "MetadataLimitReached",
 };
 
 /** Rewrites raw simulation/tx error text into a readable StreamError name. */

@@ -70,9 +70,9 @@ topic, so an indexer can follow attestations without polling storage.
 
 - `content_hash` is exactly 32 bytes.
 - `tag` is at most `MAX_TAG_LEN = 32` bytes (UTF-8); longer is rejected with
-  `MetadataTagTooLong` (#14).
+  `MetadataTagTooLong` (#18).
 - A stream holds at most `MAX_ATTESTATIONS_PER_STREAM = 32` attestations;
-  further attaches are rejected with `MetadataLimitReached` (#15). Attaching
+  further attaches are rejected with `MetadataLimitReached` (#19). Attaching
   never overwrites, so the cap is what bounds per-stream growth.
 - Reads paginate with `limit` clamped to `MAX_PAGE_SIZE = 50`.
 

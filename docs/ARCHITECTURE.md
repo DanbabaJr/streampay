@@ -214,8 +214,8 @@ the public interface:
 | 11 | `MathOverflow` | a checked computation would overflow |
 | 12 | `NotAuthorized` | caller is neither sender nor (cancelable) recipient |
 | 13 | `NothingToWithdraw` | `withdraw_max` with an empty accrued balance |
-| 14 | `MetadataTagTooLong` | `attach_metadata` tag exceeds `MAX_TAG_LEN` (32 bytes) |
-| 15 | `MetadataLimitReached` | `attach_metadata` on a stream already holding `MAX_ATTESTATIONS_PER_STREAM` (32) |
+| 18 | `MetadataTagTooLong` | `attach_metadata` tag exceeds `MAX_TAG_LEN` (32 bytes) |
+| 19 | `MetadataLimitReached` | `attach_metadata` on a stream already holding `MAX_ATTESTATIONS_PER_STREAM` (32) |
 
 | 14 | `FeeRateTooHigh` | `set_fee_bps` above `MAX_FEE_BPS` |
 | 15 | `NotGovernor` | non-governor calls a governor-gated function (also: non-nominee `accept_governor`) |

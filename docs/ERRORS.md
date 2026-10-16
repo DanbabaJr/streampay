@@ -21,8 +21,8 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 11 | `MathOverflow` | reachable (6 branch(es)) | `available`, `cancel_stream`, `create_stream`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128 |
 | 12 | `NotAuthorized` | reachable (2 branch(es)) | `attach_metadata`, `cancel_stream` | the caller is neither the sender nor the recipient; the attester is neither the stream's sender nor its recipient |
 | 13 | `NothingToWithdraw` | reachable (1 branch(es)) | `withdraw_max` | nothing has accrued yet, or everything accrued was already withdrawn |
-| 14 | `MetadataTagTooLong` | reachable (1 branch(es)) | `attach_metadata` | the tag exceeds MAX_TAG_LEN (32) bytes |
-| 15 | `MetadataLimitReached` | reachable (1 branch(es)) | `attach_metadata` | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations |
+| 18 | `MetadataTagTooLong` | reachable (1 branch(es)) | `attach_metadata` | the tag exceeds MAX_TAG_LEN (32) bytes |
+| 19 | `MetadataLimitReached` | reachable (1 branch(es)) | `attach_metadata` | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations |
 | 14 | `FeeRateTooHigh` | reachable (1 branch(es)) | `set_fee_bps` | new_fee_bps exceeds MAX_FEE_BPS (the protocol cap) |
 | 15 | `NotGovernor` | reachable (2 branch(es)) | `accept_governor`, `nominate_governor`, `set_fee_bps`, `withdraw_treasury` | the caller is not the treasury governor; the caller is not the nominated governor |
 | 16 | `NoPendingGovernor` | reachable (1 branch(es)) | `accept_governor` | accept_governor with no nomination pending |
@@ -44,8 +44,8 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `TopUpAmountNonPositive` | `top_up` | `ZeroAmount` | 9 | top-up amount is zero or negative | reachable |
 | `TopUpDepositOverflow` | `top_up` | `MathOverflow` | 11 | deposit + amount would overflow i128 | reachable |
 | `AttachMetadataNotAuthorized` | `attach_metadata` | `NotAuthorized` | 12 | the attester is neither the stream's sender nor its recipient | reachable |
-| `AttachMetadataTagTooLong` | `attach_metadata` | `MetadataTagTooLong` | 14 | the tag exceeds MAX_TAG_LEN (32) bytes | reachable |
-| `AttachMetadataLimitReached` | `attach_metadata` | `MetadataLimitReached` | 15 | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations | reachable |
+| `AttachMetadataTagTooLong` | `attach_metadata` | `MetadataTagTooLong` | 18 | the tag exceeds MAX_TAG_LEN (32) bytes | reachable |
+| `AttachMetadataLimitReached` | `attach_metadata` | `MetadataLimitReached` | 19 | the stream already holds MAX_ATTESTATIONS_PER_STREAM (32) attestations | reachable |
 | `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
 | `StreamNotActive` | `withdraw`, `withdraw_max`, `cancel_stream`, `top_up` | `StreamNotActive` | 5 | the stream status is Cancelled or Depleted | reachable |
 | `CapacityOverflow` | `create_stream`, `top_up` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |

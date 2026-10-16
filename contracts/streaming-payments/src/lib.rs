@@ -59,11 +59,11 @@ use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, BytesN, E
 use surface::Branch;
 
 pub use errors::StreamError;
-pub use events::{MetadataAttached, StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn};
-pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
 pub use events::{
-    FeeCharged, FeeWithdrawn, StreamCancelled, StreamCreated, StreamToppedUp, Withdrawn,
+    FeeCharged, FeeWithdrawn, MetadataAttached, StreamCancelled, StreamCreated, StreamToppedUp,
+    Withdrawn,
 };
+pub use metadata::{Attestation, AttestationRef, MAX_ATTESTATIONS_PER_STREAM, MAX_TAG_LEN};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{streamed_at, Stream, StreamStatus, MAX_DURATION_SECONDS, MAX_PAGE_SIZE};
@@ -528,6 +528,8 @@ impl StreamingPayments {
         limit: u32,
     ) -> Vec<AttestationRef> {
         metadata::page_party_attestations(&env, &party, offset, limit)
+    }
+
     // ------------------------------------------------------------ treasury --
     //
     // The optional protocol-fee layer: configuration (governor-gated),

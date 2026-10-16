@@ -72,6 +72,8 @@ pub struct MetadataAttached {
     pub content_hash: BytesN<32>,
     pub tag: String,
     pub timestamp: u64,
+}
+
 /// Emitted exactly once per funded stream that owes a protocol fee, in the
 /// same transaction as (and immediately after) `StreamCreated`. Keyed by
 /// `stream_id` so fee history is auditable per stream; the stream's stored

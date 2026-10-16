@@ -21,8 +21,9 @@ use soroban_sdk::{testutils::Address as _, BytesN, String as SdkString};
 use crate::stream::streamed_at;
 use crate::surface::{trace, Branch, Reachability, RETIRED_CODES};
 use crate::test::Fixture;
-use crate::{StreamError, MAX_ATTESTATIONS_PER_STREAM, MAX_DURATION_SECONDS, MAX_TAG_LEN};
-use crate::{StreamError, MAX_DURATION_SECONDS, MAX_FEE_BPS};
+use crate::{
+    StreamError, MAX_ATTESTATIONS_PER_STREAM, MAX_DURATION_SECONDS, MAX_FEE_BPS, MAX_TAG_LEN,
+};
 
 const DAY: u64 = 24 * 60 * 60;
 const DEPOSIT: i128 = 10_000_000_000;
@@ -412,7 +413,7 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::NothingToWithdraw
             | StreamError::MetadataTagTooLong
             | StreamError::MetadataLimitReached => StreamError::ALL.contains(&e),
-            | StreamError::FeeRateTooHigh
+            StreamError::FeeRateTooHigh
             | StreamError::NotGovernor
             | StreamError::NoPendingGovernor
             | StreamError::InsufficientTreasuryBalance => StreamError::ALL.contains(&e),

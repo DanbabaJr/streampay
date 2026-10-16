@@ -52,10 +52,11 @@ pub enum StreamError {
     NotAuthorized = 12,
     /// `withdraw_max` found nothing accrued-but-unwithdrawn to pay out.
     NothingToWithdraw = 13,
-    /// A metadata attestation tag exceeds `MAX_TAG_LEN` bytes.
-    MetadataTagTooLong = 14,
+    /// A metadata attestation tag exceeds `MAX_TAG_LEN` bytes. Appended after
+    /// the treasury codes (1–17), per the append-only code policy.
+    MetadataTagTooLong = 18,
     /// A stream has reached `MAX_ATTESTATIONS_PER_STREAM` attestations.
-    MetadataLimitReached = 15,
+    MetadataLimitReached = 19,
     /// The requested fee rate exceeds the protocol cap (`MAX_FEE_BPS`).
     FeeRateTooHigh = 14,
     /// The caller is not the treasury governor.
