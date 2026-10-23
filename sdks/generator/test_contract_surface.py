@@ -88,6 +88,31 @@ class SpecCoverageTest(unittest.TestCase):
         recorded = guard.FINGERPRINT_PATH.read_text().strip()
         self.assertEqual(recorded, guard.fingerprint(self.spec))
 
+    def test_payload_enum_variants_keep_their_field_types(self) -> None:
+        """A tuple variant is part of the surface; dropping it breaks clients."""
+        action = next(
+            (enum for enum in self.spec["enums"] if enum["name"] == "GovernanceAction"),
+            None,
+        )
+        self.assertIsNotNone(action, "GovernanceAction is missing from the spec")
+        cases = {case["name"]: case for case in action["cases"]}
+        self.assertEqual(cases["SetFeeBps"]["types"], ["u32"])
+        self.assertEqual(
+            cases["SetStreamPolicy"]["types"],
+            [{"option": "address"}, "StreamPolicy"],
+        )
+        self.assertNotIn("types", cases["ExecuteUpgrade"])
+
+    def test_doc_attributes_are_visible_to_the_parser(self) -> None:
+        """Docs live behind `cfg_attr(..., doc = "...")`, often multi-line."""
+        self.assertEqual(
+            guard.normalize_docs(
+                '    #[cfg_attr(\n        not(target_family = "wasm"),\n'
+                '        doc = " text"\n    )]\n    Variant,\n'
+            ),
+            "    /// text\n    Variant,\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

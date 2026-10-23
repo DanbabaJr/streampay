@@ -1,7 +1,7 @@
 {
   "schema": "streampay-vector/v1",
   "name": "withdraw",
-  "specFingerprint": "4ac29f10165deaaa63443f63ceef34c5981c21cad8449b2d61cc2d83192f7cef",
+  "specFingerprint": "f01ec1e4dd08962870218c378485bac1286ddce0bf1c50c2e363e3933fa65e61",
   "provenance": "Withdrawn payload from contracts/streaming-payments/test_snapshots/test/withdraw_max_emits_withdrawn_event.1.json.",
   "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAId2l0aGRyYXcAAAACAAAABQAAAAAAAAABAAAACgAAAAAAAAAAAAAAADuaygAAAAAAAAAAAAAAAAEURtIsAAAAQC11XrNQyVqsailHufbITw2NxCvoiMVve3eZwdLSGJbPXKHXvEADYuv4qz+lpSIp12RDBQjD8stFCXezNmQfhQ4=",
   "resultXdr": "AAAAAQ==",

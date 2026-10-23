@@ -59,6 +59,16 @@ def jsdoc(doc: str, indent: str = "") -> str:
     return f"{indent}/**\n{body}\n{indent} */\n"
 
 
+def enum_has_payload(enum: dict) -> bool:
+    """True when any variant carries values (a Rust tuple variant).
+
+    soroban-sdk encodes every ``#[contracttype]`` enum as a vector: the variant
+    name as a ``Symbol`` followed by the variant's values. Unit variants (and
+    all variants of an enum with no payloads) are a one-element vector.
+    """
+    return any(case.get("types") for case in enum["cases"])
+
+
 # --------------------------------------------------------------------------- #
 # Type mapping                                                                #
 # --------------------------------------------------------------------------- #
@@ -259,8 +269,17 @@ def generate_generated_ts() -> str:
 
     for enum in SPEC["enums"]:
         lines.append(jsdoc(enum.get("doc", "")).rstrip())
-        union = " | ".join(f'"{case["name"]}"' for case in enum["cases"])
-        lines.append(f"export type {enum['name']} = {union};")
+        if enum_has_payload(enum):
+            lines.append(f"export type {enum['name']} =")
+            for index, case in enumerate(enum["cases"]):
+                suffix = ";" if index == len(enum["cases"]) - 1 else ""
+                values = ", ".join(input_type(t) for t in case.get("types", []))
+                lines.append(
+                    f'  | {{ type: "{case["name"]}"; values: [{values}] }}{suffix}'
+                )
+        else:
+            union = " | ".join(f'"{case["name"]}"' for case in enum["cases"])
+            lines.append(f"export type {enum['name']} = {union};")
         lines.append("")
 
     for struct in SPEC["structs"]:
@@ -343,23 +362,58 @@ def generate_generated_ts() -> str:
     ]
 
     for enum in SPEC["enums"]:
-        lines.append(f"export function encode{enum['name']}(value: {enum['name']}): xdr.ScVal {{")
-        lines.append("  switch (value) {")
+        name = enum["name"]
+        payload = enum_has_payload(enum)
+        lines.append(f"export function encode{name}(value: {name}): xdr.ScVal {{")
+        lines.append("  switch (value.type) {" if payload else "  switch (value) {")
         for case in enum["cases"]:
-            lines.append(f'    case "{case["name"]}":')
-            lines.append(f'      return nativeToScVal({case["value"]}, {{ type: "u32" }});')
+            tag = json.dumps(case["name"])
+            lines.append(f"    case {tag}:")
+            if payload:
+                entries = [
+                    encode_expr(t, f"value.values[{index}]", f"{name}.{case['name']}[{index}]")
+                    for index, t in enumerate(case.get("types", []))
+                ]
+                lines.append("      return xdr.ScVal.scvVec([")
+                lines.append(f"        xdr.ScVal.scvSymbol({tag}),")
+                for entry in entries:
+                    lines.append(f"        {entry},")
+                lines.append("      ]);")
+            else:
+                lines.append(
+                    f"      return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol({tag})]);"
+                )
         lines.append("    default:")
-        lines.append(f"      throw new Error(`invalid {enum['name']}: ${{String(value)}}`);")
+        if payload:
+            # The switch is exhaustive over the union, so `value` narrows to
+            # `never` here; widen it to report the offending tag.
+            lines.append(
+                f"      throw new Error(`invalid {name} type: "
+                "${String((value as { type?: unknown }).type)}`);"
+            )
+        else:
+            lines.append(f"      throw new Error(`invalid {name}: ${{String(value)}}`);")
         lines.append("  }")
         lines.append("}")
         lines.append("")
-        lines.append(f"export function decode{enum['name']}(value: unknown): {enum['name']} {{")
-        lines.append("  switch (Number(value)) {")
+        lines.append(f"export function decode{name}(value: unknown): {name} {{")
+        lines.append(f'  const items = asArray(value, "{name}");')
+        lines.append(f'  switch (asString(items[0], "{name} variant")) {{')
         for case in enum["cases"]:
-            lines.append(f'    case {case["value"]}:')
-            lines.append(f'      return "{case["name"]}";')
+            tag = json.dumps(case["name"])
+            lines.append(f"    case {tag}:")
+            if payload:
+                values = ", ".join(
+                    decode_expr(t, f"items[{index + 1}]", f"{name}.{case['name']}[{index}]")
+                    for index, t in enumerate(case.get("types", []))
+                )
+                lines.append(f"      return {{ type: {tag}, values: [{values}] }};")
+            else:
+                lines.append(f"      return {tag};")
         lines.append("    default:")
-        lines.append(f"      throw new Error(`unknown {enum['name']}: ${{String(value)}}`);")
+        lines.append(
+            f"      throw new Error(`unknown {name} variant: ${{String(items[0])}}`);"
+        )
         lines.append("  }")
         lines.append("}")
         lines.append("")

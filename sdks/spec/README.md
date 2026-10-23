@@ -11,7 +11,11 @@
   types), return type, whether the call is fallible (`error`), and whether it
   mutates state
 * `structs` / `enums` — the `#[contracttype]` types reachable from entrypoints
-  or events
+  or events. A payload (tuple) enum variant carries its positional `types`;
+  `value` is the declaration index. Neither is the wire tag: soroban-sdk
+  encodes every contract enum as a vector of the variant name as a `Symbol`
+  followed by the variant's values, so a client cannot mis-decode an enum whose
+  declaration order changed
 * `events` — event name, topic symbol, topic fields, data fields (the layout
   `#[contractevent]` emits: `[symbol(topic), topic fields…]` plus a
   symbol-keyed data map)
@@ -36,6 +40,7 @@ IR types are a small language:
 | `{ "result": { "ok": T, "err": E } }` | `Result<T, E>` | `{ ok: T } \| { error: E }` |
 | `void` | `()` | `void` |
 | `Name` | a contract struct/enum | generated interface/union |
+| `[T, …]` (case `types`) | a tuple enum variant | `{ type: "Case"; values: [T, …] }` |
 
 Error names and codes are **not** in the spec. `generate.py` reads the canonical
 catalog (`frontend/lib/errors.ts`), which is generated from `errors.rs` and

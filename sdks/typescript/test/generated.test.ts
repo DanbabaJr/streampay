@@ -5,7 +5,9 @@ import { nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 
 import {
   decodeCreateStreamsBatchResult,
+  decodeGovernanceAction,
   decodeIntentStatus,
+  decodeProposal,
   decodeStreamPayEvent,
   addressToScVal,
   decodeOracleConfig,
@@ -16,17 +18,22 @@ import {
   decodeTreasuryStatus,
   encodeCreateStreamWithOracleArgs,
   encodeCreateStreamsArgs,
+  encodeGovernanceAction,
   encodeIntentStatus,
   encodeOracleConfig,
+  encodeProposal,
   encodeScheduledIntent,
   encodeSponsoredWithdrawArgs,
   encodeStream,
   encodeStreamStatus,
   encodeTreasuryStatus,
+  type GovernanceAction,
   type OracleConfig,
+  type Proposal,
   type ScheduledIntent,
   type Stream,
   type StreamInput,
+  type StreamPolicy,
   type TreasuryStatus,
 } from "../src/generated.js";
 
@@ -59,6 +66,61 @@ test("enum codecs cover every declared case", () => {
   for (const value of ["Pending", "Executed", "Cancelled", "Expired"] as const) {
     assert.equal(decodeIntentStatus(scValToNative(encodeIntentStatus(value))), value);
   }
+});
+
+test("contract enums use soroban's [variant symbol, ...values] encoding", () => {
+  const expected = xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Active")]);
+  assert.equal(encodeStreamStatus("Active").toXDR("base64"), expected.toXDR("base64"));
+  assert.equal(
+    decodeStreamStatus(scValToNative(xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Depleted")]))),
+    "Depleted"
+  );
+});
+
+test("payload enums round-trip with their positional values", () => {
+  const policy: StreamPolicy = {
+    minRate: 1n,
+    maxRate: 2n,
+    minDuration: 3n,
+    maxDuration: 4n,
+    minDeposit: 5n,
+  };
+  const actions: GovernanceAction[] = [
+    { type: "SetFeeBps", values: [100] },
+    { type: "SetStreamPolicy", values: [null, policy] },
+    { type: "SetSigners", values: [[SENDER, RECIPIENT]] },
+    { type: "ProposeUpgrade", values: [new Uint8Array(32).fill(3), 60n] },
+    { type: "ExecuteUpgrade", values: [] },
+  ];
+  for (const action of actions) {
+    assert.deepEqual(
+      decodeGovernanceAction(scValToNative(encodeGovernanceAction(action))),
+      action
+    );
+  }
+
+  // The variant is tagged by name and the value follows it, so a client built
+  // from a different spec revision cannot decode a silently reordered enum.
+  const encoded = encodeGovernanceAction({ type: "SetFeeBps", values: [100] });
+  const expected = xdr.ScVal.scvVec([
+    xdr.ScVal.scvSymbol("SetFeeBps"),
+    nativeToScVal(100, { type: "u32" }),
+  ]);
+  assert.equal(encoded.toXDR("base64"), expected.toXDR("base64"));
+});
+
+test("structs carrying a payload enum round-trip", () => {
+  const proposal: Proposal = {
+    id: 1n,
+    action: { type: "SetFeeBps", values: [50] },
+    proposedBy: GOVERNOR,
+    proposedAt: 10n,
+    executableAt: 20n,
+    signers: [GOVERNOR],
+    vetoed: false,
+    executed: false,
+  };
+  assert.deepEqual(decodeProposal(scValToNative(encodeProposal(proposal))), proposal);
 });
 
 test("optional fields decode to null and back", () => {

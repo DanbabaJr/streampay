@@ -20,6 +20,14 @@
       "value": 172800,
       "type": "u64"
     },
+    "DEFAULT_VETO_WINDOW_SECONDS": {
+      "value": 172800,
+      "type": "u64"
+    },
+    "DISPUTE_TIMEOUT_SECONDS": {
+      "value": 604800,
+      "type": "u64"
+    },
     "INITIAL_SCHEMA_VERSION": {
       "value": 1,
       "type": "u32"
@@ -48,11 +56,27 @@
       "value": 50,
       "type": "u32"
     },
+    "MAX_RATE_SEGMENTS": {
+      "value": 32,
+      "type": "u32"
+    },
+    "MAX_SIGNERS": {
+      "value": 10,
+      "type": "u32"
+    },
     "MIN_BATCH": {
       "value": 1,
       "type": "u32"
     },
+    "MIN_DISPUTE_BOND": {
+      "value": 1,
+      "type": "i128"
+    },
     "MIN_UPGRADE_DELAY_SECONDS": {
+      "value": 86400,
+      "type": "u64"
+    },
+    "MIN_VETO_WINDOW_SECONDS": {
       "value": 86400,
       "type": "u64"
     },
@@ -62,6 +86,18 @@
     },
     "OWNERSHIP_PROPOSAL_TTL_SECONDS": {
       "value": 604800,
+      "type": "u64"
+    },
+    "RATE_PROPOSAL_TTL_SECONDS": {
+      "value": 604800,
+      "type": "u64"
+    },
+    "REQUIRED_SIGNATURES": {
+      "value": 2,
+      "type": "u32"
+    },
+    "ROTATION_WINDOW_MULTIPLIER": {
+      "value": 4,
       "type": "u64"
     },
     "TARGET_SCHEMA_VERSION": {
@@ -223,7 +259,7 @@
     },
     {
       "name": "cancel_stream",
-      "doc": "Cancels a stream: pays the recipient their accrued-but-unwithdrawn\nbalance and refunds the sender the unaccrued remainder, atomically.\n\nCallable by the sender always, and by the recipient only if the stream\nwas created with `cancelable = true`. Cancelling an already-cancelled\nor depleted stream reverts with [`StreamError::StreamNotActive`].\n\nEach payout leg maps a token-side failure to its own code —\n[`StreamError::RecipientPayoutFailed`] for the recipient's accrued\nshare and [`StreamError::SenderRefundFailed`] for the sender's refund —\nand any failure rolls the whole cancellation back: the stream stays\n`Active`, `withdrawn` is restored, and no event survives.\n\n# Ordering against `withdraw` (same-ledger race)\n\nThe counterpart of the ordering documented on\n[`StreamingPayments::withdraw`]: cancellation is atomic and sees the\n`withdrawn` balance as of *its* execution point.\n\n* If the recipient's `withdraw` executes first, the cancel splits the\nremainder only (`streamed − withdrawn` to the recipient,\n`deposit − streamed` to the sender). If that withdrawal already\ndrained the stream to `Depleted`, the cancel reverts with\n[`StreamError::StreamNotActive`] (code 5).\n* If this cancel executes first, the stream is `Cancelled` and any\nlater `withdraw` / `withdraw_max` reverts with\n[`StreamError::StreamNotActive`] (code 5).\n\nLast write wins in execution order; no interleaving exists within a\nledger, and the losing call leaves state and balances untouched.\nPinned by the `race_*` regression tests in `test.rs`; see\n`docs/ARCHITECTURE.md` §6.1 for the race table.",
+      "doc": "Cancels a stream: pays the recipient their accrued-but-unwithdrawn\nbalance and refunds the sender the unaccrued remainder, atomically.\n\nCallable by the sender always, and by the recipient only if the stream\nwas created with `cancelable = true`. Cancelling an already-cancelled\nor depleted stream reverts with [`StreamError::StreamNotActive`];\ncancelling while a dispute is open reverts with\n[`StreamError::DisputeActive`] until the dispute is resolved or expires.\nor depleted stream reverts with [`StreamError::StreamNotActive`].\n\nEach payout leg maps a token-side failure to its own code —\n[`StreamError::RecipientPayoutFailed`] for the recipient's accrued\nshare and [`StreamError::SenderRefundFailed`] for the sender's refund —\nand any failure rolls the whole cancellation back: the stream stays\n`Active`, `withdrawn` is restored, and no event survives.\n\n# Ordering against `withdraw` (same-ledger race)\n\nThe counterpart of the ordering documented on\n[`StreamingPayments::withdraw`]: cancellation is atomic and sees the\n`withdrawn` balance as of *its* execution point.\n\n* If the recipient's `withdraw` executes first, the cancel splits the\nremainder only (`streamed − withdrawn` to the recipient,\n`deposit − streamed` to the sender). If that withdrawal already\ndrained the stream to `Depleted`, the cancel reverts with\n[`StreamError::StreamNotActive`] (code 5).\n* If this cancel executes first, the stream is `Cancelled` and any\nlater `withdraw` / `withdraw_max` reverts with\n[`StreamError::StreamNotActive`] (code 5).\n\nLast write wins in execution order; no interleaving exists within a\nledger, and the losing call leaves state and balances untouched.\nPinned by the `race_*` regression tests in `test.rs`; see\n`docs/ARCHITECTURE.md` §6.1 for the race table.\nCancels a stream: pays the recipient their accrued-but-unwithdrawn\nbalance and refunds the sender the unaccrued remainder, atomically.\n\nCallable by the sender always, and by the recipient only if the stream\nwas created with `cancelable = true`. Cancelling an already-cancelled\nor depleted stream reverts with [`StreamError::StreamNotActive`].\n\nEach payout leg maps a token-side failure to its own code —\n[`StreamError::RecipientPayoutFailed`] for the recipient's accrued\nshare and [`StreamError::SenderRefundFailed`] for the sender's refund —\nand any failure rolls the whole cancellation back: the stream stays\n`Active`, `withdrawn` is restored, and no event survives.\n\n# Ordering against `withdraw` (same-ledger race)\n\nThe counterpart of the ordering documented on\n[`StreamingPayments::withdraw`]: cancellation is atomic and sees the\n`withdrawn` balance as of *its* execution point.\n\n* If the recipient's `withdraw` executes first, the cancel splits the\nremainder only (`streamed − withdrawn` to the recipient,\n`deposit − streamed` to the sender). If that withdrawal already\ndrained the stream to `Depleted`, the cancel reverts with\n[`StreamError::StreamNotActive`] (code 5).\n* If this cancel executes first, the stream is `Cancelled` and any\nlater `withdraw` / `withdraw_max` reverts with\n[`StreamError::StreamNotActive`] (code 5).\n\nLast write wins in execution order; no interleaving exists within a\nledger, and the losing call leaves state and balances untouched.\nPinned by the `race_*` regression tests in `test.rs`; see\n`docs/ARCHITECTURE.md` §6.1 for the race table.",
       "args": [
         {
           "name": "caller",
@@ -240,7 +276,7 @@
     },
     {
       "name": "top_up",
-      "doc": "Adds funds to an existing active stream. The deposit grows and accrual\nremains linear over the original window, so the recipient's accrued\namount increases pro-rata immediately (Sablier-v1 `increaseAmount`\nsemantics).\n\nTop-ups are rejected on cancelled or depleted streams. Topping up a\nstream that has already passed `end_time` adds fully-accrued funds the\nrecipient can withdraw immediately.\n\nA token-side failure to pull the funds returns\n[`StreamError::TopUpTransferFailed`] and leaves `deposit` unchanged.\n\nNote: extending `end_time` is intentionally not supported in v1 —\nretroactively re-baselining accrual is lossy for the recipient; see\n`docs/ARCHITECTURE.md` for the design considerations and roadmap.",
+      "doc": "Adds funds to an existing active stream. The deposit grows and accrual\nremains linear over the original window, so the recipient's accrued\namount increases pro-rata immediately (Sablier-v1 `increaseAmount`\nsemantics).\n\nTop-ups are rejected on cancelled or depleted streams, and frozen\n([`StreamError::DisputeActive`]) while a dispute is open. Topping up a\nstream that has already passed `end_time` adds fully-accrued funds the\nrecipient can withdraw immediately.\n\nA token-side failure to pull the funds returns\n[`StreamError::TopUpTransferFailed`] and leaves `deposit` unchanged.\n\nNote: extending `end_time` is intentionally not supported in v1 —\nretroactively re-baselining accrual is lossy for the recipient; see\n`docs/ARCHITECTURE.md` for the design considerations and roadmap.\nAdds funds to an existing active stream. The deposit grows and accrual\nremains linear over the original window, so the recipient's accrued\namount increases pro-rata immediately (Sablier-v1 `increaseAmount`\nsemantics).\n\nTop-ups are rejected on cancelled or depleted streams. Topping up a\nstream that has already passed `end_time` adds fully-accrued funds the\nrecipient can withdraw immediately.\n\nA token-side failure to pull the funds returns\n[`StreamError::TopUpTransferFailed`] and leaves `deposit` unchanged.\n\nNote: extending `end_time` is intentionally not supported in v1 —\nretroactively re-baselining accrual is lossy for the recipient; see\n`docs/ARCHITECTURE.md` for the design considerations and roadmap.",
       "args": [
         {
           "name": "stream_id",
@@ -249,6 +285,53 @@
         {
           "name": "amount",
           "type": "i128"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "raise_dispute",
+      "doc": "Recipient-initiated dispute: flags this stream (wrong address,\ncoerced creation) and freezes its cancel/top-up mutations until the\nsender calls [`StreamingPayments::resolve_dispute`] or the timelock\nelapses and anyone calls [`StreamingPayments::expire_dispute`].\n\nOnly the stream's recipient can raise it (their authorization is\nrequired), only on an active, undisputed stream. Anti-griefing: the\nrecipient posts a bond ([`StreamingPayments::required_dispute_bond`],\na share of the deposit that escalates with every dispute round on\nthe stream) via a prior token approval, held by the contract until\nresolution. Accrual keeps running and accrued funds stay withdrawable\nthroughout — the freeze targets the stream's lifecycle, not the\nrecipient's earned balance.\n\nReturns the recorded dispute (bond, window, expiry timestamp).",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "Dispute",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "resolve_dispute",
+      "doc": "Sender-only resolution of an open dispute:\n\n* `accept = true` — the dispute is legitimate: the bond is refunded\nto the recipient and the stream is unwound with the standard\npro-rata cancel split (a `StreamCancelled` event accompanies the\n`DisputeResolved`). If the stream already depleted during the\ndispute (the recipient withdrew everything), only the bond is\nrefunded.\n* `accept = false` — bad faith: the bond is slashed to the sender as\ncompensation for the frozen window, and the stream resumes normal\noperation immediately.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "accept",
+          "type": "bool"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "expire_dispute",
+      "doc": "Closes a dispute whose timelock has fully elapsed: the bond is split\n(sender receives the upper half as compensation for the frozen\nwindow, the recipient the remainder) and the stream resumes normally.\n\nCallable by anyone once `now >= expires_at` — no authorization is\ninvolved and no funds ever move to the trigger. Reverting the split\nto a full bond refund would make serial disputes free for a patient\ngriefer; see `docs/ARCHITECTURE.md` for the griefing-threshold math.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
         }
       ],
       "returns": "void",
@@ -326,6 +409,91 @@
       "mutating": false
     },
     {
+      "name": "propose_rate_change",
+      "doc": "Proposes a new streaming rate for `stream_id`. The change takes\neffect only when the counterparty calls\n[`StreamingPayments::accept_rate_change`], and only from that moment\nonward: everything accrued before it is untouched.\n\n* Either party may propose; their authorization is required. A\nstranger is rejected with [`StreamError::NotAuthorized`].\n* The stream must be `Active` and its window must not have elapsed:\na rate for a finished stream would be a no-op that still rebalances\nfunds, so it is rejected with [`StreamError::InvalidTimeRange`].\n* `amount_per_second` must be positive ([`StreamError::ZeroAmount`]).\n* At most one unexpired proposal exists per stream. Proposing again\nwhile one is pending reverts with\n[`StreamError::RateProposalPending`]; an expired proposal is\nremoved and replaced.\n\nGovernance policy for the *proposed* rate is checked at acceptance,\nnot here: the ceilings that bind are the ones in force when the\nchange becomes effective, and they can move during the acceptance\nwindow. No tokens move and no accounting field changes at proposal\ntime; the offer is recorded under its own storage key with a\nseven-day acceptance window ([`RATE_PROPOSAL_TTL_SECONDS`]).",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount_per_second",
+          "type": "i128"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "accept_rate_change",
+      "doc": "Accepts a pending rate change, rebalancing the deposit atomically.\n\nOnly the proposal's counterparty may accept, and their authorization\nis required. The rate itself was fixed by the proposal; what acceptance\ncomputes is what that rate now costs:\n\n* `owed` — accrued at the change boundary `t` under the schedule that\nwas in force until now, i.e. `streamed` at `t`. It is carried into\nthe new schedule untouched, which is what makes the change unable to\nre-price the past.\n* `reserved` — `amount_per_second * (end_time - t)`, an exact integer\nproduct, floored by nothing and rounded by nothing: the new segment\naccrues that amount over exactly that window, so it is fully streamed\nat `end_time` with no rounding residue.\n* `adjustment` — `reserved - (deposit - owed)`. Positive means the\nold reserve no longer covers the new rate and the sender tops up the\nshortfall; negative means the sender is refunded the freed remainder.\n\nThe deposit becomes `owed + reserved`, so the accrual endpoint still\nequals the deposit and the invariant `withdrawn <= streamed <= deposit`\nholds across the whole change.\n\nFunds movement follows the direction of the change: a top-up is pulled\n*before* any effect is written (like `top_up`), so a token that refuses\nthe pull leaves the schedule and the deposit untouched; a refund is paid\n*after* the effects (like `cancel_stream`), so a token that refuses the\nrefund rolls the whole acceptance back and the proposal survives for a\nretry.\n\nAn expired proposal cannot be accepted\n([`StreamError::RateProposalExpired`]), and neither can one whose parties\nhave moved on: if a role transferred after the offer was made, the\nrecorded proposer/counterparty pair is no longer the stream's sender and\nrecipient, and acceptance reverts with [`StreamError::NotAuthorized`].\nThe stale offer blocks nothing — its proposer can always cancel it.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "cancel_rate_change",
+      "doc": "Cancels a pending rate proposal. Only the address that created it\nmay cancel, and its authorization is required.\n\nCancellation is allowed after the acceptance window elapsed (it simply\nclears the stale entry) and on a stream that has since been cancelled\nor depleted, which is what lets a proposer clean up after the fact.\nIt emits no event: the proposal never changed the stream, and\n`RateChangeProposed` remains the permanent record that one existed.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "pending_rate_change",
+      "doc": "Read-only view of a stream's pending rate proposal, if any.\nReading extends the proposal's storage TTL; unknown streams return\n`None`.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "PendingRateChange"
+      },
+      "error": null,
+      "mutating": false
+    },
+    {
+      "name": "rate_segments",
+      "doc": "Read-only view of a stream's rate schedule. Empty means the stream\nstill accrues at its original rate over `[start_time, end_time)`: the\nsingle-window formula, with no stored segment to consult.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "vec": "RateSegment"
+      },
+      "error": null,
+      "mutating": false
+    },
+    {
       "name": "get_stream",
       "doc": "Read-only view of a stream's full state.",
       "args": [
@@ -335,6 +503,32 @@
         }
       ],
       "returns": "Stream",
+      "error": "StreamError",
+      "mutating": false
+    },
+    {
+      "name": "get_dispute",
+      "doc": "Read-only view of a stream's open dispute. Reverts with\n[`StreamError::DisputeNotFound`] when the stream is undisputed\n(disputes exist only while open; resolution and expiry remove them).",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "Dispute",
+      "error": "StreamError",
+      "mutating": false
+    },
+    {
+      "name": "required_dispute_bond",
+      "doc": "The bond a recipient must post (and pre-approve) to raise the next\ndispute on this stream: 5% of the deposit, multiplied by the number\nof disputes already raised on it, floored at one token unit.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "i128",
       "error": "StreamError",
       "mutating": false
     },
@@ -539,7 +733,7 @@
     },
     {
       "name": "set_fee_bps",
-      "doc": "Sets the protocol fee rate (basis points on each new stream's\ndeposit, charged once at creation). Governor-only. Reverts with\n[`StreamError::FeeRateTooHigh`] above [`MAX_FEE_BPS`] (the protocol\ncap) and with [`StreamError::NotGovernor`] for any other caller.\n\nChanges apply only to streams created afterwards: fees are a\nproperty of the deposit boundary a stream actually crossed, never\nretroactively.",
+      "doc": "Sets the protocol fee rate (basis points on each new stream's\ndeposit, charged once at creation). Governor-only. Reverts with\n[`StreamError::FeeRateTooHigh`] above [`MAX_FEE_BPS`] (the protocol\ncap) and with [`StreamError::NotGovernor`] for any other caller.\n\nChanges apply only to streams created afterwards: fees are a\nproperty of the deposit boundary a stream actually crossed, never\nretroactively.\n\nOnce the governance signer set is bootstrapped this path closes and the\naction must arrive as an executed proposal ([`StreamError::GovernanceTimelockRequired`]).",
       "args": [
         {
           "name": "caller",
@@ -992,7 +1186,7 @@
     },
     {
       "name": "set_stream_policy",
-      "doc": "Sets governance policy floors and ceilings for streams of `token`, or global default if `token` is None.\nGovernor-only.\n\nGovernance timelock hook: this setter gates via `treasury::require_governor` and will route\nthrough the timelocked proposal queue once governance timelocks are enabled across all operations.",
+      "doc": "Sets governance policy floors and ceilings for streams of `token`, or global default if `token` is None.\nGovernor-only.\n\nGated by the governance timelock once the signer set is bootstrapped: the\naction then arrives as `GovernanceAction::SetStreamPolicy` on an executed\nproposal (see `governance.rs`).",
       "args": [
         {
           "name": "caller",
@@ -1048,7 +1242,7 @@
     },
     {
       "name": "set_frozen",
-      "doc": "Sets the freeze state of the contract. Governor-only.\n\nWhen frozen, mutating stream entrypoints (create, withdraw, withdraw_max,\ncancel, top_up) revert with [`StreamError::ContractFrozen`], but read views\nremain accessible.",
+      "doc": "Sets the freeze state of the contract. Governor-only.\n\nWhen frozen, mutating stream entrypoints (create, withdraw, withdraw_max,\ncancel, top_up) revert with [`StreamError::ContractFrozen`], but read views\nremain accessible.\n\nFreezing stays immediate even after governance is bootstrapped: a\ntimelock that delays the break-glass is worse than no break-glass.\n*Unfreezing* reopens the contract to activity, so it requires an executed\nproposal.",
       "args": [
         {
           "name": "caller",
@@ -1086,7 +1280,7 @@
     },
     {
       "name": "cancel_upgrade",
-      "doc": "Cancels a pending upgrade proposal. Governor-only.\n\nReverts with [`StreamError::NoPendingUpgrade`] if no proposal is pending.",
+      "doc": "Cancels a pending upgrade proposal. Governor-only.\n\nReverts with [`StreamError::NoPendingUpgrade`] if no proposal is pending.\n\nLike freezing, this is a risk-reducing action and so stays immediate: a\nmaliciously proposed upgrade must be cancellable the second it is seen,\nnot two days later.",
       "args": [
         {
           "name": "caller",
@@ -1234,6 +1428,146 @@
       },
       "error": null,
       "mutating": false
+    },
+    {
+      "name": "governance_bootstrap",
+      "doc": "Establishes the governance signer set and its veto window. Governor-only,\nand one-time: after bootstrap the set can only change by executing a\n`GovernanceAction::SetSigners` proposal, so no key can ever re-establish\ngovernance over an existing one.\n\nUntil this is called every admin entry point behaves exactly as it did\nbefore the timelock existed, which makes adoption an explicit, auditable\nact rather than a side effect of a wasm upgrade.\n\nReverts with [`StreamError::GovernanceDuplicateSigner`] when the set lists\nthe same address twice and [`StreamError::GovernanceSignersNotDistinct`]\nwhen it holds fewer than two distinct keys — the invariant is two\n*independent* signatures, not two slots.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "signers",
+          "type": {
+            "vec": "address"
+          }
+        },
+        {
+          "name": "veto_window",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "governance_propose",
+      "doc": "Proposes an admin action for the timelock. Signer-only; returns the\nproposal id.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "action",
+          "type": "GovernanceAction"
+        }
+      ],
+      "returns": "u64",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "governance_sign",
+      "doc": "Adds the caller's signature to a proposal. Reverts with\n[`StreamError::GovernanceDuplicateSignature`] if they already signed.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "proposal_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "u32",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "governance_veto",
+      "doc": "Vetoes a proposal while its window is open. One signer is enough: vetoing\nremoves risk, so it should never be the action that requires a quorum.",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "proposal_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "governance_execute",
+      "doc": "Applies a matured, multiply-signed proposal.\n\nPermissionless on purpose: a proposal that only a particular keyholder\ncan submit is one that keyholder can suppress. `executor` is recorded in\nthe audit trail but authorizes nothing — the authority is the two\nsignatures on the proposal.",
+      "args": [
+        {
+          "name": "executor",
+          "type": "address"
+        },
+        {
+          "name": "proposal_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "governance_is_initialized",
+      "doc": "Whether the timelock has taken over the admin entry points.",
+      "args": [],
+      "returns": "bool",
+      "error": null,
+      "mutating": false
+    },
+    {
+      "name": "governance_signers",
+      "doc": "The current signer set.",
+      "args": [],
+      "returns": {
+        "vec": "address"
+      },
+      "error": null,
+      "mutating": false
+    },
+    {
+      "name": "governance_veto_window",
+      "doc": "The configured veto window in seconds.",
+      "args": [],
+      "returns": "u64",
+      "error": null,
+      "mutating": false
+    },
+    {
+      "name": "governance_proposal",
+      "doc": "Reads a proposal: its window, recorded signatures and terminal flags.",
+      "args": [
+        {
+          "name": "proposal_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "Proposal"
+      },
+      "error": null,
+      "mutating": false
+    },
+    {
+      "name": "governance_proposal_count",
+      "doc": "The next proposal id, for clients that want to follow the queue.",
+      "args": [],
+      "returns": "u64",
+      "error": null,
+      "mutating": false
     }
   ],
   "structs": [
@@ -1301,6 +1635,63 @@
           "name": "expires_at",
           "type": "u64",
           "doc": "Ledger timestamp at or after which the proposal is stale."
+        }
+      ]
+    },
+    {
+      "name": "RateSegment",
+      "doc": "One window of a stream's piecewise rate schedule.\n\nA segment reserves `allocation` tokens for the half-open window\n`[start_time, end_time)` and accrues them pro rata over `basis_seconds`:\n\n```text\nfloor(allocation * elapsed_within_window / basis_seconds)\n```\n\n`basis_seconds` is normally the window's own length, which makes the term\nexact (no rounding at all) whenever `allocation` is a whole multiple of it —\nthe shape every renegotiated segment has, because it is priced as\n`amount_per_second * window_length`. It is the *original* stream duration for\nthe first segment of a renegotiated stream, whose `allocation` is the deposit\nthe schedule started from: keeping that pair untouched is what makes an\naccepted change unable to re-price the past.\n\nBecause each window is a sub-interval of the stream, the elapsed part of it\nis never longer than `basis_seconds`, which is the condition\n[`validate_capacity`] needs to guarantee the product cannot overflow.",
+      "fields": [
+        {
+          "name": "start_time",
+          "type": "u64",
+          "doc": "First timestamp this segment accrues at (inclusive)."
+        },
+        {
+          "name": "end_time",
+          "type": "u64",
+          "doc": "Last timestamp this segment accrues at (exclusive)."
+        },
+        {
+          "name": "allocation",
+          "type": "i128",
+          "doc": "Tokens reserved for the window, as of the segment being accepted."
+        },
+        {
+          "name": "basis_seconds",
+          "type": "u64",
+          "doc": "Divisor of the pro-rata term; see the struct docs."
+        }
+      ]
+    },
+    {
+      "name": "PendingRateChange",
+      "doc": "A pending two-step rate change for one stream.\n\nLike [`PendingOwnership`], this lives under its own storage key\n([`DataKey::PendingRateChange`]) rather than inside [`Stream`], and the\nschedule it would install lives under [`DataKey::RateSegments`]. Neither is\npart of the `Stream` entry, so an existing stream's stored XDR keeps its\nlayout: a stream created before this feature accrues exactly as it did, and a\nrate change that is proposed and then cancelled leaves no trace in the\nstream's accounting fields.",
+      "fields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "proposed_by",
+          "type": "address",
+          "doc": "The stream party that created the proposal (and the only address allowed\nto cancel it)."
+        },
+        {
+          "name": "counterparty",
+          "type": "address",
+          "doc": "The other party: the address whose acceptance makes the change effective."
+        },
+        {
+          "name": "amount_per_second",
+          "type": "i128",
+          "doc": "The proposed rate, in whole token units per second, for the window that\nstarts when the proposal is accepted."
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": "Ledger timestamp at or after which the proposal is stale. What the\nproposal commits to is the *rate*; the funds movement it implies is\ncomputed from the schedule at the moment it is accepted."
         }
       ]
     },
@@ -1776,6 +2167,85 @@
           "doc": "Whether the timestamp came from oracle aggregation (`true`) or ledger fallback (`false`)."
         }
       ]
+    },
+    {
+      "name": "Proposal",
+      "doc": "A proposed admin action awaiting its veto window and signatures.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "action",
+          "type": "GovernanceAction",
+          "doc": ""
+        },
+        {
+          "name": "proposed_by",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "proposed_at",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "executable_at",
+          "type": "u64",
+          "doc": "First ledger timestamp at which the proposal may execute."
+        },
+        {
+          "name": "signers",
+          "type": {
+            "vec": "address"
+          },
+          "doc": "Distinct signatures recorded so far, in signing order."
+        },
+        {
+          "name": "vetoed",
+          "type": "bool",
+          "doc": ""
+        },
+        {
+          "name": "executed",
+          "type": "bool",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "Dispute",
+      "doc": "An open dispute on a stream. Stored only while the dispute is live;\nresolution/expiry deletes the entry.",
+      "fields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "raised_by",
+          "type": "address",
+          "doc": "The stream recipient who raised it (always the stream's recipient)."
+        },
+        {
+          "name": "bond",
+          "type": "i128",
+          "doc": "Bond held by the contract for the duration of the dispute."
+        },
+        {
+          "name": "started_at",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": "First ledger timestamp at which the dispute can be expired."
+        }
+      ]
     }
   ],
   "enums": [
@@ -1839,6 +2309,110 @@
           "name": "Expired",
           "value": 3,
           "doc": "Passed `expires_at` with occurrences outstanding; escrow refunded.\nTerminal."
+        }
+      ]
+    },
+    {
+      "name": "GovernanceAction",
+      "doc": "One admin action that may be proposed, timelocked and executed.\n\nThe payloads mirror the direct entry points exactly, so dispatch is a\none-to-one call into the same internal helper rather than a second\nimplementation of the same authority.",
+      "cases": [
+        {
+          "name": "SetFeeBps",
+          "value": 0,
+          "doc": "`set_fee_bps`",
+          "types": [
+            "u32"
+          ]
+        },
+        {
+          "name": "SetStreamPolicy",
+          "value": 1,
+          "doc": "`set_stream_policy`",
+          "types": [
+            {
+              "option": "address"
+            },
+            "StreamPolicy"
+          ]
+        },
+        {
+          "name": "SetFrozen",
+          "value": 2,
+          "doc": "`set_frozen` — unfreezing goes through the timelock; freezing does not.",
+          "types": [
+            "bool"
+          ]
+        },
+        {
+          "name": "WithdrawTreasury",
+          "value": 3,
+          "doc": "`withdraw_treasury(token, recipient, amount)`",
+          "types": [
+            "address",
+            "address",
+            "i128"
+          ]
+        },
+        {
+          "name": "NominateGovernor",
+          "value": 4,
+          "doc": "`nominate_governor` — step one of the two-step rotation.",
+          "types": [
+            "address"
+          ]
+        },
+        {
+          "name": "ProposeUpgrade",
+          "value": 5,
+          "doc": "`propose_upgrade(new_wasm_hash, delay_seconds)`",
+          "types": [
+            "bytes32",
+            "u64"
+          ]
+        },
+        {
+          "name": "ExecuteUpgrade",
+          "value": 6,
+          "doc": "`execute_upgrade`"
+        },
+        {
+          "name": "MigrateStorage",
+          "value": 7,
+          "doc": "`migrate_storage(start_id, count)`",
+          "types": [
+            "u64",
+            "u32"
+          ]
+        },
+        {
+          "name": "SetOracleConfig",
+          "value": 8,
+          "doc": "`set_oracle_config(publishers, threshold, max_stale_seconds)`",
+          "types": [
+            {
+              "vec": "address"
+            },
+            "u32",
+            "u64"
+          ]
+        },
+        {
+          "name": "SetSigners",
+          "value": 9,
+          "doc": "Replace the signer set. A rotation of the keys that govern this contract.",
+          "types": [
+            {
+              "vec": "address"
+            }
+          ]
+        },
+        {
+          "name": "SetVetoWindow",
+          "value": 10,
+          "doc": "Replace the veto window.",
+          "types": [
+            "u64"
+          ]
         }
       ]
     }
@@ -2227,6 +2801,98 @@
           "name": "withdrawn_total",
           "type": "i128",
           "doc": "Total fees withdrawn for this token after this withdrawal."
+        }
+      ]
+    },
+    {
+      "name": "DisputeRaised",
+      "topic": "dispute_raised",
+      "doc": "Emitted when the recipient raises a dispute, freezing the stream's\ncancel/top-up mutations until resolution or expiry. The bond (stream\ntoken, held by the contract) accompanies the flag.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "bond",
+          "type": "i128",
+          "doc": "Bond pulled into the contract for the duration of the dispute."
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": "First ledger timestamp at which the dispute can be expired."
+        }
+      ]
+    },
+    {
+      "name": "DisputeResolved",
+      "topic": "dispute_resolved",
+      "doc": "Emitted when the sender resolves an open dispute. `accept = true`\nrefunds the bond to the recipient and unwinds the stream pro-rata\n(a `StreamCancelled` event accompanies it); `accept = false` treats the\ndispute as bad-faith and slashes the bond to the sender, resuming the\nstream normally.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "sender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "accept",
+          "type": "bool",
+          "doc": "Whether the sender accepted the dispute as legitimate."
+        },
+        {
+          "name": "bond",
+          "type": "i128",
+          "doc": "The bond at stake (paid to the recipient on accept, slashed to the\nsender otherwise)."
+        }
+      ]
+    },
+    {
+      "name": "DisputeExpired",
+      "topic": "dispute_expired",
+      "doc": "Emitted when a dispute's timelock expires without a verdict: the stream\nresumes and the bond is split, `sender_share` rounding up.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "bond",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "sender_share",
+          "type": "i128",
+          "doc": "Half of the bond (rounded up) paid to the sender as compensation for\nthe frozen window."
+        },
+        {
+          "name": "recipient_share",
+          "type": "i128",
+          "doc": "The remainder of the bond refunded to the recipient."
         }
       ]
     },
@@ -2743,6 +3409,218 @@
         {
           "name": "role",
           "type": "OwnershipRole",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "RateChangeProposed",
+      "topic": "rate_change_proposed",
+      "doc": "Emitted when the sender or recipient proposes a new streaming rate. The\nchange takes effect only when the counterparty accepts, and only from the\nmoment of acceptance: nothing accrues differently before it, and the\n`RateChangeAccepted` event that follows carries the settled amounts.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "proposed_by",
+          "type": "address",
+          "doc": "The proposing party (the stream's sender or recipient)."
+        },
+        {
+          "name": "counterparty",
+          "type": "address",
+          "doc": "The party whose acceptance the change requires."
+        },
+        {
+          "name": "amount_per_second",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": "Ledger timestamp at or after which the proposal is stale."
+        }
+      ]
+    },
+    {
+      "name": "RateChangeAccepted",
+      "topic": "rate_change_accepted",
+      "doc": "Emitted when a pending rate change is accepted and its rebalancing settles.\n\nThe four amounts are the whole funds-bug audit trail for one change, and\nthey are exact by construction: `reserved_at_new_rate` is an integer product\n(`new_amount_per_second * window length`) and `deposit` is\n`owed_at_change + reserved_at_new_rate`. `adjustment` is the signed\ndifference against the deposit before the change — positive means the sender\ntopped up that amount, negative means the sender was refunded its absolute\nvalue, zero means the old reserve still covered the new rate exactly.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "accepted_by",
+          "type": "address",
+          "doc": "The accepting counterparty (the address that authorized the change)."
+        },
+        {
+          "name": "new_amount_per_second",
+          "type": "i128",
+          "doc": "Rate in effect from `effective_from` (inclusive) to the stream's\n`end_time`; the rate the proposal committed to."
+        },
+        {
+          "name": "effective_from",
+          "type": "u64",
+          "doc": "First timestamp accrued at the new rate."
+        },
+        {
+          "name": "owed_at_change",
+          "type": "i128",
+          "doc": "Accrued at `effective_from` under the previous schedule. The change\ncannot alter this amount — that is the property the segment split keeps."
+        },
+        {
+          "name": "reserved_at_new_rate",
+          "type": "i128",
+          "doc": "Reserved for `[effective_from, end_time)` at the new rate."
+        },
+        {
+          "name": "adjustment",
+          "type": "i128",
+          "doc": "Funds moved to settle the change (see the struct docs)."
+        },
+        {
+          "name": "deposit",
+          "type": "i128",
+          "doc": "Stream deposit after the adjustment; equals\n`owed_at_change + reserved_at_new_rate`."
+        }
+      ]
+    },
+    {
+      "name": "GovernanceSignersSet",
+      "topic": "governance_signers_set",
+      "doc": "Emitted when the signer set is established or rotated, and when the veto\nwindow changes. The set is emitted in full because \"which keys govern this\ncontract\" is only auditable from the transcript, not from a delta.",
+      "topicFields": [
+        {
+          "name": "set_by",
+          "type": "address",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "signers",
+          "type": {
+            "vec": "address"
+          },
+          "doc": ""
+        },
+        {
+          "name": "veto_window",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "GovernanceActionProposed",
+      "topic": "governance_action_proposed",
+      "doc": "Emitted when a signer proposes an admin action. `executable_at` is the end of\nthe veto window: from that timestamp the proposal is executable by anyone and\nis never voided by time.",
+      "topicFields": [
+        {
+          "name": "proposal_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "proposed_by",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "executable_at",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "action",
+          "type": "GovernanceAction",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "GovernanceActionSigned",
+      "topic": "governance_action_signed",
+      "doc": "Emitted for each distinct signature. A second signature from an address that\nalready signed is refused before this event can fire, so `signature_count`\nhere is always a count of distinct keys.",
+      "topicFields": [
+        {
+          "name": "proposal_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "signer",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "signature_count",
+          "type": "u32",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "GovernanceActionVetoed",
+      "topic": "governance_action_vetoed",
+      "doc": "Emitted when a signer vetoes a proposal inside its veto window.",
+      "topicFields": [
+        {
+          "name": "proposal_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "vetoed_by",
+          "type": "address",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "GovernanceActionExecuted",
+      "topic": "governance_action_executed",
+      "doc": "Emitted when a matured, multiply-signed proposal is applied. `executed_by` is\nwhoever submitted the transaction — execution is permissionless — while\n`signers` names the keys that actually authorized it.",
+      "topicFields": [
+        {
+          "name": "proposal_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "action",
+          "type": "GovernanceAction",
+          "doc": ""
+        },
+        {
+          "name": "signers",
+          "type": {
+            "vec": "address"
+          },
+          "doc": ""
+        },
+        {
+          "name": "executed_by",
+          "type": "address",
           "doc": ""
         }
       ]
