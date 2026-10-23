@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,9 +14,10 @@ export async function runIndexerBenchmark(runs = 3) {
 
   const rawEvents = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
   
-  // Dynamically import compiled store and decoder from indexer
-  const { StreamStore } = await import(path.join(REPO_ROOT, "indexer/dist/store.js"));
-  const { decodeEvent } = await import(path.join(REPO_ROOT, "indexer/dist/decoder.js"));
+  // Dynamically import compiled store and decoder from indexer. `pathToFileURL`
+  // because a Windows absolute path is not a valid ESM specifier.
+  const { StreamStore } = await import(pathToFileURL(path.join(REPO_ROOT, "indexer/dist/store.js")).href);
+  const { decodeEvent } = await import(pathToFileURL(path.join(REPO_ROOT, "indexer/dist/decoder.js")).href);
 
   const durations = [];
   const eventCount = rawEvents.length;

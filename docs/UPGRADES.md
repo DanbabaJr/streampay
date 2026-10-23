@@ -130,6 +130,50 @@ Once the timelock duration has elapsed (`ledger.timestamp >= pending.unlock_time
    stellar contract invoke --id <CONTRACT_ID> --source-account <GOVERNOR_SECRET> -- set_frozen --caller <GOVERNOR_ADDRESS> --frozen false
    ```
 
+### Phases 2-6 After Governance Bootstrap
+
+`governance_bootstrap` installs the two-key signer set (issue #119). Once it has
+run, the *direct* form of every upgrade step above reverts with
+`StreamError::GovernanceTimelockRequired` (code 79) — each step becomes a
+proposal that must clear its veto window and collect two distinct signer
+signatures. The actions themselves, their events and their guards are
+unchanged; only the path to invoking them changes.
+
+| Phase | Direct entry point | Governance action arm |
+| --- | --- | --- |
+| 2. Propose upgrade | `propose_upgrade` | `GovernanceAction::ProposeUpgrade(hash, delay_seconds)` |
+| 3. Freeze | `set_frozen(true)` | *not gated* — see below |
+| 4. Migrate storage | `migrate_storage` | `GovernanceAction::MigrateStorage(start_id, count)` |
+| 5. Execute upgrade | `execute_upgrade` | `GovernanceAction::ExecuteUpgrade` |
+| 6. Unfreeze | `set_frozen(false)` | `GovernanceAction::SetFrozen(false)` |
+
+```bash
+# One proposal per step, signed by both keys, executed after the veto window.
+stellar contract invoke --id <CONTRACT_ID> --source-account <SIGNER_A> -- \
+  governance_propose --caller <SIGNER_A> --action '{"set_frozen":true}'
+# -> proposal id 1; then sign, wait out the window, execute.
+```
+
+Two carve-outs survive bootstrap because they are risk-*reducing*:
+
+* **`set_frozen(true)` stays immediate.** A timelock on the break-glass is worse
+  than no break-glass, so freezing needs only the governor's signature.
+  Unfreezing reopens the contract to activity and is therefore proposed.
+* **`cancel_upgrade` stays immediate.** Aborting a pending upgrade removes
+  authority; the governor calls it directly.
+
+Note that the two clocks are independent and both must expire: a
+`ProposeUpgrade` waits out the governance veto window (default 172,800 s)
+*and* the wasm hash stays locked until `delay_seconds` after the proposal
+executes.
+
+Storage migration is the expensive one under governance: each executed proposal
+applies a single batch of at most `MAX_MIGRATION_BATCH_SIZE` (50) streams, and an
+executed proposal cannot be replayed, so a 1,000-stream migration is 20
+proposals, each with its own veto window. Bootstrap governance *after* the v1→v2
+migration for exactly this reason; a contract that still has streams to migrate
+and has already bootstrapped should expect the multi-proposal schedule.
+
 ---
 
 ## 3. Rollback Plan

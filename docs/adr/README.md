@@ -39,6 +39,7 @@ Allowed statuses:
 | [0009](./0009-eslint-9-pinning.md) | ESLint 9 Pinning for Next.js 16 Flat Config | Superseded | 2026-10-04 | Pin `eslint` to `^9.39.5` (superseded by commit [8ac0d12](https://github.com/Neziahtech/streampay/commit/8ac0d12a4b77309fde0de1ac0fc347747d83efca) upgrading to `^10.12.0`). |
 | [0010](./0010-payment-link-reference-format.md) | Shareable Payment Link Reference Format and Privacy Blinding | Accepted | 2026-10-17 | Adopt base64url payload with recipient blinding hash and CRC32 checksum for shareable payment links. |
 | [0011](./0011-attestation-signing-scheme.md) | Signing Scheme for Release Build Attestations | Accepted | 2026-10-17 | Independent verifier Ed25519 signatures with in-repo trust anchor and POSIX verification script. |
+| [0012](./0012-piecewise-rate-schedule-storage.md) | Piecewise Rate Schedules — Representation, Rounding, and Storage | Accepted | 2026-10-21 | Price renegotiated streams as `(allocation, basis_seconds)` windows under their own storage key, so the past is never re-priced and the new window accrues with no division. |
 
 ## How to Propose a New ADR
 

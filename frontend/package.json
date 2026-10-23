@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test && vitest run",
+    "test:i18n": "vitest run lib/i18n/catalog.spec.ts",
     "test:accrual": "node --test lib/accrual.test.ts",
     "test:scheduler": "vitest run",
     "test:parity": "node --experimental-strip-types --test test/client-parity.test.ts",
@@ -19,6 +20,7 @@
   "dependencies": {
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^17.2.1",
+    "intl-messageformat": "^12.1.3",
     "next": "^16.4.2",
     "react": "^19.0.0",
     "react-dom": "^19.3.1"

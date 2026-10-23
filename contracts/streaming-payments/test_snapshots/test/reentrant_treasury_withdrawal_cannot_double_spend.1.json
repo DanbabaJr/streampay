@@ -376,6 +376,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "use_oracle"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "withdrawn"
                     },
                     "val": {

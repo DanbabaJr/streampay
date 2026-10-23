@@ -31,6 +31,8 @@ doc = false
 bench = false
 
 [[bin]]
+name = "dispute_bond"
+path = "fuzz_targets/dispute_bond.rs"
 name = "differential"
 path = "fuzz_targets/differential.rs"
 test = false
@@ -44,6 +46,13 @@ test = false
 doc = false
 bench = false
 
+
+[[bin]]
+name = "rate_schedule"
+path = "fuzz_targets/rate_schedule.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "campaign"

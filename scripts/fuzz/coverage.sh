@@ -13,7 +13,7 @@ set -euo pipefail
 OUT="${1:?campaign directory}"; shift
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FUZZ="$ROOT/fuzz"
-targets=("$@"); [[ ${#targets[@]} -gt 0 ]] || targets=(campaign differential conservation streamed_at)
+targets=("$@"); [[ ${#targets[@]} -gt 0 ]] || targets=(campaign differential conservation rate_schedule streamed_at)
 
 SYSROOT="$(rustc --print sysroot)"
 LLVM_COV="$(find "$SYSROOT" -name llvm-cov -type f | head -1)"

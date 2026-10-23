@@ -17,9 +17,29 @@ jobs:
     name: Contract — test / fmt / clippy / wasm
     runs-on: ubuntu-latest
     env:
-      # Single source of truth for the Wasm size budget (KB, issue #35).
-      # Raise deliberately in a PR with justification if the contract grows.
-      WASM_SIZE_BUDGET_KB: 120
+      # Single source of truth for the Wasm size budget (KB). The rule is:
+      # the smallest whole KB that the current public interface fits, so the
+      # ratchet stays as tight as the interface allows. 90 KB = this build's
+      # 91,534 B + 2,606 B of headroom. History: issue #58's techniques took the
+      # contract from 91,004 B to 60,386 B, upstream's ownership-transfer +
+      # vault surface added 3,757 B (gate: 63 KB), and the governance timelock
+      # that has now merged adds 14,123 B more — 10,005 B of `code`, 3,072 B of
+      # structural spec entries, 748 B of `data` topics and 235 B of exports, on
+      # top of the ungated `///` docs its new interface items carried (6,416 B,
+      # recovered by re-applying Technique 1; docs/WASM_SIZE.md). The recipient
+      # dispute flow (#55) then adds 7,004 B on top of that 77 KB gate: 5
+      # entrypoints, 3 events, 2 types, 3 error codes and one persistent storage
+      # key, no new dependencies, measured with the pinned stellar-cli 28.1.0.
+      # Its interface items merged without Technique 1, so the same gating that
+      # governance needed here recovers 5,048 B (90,318 B before, 85,270 B
+      # after). Issue #54's mid-stream rate renegotiation adds 6,347 B on top of
+      # that — 4,162 B of `code` (the propose/accept/cancel legs and the piecewise
+      # accrual helpers), 1,512 B of structural `contractspecv0` entries (5
+      # entrypoints, 2 events, 2 stored structs, 4 error codes), 537 B of `data`
+      # event symbols, 107 B of exports and 29 B of meta. Merged together the two
+      # feature branches produce 91,534 B (89.4 KB → 90 KB gate). The next
+      # entrypoint addition should trigger the split discussion, not a bump.
+      WASM_SIZE_BUDGET_KB: 90
     steps:
       - uses: actions/checkout@v7
 
@@ -121,6 +141,18 @@ jobs:
       - name: Wasm build (stellar contract build)
         working-directory: contracts/streaming-payments
         run: stellar contract build
+
+      # Issue #58's Technique 1 invariant, as a gate rather than a one-off edit:
+      # no `#[contracttype]`/`#[contracterror]`/`#[contractevent]` item and no
+      # `pub fn` in `#[contractimpl]` may carry a plain `///` doc comment,
+      # because `soroban-sdk-macros` embeds those strings into `contractspecv0`
+      # (~6.4 KB of the binary when the governance interface merged with plain
+      # docs and silently broke this rule). Host documentation is unaffected —
+      # the same text lives in a `cfg_attr(not(target_family = "wasm"), doc)`
+      # attribute. Scoped to streampay deliberately: the other crates are not
+      # covered by the size budget below.
+      - name: Interface doc strings stay out of the Wasm spec
+        run: python3 scripts/gate_interface_docs.py --check contracts/streaming-payments/src/*.rs
 
       - name: Wasm size budget check
         run: |

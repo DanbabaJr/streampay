@@ -8,21 +8,21 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 
 | Code | Variant | Status | Processed by | Meaning |
 | ---: | --- | --- | --- | --- |
-| 1 | `StreamNotFound` | reachable (1 branch(es)) | `accept_ownership_transfer`, `available`, `cancel_stream`, `get_stream`, `propose_ownership_transfer`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_max` | no stream is stored under the id |
+| 1 | `StreamNotFound` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `available`, `cancel_stream`, `expire_dispute`, `get_stream`, `propose_ownership_transfer`, `propose_rate_change`, `raise_dispute`, `required_dispute_bond`, `resolve_dispute`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_max` | no stream is stored under the id |
 | 2 | `NotStreamSender` | **retired** (unreachable) | — | Reserved role check from the original draft. The contract authorizes sender-only actions by comparing the caller address directly and uses `NotAuthorized` (#12) otherwise, so this variant is never returned. Retained for wire compatibility. |
 | 3 | `NotStreamRecipient` | **retired** (unreachable) | — | Reserved role check from the original draft. Recipient-only actions require the recipient's authorization (`require_auth`) and use `NotAuthorized` (#12) for business-rule rejections, so this variant is never returned. Retained for wire compatibility. |
 | 4 | `StreamNotCancellable` | reachable (1 branch(es)) | `cancel_stream` | the recipient calls cancel_stream on a stream created non-cancelable |
-| 5 | `StreamNotActive` | reachable (1 branch(es)) | `accept_ownership_transfer`, `cancel_stream`, `propose_ownership_transfer`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_max` | the stream status is Cancelled or Depleted |
+| 5 | `StreamNotActive` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `cancel_stream`, `propose_ownership_transfer`, `propose_rate_change`, `raise_dispute`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_max` | the stream status is Cancelled or Depleted |
 | 6 | `StartTimeInPast` | reachable (1 branch(es)) | `create_stream`, `create_streams` | start_time is before the current ledger timestamp |
-| 7 | `InvalidTimeRange` | reachable (1 branch(es)) | `create_stream`, `create_streams` | end_time is not strictly after start_time (zero or negative duration) |
+| 7 | `InvalidTimeRange` | reachable (2 branch(es)) | `accept_rate_change`, `create_stream`, `create_streams`, `propose_rate_change` | end_time is not strictly after start_time (zero or negative duration); the stream's end_time is at or before the current time, so no window is left to re-rate |
 | 8 | `DurationTooLong` | reachable (1 branch(es)) | `create_stream`, `create_streams` | duration exceeds MAX_DURATION_SECONDS (100 years) |
-| 9 | `ZeroAmount` | reachable (6 branch(es)) | `create_stream`, `create_streams`, `register_sponsor`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_treasury` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative; treasury withdrawal amount is zero or negative; a sponsor budget cap (per-period or per-beneficiary) is zero or negative; a sponsored claim requests a zero or negative payout |
+| 9 | `ZeroAmount` | reachable (7 branch(es)) | `create_stream`, `create_streams`, `propose_rate_change`, `register_sponsor`, `sponsored_withdraw`, `top_up`, `withdraw`, `withdraw_treasury` | deposit_amount is zero or negative; withdraw amount is zero or negative; top-up amount is zero or negative; treasury withdrawal amount is zero or negative; a sponsor budget cap (per-period or per-beneficiary) is zero or negative; a sponsored claim requests a zero or negative payout; the proposed amount_per_second is zero or negative |
 | 10 | `AmountExceedsAvailable` | reachable (2 branch(es)) | `sponsored_withdraw`, `withdraw` | amount exceeds the accrued-but-unwithdrawn balance; a sponsored claim exceeds the stream's accrued-but-unwithdrawn balance |
-| 11 | `MathOverflow` | reachable (6 branch(es)) | `available`, `cancel_stream`, `create_stream`, `sponsored_withdraw`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128 |
-| 12 | `NotAuthorized` | reachable (4 branch(es)) | `accept_ownership_transfer`, `cancel_ownership_transfer`, `cancel_stream`, `propose_ownership_transfer` | the caller is neither the sender nor the recipient; the caller is neither the current sender nor the current recipient; the caller is not the proposal's named new owner; the caller did not create the pending ownership proposal |
+| 11 | `MathOverflow` | reachable (9 branch(es)) | `accept_rate_change`, `available`, `cancel_stream`, `create_stream`, `sponsored_withdraw`, `streamed_at`, `top_up`, `withdraw`, `withdraw_max` | deposit + amount would overflow i128; deposit * duration would overflow u128; deposit * elapsed would overflow u128; withdrawn exceeds streamed (an invariant-violating stored stream); the cancel pro-rata split would underflow; withdrawn + amount would overflow i128; amount_per_second * remaining_seconds (or owed + that reserve) would overflow i128; adding a per-segment term would overflow i128 (accrual sum, or a top-up onto a segment's allocation); deposit - owed would underflow (an invariant-violating stored stream) |
+| 12 | `NotAuthorized` | reachable (9 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `cancel_ownership_transfer`, `cancel_rate_change`, `cancel_stream`, `propose_ownership_transfer`, `propose_rate_change`, `resolve_dispute` | the caller is neither the sender nor the recipient; resolve_dispute called by a non-sender; the caller is neither the current sender nor the current recipient; the caller is not the proposal's named new owner; the caller did not create the pending ownership proposal; the caller is neither the current sender nor the current recipient; the caller is not the proposal's named counterparty; the proposal's proposer or counterparty no longer holds a role on the stream; the caller did not create the pending rate-change proposal |
 | 13 | `NothingToWithdraw` | reachable (1 branch(es)) | `withdraw_max` | nothing has accrued yet, or everything accrued was already withdrawn |
 | 14 | `FeeRateTooHigh` | reachable (1 branch(es)) | `set_fee_bps` | new_fee_bps exceeds MAX_FEE_BPS (the protocol cap) |
-| 15 | `NotGovernor` | reachable (2 branch(es)) | `accept_governor`, `cancel_upgrade`, `execute_upgrade`, `migrate_storage`, `nominate_governor`, `propose_upgrade`, `set_fee_bps`, `set_frozen`, `set_stream_policy`, `withdraw_treasury` | the caller is not the treasury governor; the caller is not the nominated governor |
+| 15 | `NotGovernor` | reachable (2 branch(es)) | `accept_governor`, `cancel_upgrade`, `execute_upgrade`, `governance_bootstrap`, `migrate_storage`, `nominate_governor`, `propose_upgrade`, `set_fee_bps`, `set_frozen`, `set_stream_policy`, `withdraw_treasury` | the caller is not the treasury governor; the caller is not the nominated governor |
 | 16 | `NoPendingGovernor` | reachable (1 branch(es)) | `accept_governor` | accept_governor with no nomination pending |
 | 17 | `InsufficientTreasuryBalance` | reachable (1 branch(es)) | `withdraw_treasury` | amount exceeds fees collected minus fees already withdrawn |
 | 18 | `IntentNotFound` | reachable (1 branch(es)) | `cancel_scheduled`, `execute_scheduled`, `get_intent`, `reclaim_expired` | no scheduled intent is stored under the id |
@@ -34,23 +34,23 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 24 | `IntentParamsMismatch` | reachable (1 branch(es)) | `execute_scheduled` | stored parameters do not match the authorization commitment |
 | 25 | `IntentNotExpired` | reachable (1 branch(es)) | `reclaim_expired` | the intent has not reached expires_at |
 | 26 | `DepositTransferFailed` | reachable (1 branch(es)) | `create_stream`, `create_streams` | the token refuses the deposit (+fee) pull (allowance, balance, or a non-compliant token) |
-| 27 | `TopUpTransferFailed` | reachable (1 branch(es)) | `top_up` | the token refuses the pull of the added funds |
+| 27 | `TopUpTransferFailed` | reachable (2 branch(es)) | `accept_rate_change`, `top_up` | the token refuses the pull of the added funds; the token refuses the pull of the shortfall a rate increase requires |
 | 28 | `RecipientPayoutFailed` | reachable (1 branch(es)) | `cancel_stream`, `withdraw`, `withdraw_max` | the token refuses a payout to the recipient |
-| 29 | `SenderRefundFailed` | reachable (1 branch(es)) | `cancel_stream` | the token refuses the refund to the sender |
+| 29 | `SenderRefundFailed` | reachable (2 branch(es)) | `accept_rate_change`, `cancel_stream` | the token refuses the refund to the sender; the token refuses the refund of the escrow a rate decrease frees |
 | 30 | `TreasuryPayoutFailed` | reachable (1 branch(es)) | `withdraw_treasury` | the token refuses the payout of collected protocol fees |
 | 31 | `PolicyAssetNotAllowed` | reachable (1 branch(es)) | `create_stream`, `create_streams` | the asset is not permitted by the policy module allowlist |
 | 32 | `PolicyTimelockNotElapsed` | reachable (1 branch(es)) | `policy_execute_asset` | the timelock delay has not elapsed for this queued policy change |
 | 33 | `PolicyNoQueuedChange` | reachable (1 branch(es)) | `policy_execute_asset` | no policy change is queued for the specified asset |
 | 34 | `PolicyNotInitialized` | reachable (1 branch(es)) | `policy_accept_handoff`, `policy_cancel_handoff`, `policy_execute_asset`, `policy_propose_asset`, `policy_propose_handoff`, `policy_set_timelock_delay` | the policy module has not been initialized |
 | 35 | `PolicyNoPendingHandoff` | reachable (1 branch(es)) | `policy_accept_handoff`, `policy_cancel_handoff` | no admin handoff proposal is pending |
-| 36 | `ContractFrozen` | reachable (1 branch(es)) | `accept_ownership_transfer`, `cancel_ownership_transfer`, `cancel_stream`, `create_stream`, `create_streams`, `propose_ownership_transfer`, `top_up`, `withdraw`, `withdraw_max` | the contract is frozen for maintenance or upgrade |
+| 36 | `ContractFrozen` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `cancel_ownership_transfer`, `cancel_rate_change`, `cancel_stream`, `create_stream`, `create_streams`, `propose_ownership_transfer`, `propose_rate_change`, `top_up`, `withdraw`, `withdraw_max` | the contract is frozen for maintenance or upgrade |
 | 37 | `ContractNotFrozen` | reachable (1 branch(es)) | `migrate_storage` | storage migration requires the contract to be frozen |
 | 38 | `NoPendingUpgrade` | reachable (2 branch(es)) | `cancel_upgrade`, `execute_upgrade` | execute_upgrade called with no upgrade pending; cancel_upgrade called with no upgrade pending |
 | 39 | `TimelockNotExpired` | reachable (1 branch(es)) | `execute_upgrade` | upgrade timelock delay has not yet expired |
 | 40 | `UpgradeDelayTooShort` | reachable (1 branch(es)) | `propose_upgrade` | proposed upgrade delay is shorter than MIN_UPGRADE_DELAY_SECONDS |
 | 41 | `AlreadyMigrated` | reachable (1 branch(es)) | `migrate_storage` | storage has already been migrated to the target schema version |
-| 42 | `PolicyRateBelowFloor` | reachable (1 branch(es)) | `create_stream`, `create_streams`, `top_up` | stream rate is below the governance policy floor |
-| 43 | `PolicyRateAboveCeiling` | reachable (1 branch(es)) | `create_stream`, `create_streams`, `top_up` | stream rate exceeds the governance policy ceiling |
+| 42 | `PolicyRateBelowFloor` | reachable (2 branch(es)) | `accept_rate_change`, `create_stream`, `create_streams`, `top_up` | stream rate is below the governance policy floor; the new rate is below the governance policy rate floor |
+| 43 | `PolicyRateAboveCeiling` | reachable (2 branch(es)) | `accept_rate_change`, `create_stream`, `create_streams`, `top_up` | stream rate exceeds the governance policy ceiling; the new rate exceeds the governance policy rate ceiling |
 | 44 | `PolicyDurationBelowFloor` | reachable (1 branch(es)) | `create_stream`, `create_streams` | stream duration is below the governance policy floor |
 | 45 | `PolicyDurationAboveCeiling` | reachable (1 branch(es)) | `create_stream`, `create_streams` | stream duration exceeds the governance policy ceiling |
 | 46 | `PolicyDepositBelowFloor` | reachable (1 branch(es)) | `create_stream`, `create_streams`, `top_up` | stream deposit is below the governance policy floor |
@@ -71,6 +71,29 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 61 | `OwnershipProposalExpired` | reachable (1 branch(es)) | `accept_ownership_transfer` | the proposal's acceptance window has elapsed |
 | 62 | `InvalidTransferTarget` | reachable (1 branch(es)) | `propose_ownership_transfer` | the proposed target already holds that role |
 | 63 | `OwnershipProposalPending` | reachable (1 branch(es)) | `propose_ownership_transfer` | an unexpired ownership proposal already exists for the stream |
+| 64 | `GovernanceNotInitialized` | reachable (1 branch(es)) | `governance_execute`, `governance_propose`, `governance_sign`, `governance_veto` | the governance signer set has not been bootstrapped |
+| 65 | `GovernanceAlreadyInitialized` | reachable (1 branch(es)) | `governance_bootstrap` | governance_bootstrap was called but a signer set already exists |
+| 66 | `NotGovernanceSigner` | reachable (1 branch(es)) | `governance_propose`, `governance_sign`, `governance_veto` | the caller is not a member of the signer set |
+| 67 | `GovernanceDuplicateSigner` | reachable (1 branch(es)) | `governance_bootstrap`, `governance_execute`, `governance_propose` | the signer set lists the same address twice (one key in two slots) |
+| 68 | `GovernanceSignerSetEmpty` | reachable (1 branch(es)) | `governance_bootstrap`, `governance_execute`, `governance_propose` | the signer set is empty |
+| 69 | `GovernanceTooManySigners` | reachable (1 branch(es)) | `governance_bootstrap`, `governance_execute`, `governance_propose` | the signer set exceeds MAX_SIGNERS |
+| 70 | `GovernanceSignersNotDistinct` | reachable (1 branch(es)) | `governance_bootstrap`, `governance_execute`, `governance_propose` | the signer set holds fewer than two distinct keys |
+| 71 | `GovernanceProposalNotFound` | reachable (1 branch(es)) | `governance_execute`, `governance_sign`, `governance_veto` | no proposal is stored under the id |
+| 72 | `GovernanceVetoWindowOpen` | reachable (1 branch(es)) | `governance_execute` | execution was attempted before the veto window closed |
+| 73 | `GovernanceVetoWindowClosed` | reachable (1 branch(es)) | `governance_veto` | a veto was attempted after the veto window closed |
+| 74 | `GovernanceVetoWindowTooShort` | reachable (1 branch(es)) | `governance_bootstrap`, `governance_propose` | the veto window is shorter than MIN_VETO_WINDOW_SECONDS |
+| 75 | `GovernanceAlreadyVetoed` | reachable (1 branch(es)) | `governance_execute`, `governance_sign`, `governance_veto` | the proposal was vetoed and is dead |
+| 76 | `GovernanceAlreadyExecuted` | reachable (1 branch(es)) | `governance_execute`, `governance_sign`, `governance_veto` | the proposal has already been executed |
+| 77 | `GovernanceDuplicateSignature` | reachable (1 branch(es)) | `governance_sign` | this address already signed the proposal; execution needs two distinct keys |
+| 78 | `GovernanceSignaturesInsufficient` | reachable (1 branch(es)) | `governance_execute` | fewer than the required distinct, still-current signatures are recorded |
+| 79 | `GovernanceTimelockRequired` | reachable (1 branch(es)) | `execute_upgrade`, `migrate_storage`, `nominate_governor`, `propose_upgrade`, `set_fee_bps`, `set_frozen`, `set_oracle_config`, `set_stream_policy`, `withdraw_treasury` | the action requires an executed governance proposal now that governance is bootstrapped |
+| 80 | `DisputeActive` | reachable (3 branch(es)) | `cancel_stream`, `raise_dispute`, `top_up` | an open dispute freezes cancel_stream; an open dispute freezes top_up; raise_dispute called while a dispute is open |
+| 81 | `DisputeNotFound` | reachable (1 branch(es)) | `expire_dispute`, `get_dispute`, `resolve_dispute` | no open dispute exists on the stream |
+| 82 | `DisputeNotExpired` | reachable (1 branch(es)) | `expire_dispute` | expire_dispute called before the dispute timelock elapsed |
+| 83 | `NoPendingRateChange` | reachable (1 branch(es)) | `accept_rate_change`, `cancel_rate_change` | no rate-change proposal is stored for the stream |
+| 84 | `RateProposalExpired` | reachable (1 branch(es)) | `accept_rate_change` | the rate proposal's acceptance window has elapsed |
+| 85 | `RateProposalPending` | reachable (1 branch(es)) | `propose_rate_change` | an unexpired rate-change proposal already exists for the stream |
+| 86 | `TooManyRateSegments` | reachable (1 branch(es)) | `accept_rate_change` | the stream already carries MAX_RATE_SEGMENTS rate-change segments |
 
 ## Branch matrix (entrypoint × condition → error)
 
@@ -87,15 +110,21 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `CancelStreamNotAuthorized` | `cancel_stream` | `NotAuthorized` | 12 | the caller is neither the sender nor the recipient | reachable |
 | `TopUpAmountNonPositive` | `top_up` | `ZeroAmount` | 9 | top-up amount is zero or negative | reachable |
 | `TopUpDepositOverflow` | `top_up` | `MathOverflow` | 11 | deposit + amount would overflow i128 | reachable |
-| `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
-| `StreamNotActive` | `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer` | `StreamNotActive` | 5 | the stream status is Cancelled or Depleted | reachable |
-| `CapacityOverflow` | `create_stream`, `top_up` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |
-| `RateProductOverflow` | `streamed_at`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `sponsored_withdraw` | `MathOverflow` | 11 | deposit * elapsed would overflow u128 | reachable |
+| `CancelDuringDispute` | `cancel_stream` | `DisputeActive` | 80 | an open dispute freezes cancel_stream | reachable |
+| `TopUpDuringDispute` | `top_up` | `DisputeActive` | 80 | an open dispute freezes top_up | reachable |
+| `RaiseDisputeAlreadyActive` | `raise_dispute` | `DisputeActive` | 80 | raise_dispute called while a dispute is open | reachable |
+| `DisputeNotOpen` | `get_dispute`, `resolve_dispute`, `expire_dispute` | `DisputeNotFound` | 81 | no open dispute exists on the stream | reachable |
+| `ExpireDisputeTooEarly` | `expire_dispute` | `DisputeNotExpired` | 82 | expire_dispute called before the dispute timelock elapsed | reachable |
+| `ResolveCallerNotSender` | `resolve_dispute` | `NotAuthorized` | 12 | resolve_dispute called by a non-sender | reachable |
+| `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `raise_dispute`, `expire_dispute`, `resolve_dispute`, `required_dispute_bond`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer`, `propose_rate_change`, `accept_rate_change` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
+| `StreamNotActive` | `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `raise_dispute`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer`, `propose_rate_change`, `accept_rate_change` | `StreamNotActive` | 5 | the stream status is Cancelled or Depleted | reachable |
+| `CapacityOverflow` | `create_stream`, `top_up`, `accept_rate_change` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |
+| `RateProductOverflow` | `streamed_at`, `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `sponsored_withdraw`, `accept_rate_change` | `MathOverflow` | 11 | deposit * elapsed would overflow u128 | reachable |
 | `AvailableBalanceOverflow` | `available`, `withdraw`, `withdraw_max` | `MathOverflow` | 11 | withdrawn exceeds streamed (an invariant-violating stored stream) | defensive (unreachable) |
 | `CancelSplitOverflow` | `cancel_stream` | `MathOverflow` | 11 | the cancel pro-rata split would underflow | defensive (unreachable) |
 | `PayoutOverflow` | `withdraw`, `withdraw_max`, `sponsored_withdraw` | `MathOverflow` | 11 | withdrawn + amount would overflow i128 | defensive (unreachable) |
 | `SetFeeRateTooHigh` | `set_fee_bps` | `FeeRateTooHigh` | 14 | new_fee_bps exceeds MAX_FEE_BPS (the protocol cap) | reachable |
-| `GovernorNotAllowed` | `set_fee_bps`, `nominate_governor`, `withdraw_treasury`, `set_frozen`, `propose_upgrade`, `cancel_upgrade`, `execute_upgrade`, `migrate_storage`, `set_stream_policy` | `NotGovernor` | 15 | the caller is not the treasury governor | reachable |
+| `GovernorNotAllowed` | `set_fee_bps`, `nominate_governor`, `withdraw_treasury`, `set_frozen`, `propose_upgrade`, `cancel_upgrade`, `execute_upgrade`, `migrate_storage`, `set_stream_policy`, `governance_bootstrap` | `NotGovernor` | 15 | the caller is not the treasury governor | reachable |
 | `AcceptGovernorNoPending` | `accept_governor` | `NoPendingGovernor` | 16 | accept_governor with no nomination pending | reachable |
 | `AcceptGovernorNotNominee` | `accept_governor` | `NotGovernor` | 15 | the caller is not the nominated governor | reachable |
 | `WithdrawTreasuryAmountNonPositive` | `withdraw_treasury` | `ZeroAmount` | 9 | treasury withdrawal amount is zero or negative | reachable |
@@ -130,7 +159,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `PolicyNoPendingHandoff` | `policy_accept_handoff`, `policy_cancel_handoff` | `PolicyNoPendingHandoff` | 35 | no admin handoff proposal is pending | reachable |
 | `CreateBatchEmpty` | `create_streams_batch` | `BatchEmpty` | 47 | entries is empty | reachable |
 | `CreateBatchTooLarge` | `create_streams_batch` | `BatchTooLarge` | 48 | entries length exceeds MAX_BATCH | reachable |
-| `ContractFrozen` | `create_stream`, `create_streams`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `propose_ownership_transfer`, `accept_ownership_transfer`, `cancel_ownership_transfer` | `ContractFrozen` | 36 | the contract is frozen for maintenance or upgrade | reachable |
+| `ContractFrozen` | `create_stream`, `create_streams`, `withdraw`, `withdraw_max`, `cancel_stream`, `top_up`, `propose_ownership_transfer`, `accept_ownership_transfer`, `cancel_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `cancel_rate_change` | `ContractFrozen` | 36 | the contract is frozen for maintenance or upgrade | reachable |
 | `MigrationNotFrozen` | `migrate_storage` | `ContractNotFrozen` | 37 | storage migration requires the contract to be frozen | reachable |
 | `ExecuteUpgradeNoPending` | `execute_upgrade` | `NoPendingUpgrade` | 38 | execute_upgrade called with no upgrade pending | reachable |
 | `CancelUpgradeNoPending` | `cancel_upgrade` | `NoPendingUpgrade` | 38 | cancel_upgrade called with no upgrade pending | reachable |
@@ -153,6 +182,39 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `OwnershipProposalExpired` | `accept_ownership_transfer` | `OwnershipProposalExpired` | 61 | the proposal's acceptance window has elapsed | reachable |
 | `NoPendingOwnership` | `accept_ownership_transfer`, `cancel_ownership_transfer` | `NoPendingOwnership` | 60 | no ownership proposal is stored for the stream | reachable |
 | `CancelProposalNotProposer` | `cancel_ownership_transfer` | `NotAuthorized` | 12 | the caller did not create the pending ownership proposal | reachable |
+| `GovernanceNotInitialized` | `governance_propose`, `governance_sign`, `governance_veto`, `governance_execute` | `GovernanceNotInitialized` | 64 | the governance signer set has not been bootstrapped | reachable |
+| `GovernanceAlreadyInitialized` | `governance_bootstrap` | `GovernanceAlreadyInitialized` | 65 | governance_bootstrap was called but a signer set already exists | reachable |
+| `NotGovernanceSigner` | `governance_propose`, `governance_sign`, `governance_veto` | `NotGovernanceSigner` | 66 | the caller is not a member of the signer set | reachable |
+| `GovernanceDuplicateSigner` | `governance_bootstrap`, `governance_propose`, `governance_execute` | `GovernanceDuplicateSigner` | 67 | the signer set lists the same address twice (one key in two slots) | reachable |
+| `GovernanceSignerSetEmpty` | `governance_bootstrap`, `governance_propose`, `governance_execute` | `GovernanceSignerSetEmpty` | 68 | the signer set is empty | reachable |
+| `GovernanceTooManySigners` | `governance_bootstrap`, `governance_propose`, `governance_execute` | `GovernanceTooManySigners` | 69 | the signer set exceeds MAX_SIGNERS | reachable |
+| `GovernanceSignersNotDistinct` | `governance_bootstrap`, `governance_propose`, `governance_execute` | `GovernanceSignersNotDistinct` | 70 | the signer set holds fewer than two distinct keys | reachable |
+| `GovernanceProposalNotFound` | `governance_sign`, `governance_veto`, `governance_execute` | `GovernanceProposalNotFound` | 71 | no proposal is stored under the id | reachable |
+| `GovernanceVetoWindowOpen` | `governance_execute` | `GovernanceVetoWindowOpen` | 72 | execution was attempted before the veto window closed | reachable |
+| `GovernanceVetoWindowClosed` | `governance_veto` | `GovernanceVetoWindowClosed` | 73 | a veto was attempted after the veto window closed | reachable |
+| `GovernanceVetoWindowTooShort` | `governance_bootstrap`, `governance_propose` | `GovernanceVetoWindowTooShort` | 74 | the veto window is shorter than MIN_VETO_WINDOW_SECONDS | reachable |
+| `GovernanceAlreadyVetoed` | `governance_sign`, `governance_veto`, `governance_execute` | `GovernanceAlreadyVetoed` | 75 | the proposal was vetoed and is dead | reachable |
+| `GovernanceAlreadyExecuted` | `governance_sign`, `governance_veto`, `governance_execute` | `GovernanceAlreadyExecuted` | 76 | the proposal has already been executed | reachable |
+| `GovernanceDuplicateSignature` | `governance_sign` | `GovernanceDuplicateSignature` | 77 | this address already signed the proposal; execution needs two distinct keys | reachable |
+| `GovernanceSignaturesInsufficient` | `governance_execute` | `GovernanceSignaturesInsufficient` | 78 | fewer than the required distinct, still-current signatures are recorded | reachable |
+| `GovernanceTimelockRequired` | `set_fee_bps`, `nominate_governor`, `withdraw_treasury`, `set_stream_policy`, `set_frozen`, `propose_upgrade`, `execute_upgrade`, `migrate_storage`, `set_oracle_config` | `GovernanceTimelockRequired` | 79 | the action requires an executed governance proposal now that governance is bootstrapped | reachable |
+| `RateProposeNotAuthorized` | `propose_rate_change` | `NotAuthorized` | 12 | the caller is neither the current sender nor the current recipient | reachable |
+| `RateProposalAmountNonPositive` | `propose_rate_change` | `ZeroAmount` | 9 | the proposed amount_per_second is zero or negative | reachable |
+| `RateProposalWindowElapsed` | `propose_rate_change`, `accept_rate_change` | `InvalidTimeRange` | 7 | the stream's end_time is at or before the current time, so no window is left to re-rate | reachable |
+| `RateProposalPending` | `propose_rate_change` | `RateProposalPending` | 85 | an unexpired rate-change proposal already exists for the stream | reachable |
+| `RateAcceptNotTarget` | `accept_rate_change` | `NotAuthorized` | 12 | the caller is not the proposal's named counterparty | reachable |
+| `RateAcceptStaleParties` | `accept_rate_change` | `NotAuthorized` | 12 | the proposal's proposer or counterparty no longer holds a role on the stream | reachable |
+| `RateProposalExpired` | `accept_rate_change` | `RateProposalExpired` | 84 | the rate proposal's acceptance window has elapsed | reachable |
+| `NoPendingRateChange` | `accept_rate_change`, `cancel_rate_change` | `NoPendingRateChange` | 83 | no rate-change proposal is stored for the stream | reachable |
+| `RateCancelNotProposer` | `cancel_rate_change` | `NotAuthorized` | 12 | the caller did not create the pending rate-change proposal | reachable |
+| `RateReserveOverflow` | `accept_rate_change` | `MathOverflow` | 11 | amount_per_second * remaining_seconds (or owed + that reserve) would overflow i128 | reachable |
+| `RateSegmentSumOverflow` | `available`, `withdraw`, `withdraw_max`, `cancel_stream`, `sponsored_withdraw`, `accept_rate_change`, `top_up` | `MathOverflow` | 11 | adding a per-segment term would overflow i128 (accrual sum, or a top-up onto a segment's allocation) | defensive (unreachable) |
+| `RateHeadroomUnderflow` | `accept_rate_change` | `MathOverflow` | 11 | deposit - owed would underflow (an invariant-violating stored stream) | defensive (unreachable) |
+| `RateSegmentLimitReached` | `accept_rate_change` | `TooManyRateSegments` | 86 | the stream already carries MAX_RATE_SEGMENTS rate-change segments | reachable |
+| `RatePolicyBelowFloor` | `accept_rate_change` | `PolicyRateBelowFloor` | 42 | the new rate is below the governance policy rate floor | reachable |
+| `RatePolicyAboveCeiling` | `accept_rate_change` | `PolicyRateAboveCeiling` | 43 | the new rate exceeds the governance policy rate ceiling | reachable |
+| `RateTopUpTransferFailed` | `accept_rate_change` | `TopUpTransferFailed` | 27 | the token refuses the pull of the shortfall a rate increase requires | reachable |
+| `RateRefundFailed` | `accept_rate_change` | `SenderRefundFailed` | 29 | the token refuses the refund of the escrow a rate decrease frees | reachable |
 
 ## Retired codes
 
@@ -165,4 +227,4 @@ Codes are append-only: a retired code is never renumbered, reused, or removed �
 
 ## Defensive branches
 
-A defensive branch is a `checked_*` guard whose precondition the contract's invariants rule out for any stored stream. It has a code (so it is not a dead *code*) but cannot be triggered; the matrix test asserts it never fires: `AvailableBalanceOverflow`, `CancelSplitOverflow`, `PayoutOverflow`.
+A defensive branch is a `checked_*` guard whose precondition the contract's invariants rule out for any stored stream. It has a code (so it is not a dead *code*) but cannot be triggered; the matrix test asserts it never fires: `AvailableBalanceOverflow`, `CancelSplitOverflow`, `PayoutOverflow`, `RateSegmentSumOverflow`, `RateHeadroomUnderflow`.

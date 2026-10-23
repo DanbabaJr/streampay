@@ -51,6 +51,15 @@ The harness measures:
 | `withdraw_max` | RMW | 1 Stream Entry | 338,663 | 134,329 | 236 B |
 | `sender_streams (5 ids)` | Read | 1 Index Entry | 52,369 | 25,006 | 0 B |
 
+> **Re-measured after #54 (rate renegotiation).** Every accrual path now reads
+> the rate schedule from its own storage key, so each one pays an extra
+> persistent lookup even for a stream that never renegotiated — the `withdraw`
+> path moved from the 360,000-instruction budget the harness carried before this
+> change to a measured 365,133. `create_stream` is unchanged: a new stream has
+> no schedule to price. The numbers the harness asserts against today are in §6,
+> and §4 Candidate 5 records why the extra read was accepted rather than
+> avoided.
+
 ### 3.2 Wire & Storage Byte Footprint
 
 | Component | Entity | Serialized Payload (Bytes) | Key Size (Bytes) | Total Ledger Footprint |
@@ -123,6 +132,38 @@ The harness measures:
 
 ---
 
+### Candidate 5: Where a Negotiated Rate Schedule Lives (Implemented)
+- **Mechanism Tested:**
+  #54 replaced "one rate per stream" with a schedule of priced windows. The
+  schedule has to be readable by every accrual path (`available`, `withdraw`,
+  `withdraw_max`, `cancel_stream`, `streamed_at`, `sponsored_claim`), so the
+  question is which entry it is stored in.
+- **Options and measured results:**
+  - **Inline on `Stream`** (a `rate_segments` field): one read, but it changes
+    the XDR layout of `DataKey::Stream(id)` — every stream written by an earlier
+    release would fail to deserialize, which the append-only interface rule
+    ([ADR-0003](adr/0003-append-only-interface.md)) forbids, and it inflates the
+    entry every path reads and writes even when no renegotiation ever happened.
+  - **A `has_schedule` flag on `Stream`** to skip the read for never-renegotiated
+    streams: saves one lookup and costs the layout change above, i.e. it buys
+    nothing that Candidate 5 is trying to buy.
+  - **`DataKey::RateSegments(id)`, a separate persistent entry (implemented)**:
+    no stored layout changes, the entry only exists on a stream that actually
+    renegotiated, and its TTL is maintained with the schedule's own writes. The
+    price is one absent-key lookup on the accrual paths of every other stream.
+- **Measured cost of that lookup:** `withdraw` on a never-renegotiated stream
+  costs 365,133 CPU instructions (the harness budget before #54 was 360,000).
+  A stream with a two-window schedule prices at 407,316 (**+42,183**), and a
+  schedule at the `MAX_RATE_SEGMENTS` cap of 32 windows prices at 820,911
+  (**+455,778**, roughly 14,200 per window). The cap is what keeps the worst
+  case bounded: `full_schedule_pricing_is_bounded` measures it rather than
+  assuming it.
+- **Conclusion:** **Accepted & Implemented**. The extra read is bounded, one
+  host dispatch, and it is the only option that leaves stored streams
+  byte-identical. See [ADR-0012](adr/0012-piecewise-rate-schedule-storage.md).
+
+---
+
 ## 5. Before vs. After Footprint Comparison
 
 | Operation | Metric | Before | After | Change |
@@ -150,5 +191,12 @@ The harness measures:
    - `hot_path_footprint_harness` in `contracts/streaming-payments/src/test.rs` permanently asserts that hot paths execute within instruction budgets:
      - `create_stream` <= 560,000 CPU
      - `withdraw` <= 360,000 CPU
-     - `cancel_stream` <= 540,000 CPU
+     - `cancel_stream` <= 560,000 CPU (raised from 540,000 for the dispute freeze lookup)
      - `withdraw_max` <= 350,000 CPU
+     - `create_stream` <= 560,000 CPU (541,608 measured)
+     - `withdraw` <= 370,000 CPU (365,133 measured)
+     - `cancel_stream` <= 545,000 CPU (538,801 measured)
+     - `withdraw_max` <= 375,000 CPU (368,142 measured)
+     - `withdraw` on a renegotiated (two-window) stream <= 415,000 CPU (407,316 measured)
+   - `full_schedule_pricing_is_bounded` asserts the worst case a schedule can
+     produce — a stream at the 32-segment cap — at <= 850,000 CPU (820,911 measured).

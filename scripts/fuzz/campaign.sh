@@ -16,7 +16,7 @@ set -euo pipefail
 
 HOURS=8
 JOBS=$(nproc 2>/dev/null || echo 2)
-TARGETS="campaign,differential,conservation,streamed_at"
+TARGETS="campaign,differential,conservation,rate_schedule,streamed_at"
 SLICE_MIN=30
 OUT=""
 SANITIZER=none   # coverage-guided without ASan: these targets are safe Rust

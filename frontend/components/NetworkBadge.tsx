@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useSyncExternalStore } from "react";
+import { useLocale } from "@/lib/i18n/provider";
 import {
   APP_CONTRACT_ID,
   APP_NETWORK_BADGE,
@@ -36,6 +37,7 @@ export default function NetworkBadge({
     store.getState,
     getServerSnapshot
   );
+  const { t } = useLocale();
 
   // A wallet connected before this page loaded (extension already authorised)
   // must not silently sign for the wrong network. With no extension present
@@ -51,7 +53,7 @@ export default function NetworkBadge({
           {APP_NETWORK_BADGE}
         </span>
         <span className="network-text">
-          Stellar {networkDisplayName(APP_NETWORK_LABEL)}
+          {t("chrome.networkText", { network: networkDisplayName(APP_NETWORK_LABEL) })}
         </span>
         {APP_CONTRACT_ID ? (
           <a
@@ -62,18 +64,15 @@ export default function NetworkBadge({
             title={APP_CONTRACT_ID}
           >
             <span aria-hidden="true">
-              contract {truncateContractId(APP_CONTRACT_ID)}
+              {t("chrome.contractLabel", { shortId: truncateContractId(APP_CONTRACT_ID) })}
             </span>
             {/* The exact id, spelled out for assistive tech and copy. */}
             <span className="sr-only">
-              Streaming contract id {APP_CONTRACT_ID} — opens the block
-              explorer
+              {t("chrome.contractAria", { contractId: APP_CONTRACT_ID })}
             </span>
           </a>
         ) : (
-          <span className="network-contract-unset">
-            contract id not configured
-          </span>
+          <span className="network-contract-unset">{t("chrome.contractUnset")}</span>
         )}
       </div>
 
@@ -81,11 +80,13 @@ export default function NetworkBadge({
         <div className="network-warning" role="alert">
           <div className="network-warning-body">
             <strong className="network-warning-title">
-              Wallet is on {networkDisplayName(warning.walletLabel)}
+              {t("chrome.walletOnNetwork", {
+                network: networkDisplayName(warning.walletLabel),
+              })}
             </strong>
             <p className="network-warning-text">
-              This app signs for {networkDisplayName(warning.appLabel)}.
-              Transactions will fail until the wallet matches.
+              {t("chrome.appSignsFor", { network: networkDisplayName(warning.appLabel) })}{" "}
+              {t("chrome.mismatchBody")}
             </p>
             <p className="network-warning-hint">{mismatchHint(warning)}</p>
           </div>
@@ -93,7 +94,7 @@ export default function NetworkBadge({
             type="button"
             className="network-warning-dismiss toast-close"
             onClick={store.dismiss}
-            aria-label="Dismiss network warning"
+            aria-label={t("chrome.dismissWarning")}
           >
             <span aria-hidden="true">×</span>
           </button>

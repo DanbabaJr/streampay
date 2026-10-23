@@ -39,6 +39,17 @@ contracts/streaming-payments/test_orderings/*.txt text eol=lf
 *.mjs       text eol=lf
 *.json      text eol=lf
 
+# *.toml joins the list because two gates read it with line-oriented shell:
+# scripts/attest.sh and scripts/reproducible_build.sh grep rust-toolchain.toml
+# for the pinned channel and feed the result into a content-derived stamp. On an
+# autocrlf checkout that value arrives with a trailing carriage return, which is
+# exactly the class of drift the note above exists to prevent, and the files
+# otherwise fall under `* text=auto` (LF in the index, CRLF on a Windows
+# working tree). *.py is here for the same reason as *.rs: it is a source file
+# the CI jobs execute, and it should not depend on the contributor's platform.
+*.toml      text eol=lf
+*.py        text eol=lf
+
 # Attestation payloads are signed byte-for-byte, so any line-ending
 # normalization would invalidate every signature on a Windows checkout.
 # Must come after `* text=auto` above to take effect.

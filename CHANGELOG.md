@@ -10,6 +10,47 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- Two-step rate renegotiation (#54): `propose_rate_change`,
+  `accept_rate_change`, `cancel_rate_change`, and the `pending_rate_change` and
+  `rate_segments` read views. Either party can propose a new
+  `amount_per_second` for the remainder of a live stream; only the named
+  counterparty can accept, within a seven-day window. At acceptance the accrued
+  balance is priced under the schedule that existed before the change (never
+  re-priced), the rest of the window is reserved at the new rate, and the
+  difference against the escrow still held is pulled from the sender (increase)
+  or refunded to them (decrease) in the same transaction.
+- Piecewise accrual: `Stream` streams are now priced as a schedule of
+  `RateSegment { start_time, end_time, allocation, basis_seconds }` windows.
+  `streamed_amount_at_segments` sums the unchanged pure `streamed_at` over them,
+  so an empty schedule is the pre-#54 single-window formula bit-for-bit and a
+  renegotiated window — `allocation = rate × window`, `basis_seconds = window` —
+  accrues with no division residue at all. `available`, `withdraw`,
+  `withdraw_max`, `cancel_stream`, `streamed_at` and `sponsored_withdraw` all
+  price the same schedule.
+- `PendingRateChange` and `RateSegments` storage keys
+  (`DataKey::PendingRateChange(id)`, `DataKey::RateSegments(id)`, both
+  appended), one offer per stream and at most `MAX_RATE_SEGMENTS = 32` accepted
+  windows per stream, with dedicated TTL maintenance. No stored `Stream` layout
+  changed, so no migration is required.
+- Append-only `RateChangeProposed` / `RateChangeAccepted` events
+  (`stream_id` topic); the acceptance payload carries
+  `owed_at_change`, `reserved_at_new_rate`, `adjustment` and the new `deposit`
+  as the audit trail of the rebalancing.
+- New `StreamError` variants (appended): `NoPendingRateChange` (80),
+  `RateProposalExpired` (81), `RateProposalPending` (82), and
+  `TooManyRateSegments` (83).
+- Reference-model schedule math (`model/src/math.rs`):
+  `streamed_at_schedule` (the `u128` floor-division model) and
+  `streamed_at_rate_schedule` (a division-free `Σ rate × elapsed` model), used
+  as differential oracles rather than as a second reading of contract state.
+- New `rate_schedule` fuzz target for segment sequences, and the `conservation`
+  target now renegotiates streams inside its random operation sequence and
+  re-prices every stored schedule against the reference model. Both are wired
+  into `fuzz.yml`, `nightly-fuzz.yml`, `fuzz-campaign.yml` and the campaign /
+  coverage scripts.
+- `docs/adr/0012-piecewise-rate-schedule-storage.md`, and
+  `docs/ARCHITECTURE.md` §3.1 (piecewise math) + §18 (the renegotiation flow,
+  storage/TTL and the exactness argument).
 - Two-step stream ownership transfer: `propose_ownership_transfer`,
   `accept_ownership_transfer`, `cancel_ownership_transfer`, and the
   `pending_ownership_transfer` read view. Either the sender (payer) or the
@@ -127,6 +168,20 @@ interface: they are only ever appended to, never renumbered or reused.
   branches or any branch without a code.
 - Generated [`docs/ERROR_SURFACE.md`](./docs/ERROR_SURFACE.md) (entrypoint × branch → code
   table) with a CI step that regenerates it and diffs the committed artifact.
+- Recipient-initiated dispute flow (#55): `raise_dispute` (bonded flag that
+  freezes `cancel_stream`/`top_up` for a 7-day timelock), sender-only
+  `resolve_dispute` (accept: bond refunded + pro-rata unwind; reject: bond
+  slashed to the sender, stream resumes), permissionless `expire_dispute`
+  (bond split 50/50, stream resumes), plus `get_dispute` /
+  `required_dispute_bond` views. Anti-griefing bond = 5% of the deposit
+  scaling linearly per dispute round on the stream; accrued withdrawals and
+  accrual are never frozen. New events `DisputeRaised` / `DisputeResolved` /
+  `DisputeExpired`; new `StreamError` codes `DisputeActive` (80),
+  `DisputeNotFound` (81), `DisputeNotExpired` (82), each wired into the
+  `surface.rs` branch registry with matrix probes. Covered by unit/property
+  tests (incl. the locks-plus-outstanding-bonds balance invariant) and a new
+  `dispute_bond` fuzz target. `docs/ARCHITECTURE.md` §8 documents the freeze
+  policy and griefing-threshold math.
 - **Gas sponsorship** (`sponsor.rs`, issue #57): sponsors pay transaction
   costs for recipients claiming accrued funds. Soroban has no mempool
   relayer, so authorization is carried *inside* the call: any account
@@ -145,7 +200,7 @@ interface: they are only ever appended to, never renumbered or reused.
   (appended): `SponsorNotFound` (21), `SponsorInactive` (22),
   `BeneficiaryNotEnrolled` (23), `ClaimExpired` (24), `ClaimNonceReplay`
   (25), `SponsorBudgetExceeded` (26), `BeneficiaryBudgetExceeded` (27);
-  18–20 remain reserved for the dispute-flow PR.
+  the dispute-flow codes append at 80–82 after the governance block.
 - Frontend "Claim for free" path (`frontend/lib/sponsor.ts` + stream detail
   page): builds and signs the exact intent the contract verifies, posts it
   to the sponsor relay, and discloses who pays and how much budget remains;
@@ -213,6 +268,36 @@ interface: they are only ever appended to, never renumbered or reused.
   build`). Linked from the README and CONTRIBUTING.
 
 ### Changed
+- `hot_path_footprint_harness` instruction budgets were re-measured and raised
+  (`create_stream` 560k / `withdraw` 370k / `cancel_stream` 545k /
+  `withdraw_max` 375k, plus a new 415k budget for `withdraw` on a renegotiated
+  stream): reading the rate schedule from its own key costs one extra persistent
+  lookup on every accrual path even for a stream that never renegotiated. The
+  trade-off, and why the alternative (a field on `Stream`) was rejected, is
+  recorded in `docs/FOOTPRINT.md` Candidate 5 and ADR-0012.
+- **Contract Wasm size (#58):** the deployed binary shrinks from 91,004 B to
+  60,386 B (59.0 KiB, under the new 60 KB CI budget). Doc comments on
+  interface items are no longer embedded into `contractspecv0` on-chain
+  (kept 1:1 for host rustdoc via `cfg_attr`), and the duplicated
+  stream-creation effects leg is consolidated into one helper. No storage,
+  event, error-code or signature change; the deploy digest and the
+  canonical interface hash do change — see `docs/WASM_SIZE.md` for the
+  operator notification procedure. Merged with `main` (ownership transfer)
+  the binary is 64,143 B: upstream's new interface adds 3,757 B on top of the
+  60,386 B this work reached, and every remaining non-interface lever was
+  measured at 0 B or negative. The CI budget is therefore raised deliberately
+  to the smallest whole KB the current interface fits (63 KB, 369 B of
+  headroom), with `docs/WASM_SIZE.md` recording why and naming the next
+  entrypoint addition as the trigger to revisit the contract split. Merging
+  the governance timelock then took the build to 84,682 B, because its new
+  interface items arrived with plain `///` docs again; re-applying Technique 1
+  with the new `scripts/gate_interface_docs.py` probe (55 doc groups, and four
+  entrypoints whose doc blocks the merge had duplicated) recovers 6,416 B and
+  lands the binary at **78,266 B**, 14,123 B of which is governance's code,
+  spec entries, event symbols and exports. The scan now runs as a CI step
+  ("Interface doc strings stay out of the Wasm spec") so the rule cannot regress
+  again, and the budget moves 63 → **77 KB** (582 B of headroom) under the same
+  rule.
 - **Deployment interface:** the contract now has a constructor. Deploy with
   the governor address as a constructor argument
   (`stellar contract deploy … -- --governor G…`); `scripts/deploy_testnet.sh`
@@ -277,6 +362,23 @@ interface: they are only ever appended to, never renumbered or reused.
   cannot ship a dead link again.
 - Create-form failures decode to `StreamError` names like every other path
   (they were surfaced as raw error strings).
+- `follow-redirects` 1.16.0 → 1.16.1 in `frontend/package-lock.json`. Two
+  high-severity advisories published 2026-10-20 (`GHSA-q3jh-wrc6-jgq8`,
+  `GHSA-8r9p-f939-6h3c`) cover `>= 1.16.0, < 1.16.1`, which turned
+  `npm audit --omit=dev --audit-level=high` red on every open pull request —
+  including the ones that touched no dependency. The package is transitive
+  (`@stellar/stellar-sdk` → `axios` → `follow-redirects`) and 1.16.1 already
+  satisfies the `^1.16.0` range axios declares, so this is a re-resolve of the
+  lockfile rather than an upgrade, and unlike the 0.3.0 `postcss`/`toml` case it
+  needed no `overrides` pin.
+- `rustls-webpki` 0.103.15 → 0.103.16 and `webpki-roots` 1.0.9 → 1.0.10 in
+  `Cargo.lock`. `RUSTSEC-2026-0382` and `RUSTSEC-2026-0381` (both published
+  2026-10-20) cover the emSign roots whose private keys are now public, and they
+  reach the workspace transitively through `reqwest` from `streampay-state`, so
+  the Security job's `cargo deny check` went red on every open pull request.
+  Both patches are in-range, so `cargo update -p` for each is a four-line lock
+  re-resolve — no crate added, no other crate moved, and no `deny.toml` ignore
+  entry needed.
 
 ## [0.3.0] - 2026-10-04
 

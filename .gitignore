@@ -65,3 +65,18 @@ fuzz/coverage/
 
 # Python bytecode
 __pycache__/
+
+# Terraform (infra/terraform)
+# State is never committed: it holds rendered config for a live host, and the
+# plan output of one run must not become another operator's starting point.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+# Rendered bundles and manifest streams: reproducible from the modules, and the
+# bundle manifest hashes files that only exist after install.sh runs.
+infra/terraform/stacks/*/build/

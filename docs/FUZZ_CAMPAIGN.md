@@ -11,6 +11,7 @@ The per-PR and nightly fuzz jobs run each target for minutes. That finds shallow
 | `differential` | Pure accrual and fee math, contract vs model | Any divergence |
 | `conservation` | Multi-token value conservation over random state transitions | Any broken invariant |
 | `streamed_at` | The accrual function's properties | Any broken property |
+| `rate_schedule` | Piecewise (renegotiated) accrual over random segment sequences (#54), contract vs two models | Any divergence from the floor-division model, any residue against the division-free `Σ rate × elapsed` model, any broken bound or monotonicity |
 
 ### The campaign harness (`fuzz/src/campaign.rs`)
 
@@ -43,7 +44,7 @@ scripts/fuzz/campaign.sh --hours 0.5 --targets campaign,differential --slice-min
 # Include the wasm target.
 cargo build -p streampay-contract --target wasm32v1-none --release
 STREAMPAY_WASM=$PWD/target/wasm32v1-none/release/streampay_contract.wasm \
-  scripts/fuzz/campaign.sh --hours 8 --targets campaign,campaign_wasm,differential,conservation,streamed_at
+  scripts/fuzz/campaign.sh --hours 8 --targets campaign,campaign_wasm,differential,conservation,rate_schedule,streamed_at
 ```
 
 The runner does five things:

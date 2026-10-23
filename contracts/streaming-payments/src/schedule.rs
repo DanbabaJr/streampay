@@ -45,26 +45,53 @@ pub const MAX_OCCURRENCES: u32 = 1000;
 const TTL_THRESHOLD_LEDGERS: u32 = 200_000;
 const TTL_EXTEND_LEDGERS: u32 = 500_000;
 
-/// Lifecycle state of a scheduled intent.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Lifecycle state of a scheduled intent."
+)]
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IntentStatus {
-    /// Authorized and (partially) executable; some occurrences remain.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Authorized and (partially) executable; some occurrences remain."
+    )]
     Pending,
-    /// Every occurrence has been materialized into a stream. Terminal.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Every occurrence has been materialized into a stream. Terminal."
+    )]
     Executed,
-    /// Cancelled by the sender before the execution window opened. Terminal.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Cancelled by the sender before the execution window opened. Terminal."
+    )]
     Cancelled,
-    /// Passed `expires_at` with occurrences outstanding; escrow refunded.
-    /// Terminal.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Passed `expires_at` with occurrences outstanding; escrow refunded."
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = " Terminal.")]
     Expired,
 }
 
-/// A sender-authorized, keeper-executable intent to create one or more streams.
-///
-/// `deposit` and `fee_budget` are *per occurrence*: the sender escrows
-/// `(deposit + fee_budget) * occurrences_total` at scheduling time. Each
-/// execution creates one stream and pays the keeper one `fee_budget`.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " A sender-authorized, keeper-executable intent to create one or more streams."
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = "")]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " `deposit` and `fee_budget` are *per occurrence*: the sender escrows"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " `(deposit + fee_budget) * occurrences_total` at scheduling time. Each"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " execution creates one stream and pays the keeper one `fee_budget`."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScheduledIntent {
@@ -72,27 +99,60 @@ pub struct ScheduledIntent {
     pub sender: Address,
     pub recipient: Address,
     pub token: Address,
-    /// Deposit escrowed for *each* occurrence.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Deposit escrowed for *each* occurrence."
+    )]
     pub deposit: i128,
-    /// Scheduled start of the first occurrence.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Scheduled start of the first occurrence."
+    )]
     pub start_time: u64,
-    /// Scheduled end of the first occurrence (`end_time > start_time`).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Scheduled end of the first occurrence (`end_time > start_time`)."
+    )]
     pub end_time: u64,
-    /// Whether created streams may be cancelled by their recipient.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Whether created streams may be cancelled by their recipient."
+    )]
     pub cancelable: bool,
-    /// Seconds between occurrence starts; `0` for a one-shot intent.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Seconds between occurrence starts; `0` for a one-shot intent."
+    )]
     pub interval: u64,
-    /// Total occurrences this intent will ever create (`>= 1`).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total occurrences this intent will ever create (`>= 1`)."
+    )]
     pub occurrences_total: u32,
-    /// Occurrences not yet materialized.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Occurrences not yet materialized."
+    )]
     pub occurrences_remaining: u32,
-    /// Keeper fee escrowed for *each* occurrence (`>= 0`).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Keeper fee escrowed for *each* occurrence (`>= 0`)."
+    )]
     pub fee_budget: i128,
-    /// Earliest time the first occurrence may be executed.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Earliest time the first occurrence may be executed."
+    )]
     pub execute_after: u64,
-    /// After this time no occurrence may be executed.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " After this time no occurrence may be executed."
+    )]
     pub expires_at: u64,
-    /// SHA-256 commitment over every immutable scheduling parameter.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " SHA-256 commitment over every immutable scheduling parameter."
+    )]
     pub params_hash: BytesN<32>,
     pub status: IntentStatus,
 }
@@ -139,13 +199,13 @@ impl ScheduledIntent {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Computes the SHA-256 commitment over the immutable scheduling parameters.
 ///
 /// Addresses are canonicalized via their StrKey string form so the commitment
 /// is stable and platform-independent. Mutable bookkeeping (`status`,
 /// `occurrences_remaining`, generated `id`) is deliberately excluded, so the
 /// commitment stays constant for the lifetime of the intent.
-#[allow(clippy::too_many_arguments)]
 pub fn params_hash(
     env: &Env,
     sender: &Address,
@@ -197,9 +257,9 @@ pub fn intent_params_hash(env: &Env, intent: &ScheduledIntent) -> BytesN<32> {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Validates a scheduling request, mirroring the stream-creation checks plus
 /// the scheduling constraints. Returns the total escrow to pull on success.
-#[allow(clippy::too_many_arguments)]
 pub fn validate_schedule(
     env: &Env,
     deposit: i128,

@@ -15,7 +15,8 @@ pub use action::{Action, ActionSequence};
 pub use errors::ModelError;
 pub use events::ModelEvent;
 pub use math::{
-    available_amount, cancel_amounts, elapsed_seconds, fee_amount, streamed_at, validate_capacity,
+    available_amount, cancel_amounts, elapsed_seconds, fee_amount, streamed_at,
+    streamed_at_rate_schedule, streamed_at_schedule, validate_capacity, ModelRateSegment,
 };
 pub use model::{ModelMutations, StreamPayModel};
 pub use seeds::all_seeded_scenarios;

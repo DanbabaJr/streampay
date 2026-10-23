@@ -85,7 +85,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "function_name": "create_stream",
+              "function_name": "create_stream_with_oracle",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -107,6 +107,9 @@
                 },
                 {
                   "bool": true
+                },
+                {
+                  "bool": false
                 }
               ]
             }
@@ -549,6 +552,14 @@
                     },
                     "val": {
                       "address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "use_oracle"
+                    },
+                    "val": {
+                      "bool": false
                     }
                   },
                   {

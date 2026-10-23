@@ -1,0 +1,20 @@
+# docker build -f infra/docker/Dockerfile.ttl-sentinel -t streampay/ttl-sentinel:local .   (build context = repo root)
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY infra/ttl-sentinel/package.json infra/ttl-sentinel/package-lock.json infra/ttl-sentinel/tsconfig.json ./
+RUN npm ci
+# copy only src: rootDir "." maps src/cli.ts -> dist/src/cli.js; test files are not needed to run the CLI
+COPY infra/ttl-sentinel/src ./src
+RUN npm run build
+
+FROM node:22-alpine AS release
+ENV NODE_ENV=production
+WORKDIR /app
+COPY infra/ttl-sentinel/package.json infra/ttl-sentinel/package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+USER node
+# no EXPOSE/HEALTHCHECK: CLI poller (scan/extend), no HTTP listener
+# orchestrator invokes the full argv, e.g. node dist/src/cli.js scan --config /etc/streampay/ttl-sentinel.config.json --watch
+ENTRYPOINT ["node"]
+CMD ["dist/src/cli.js"]

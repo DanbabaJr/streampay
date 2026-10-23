@@ -6,6 +6,17 @@ import { WebhookStore } from "./webhooks/store.js";
 import { OutboxStore, newOutboxEventFromDecoded } from "./outbox/store.js";
 import { globalIndexerTracer, traceCorrelationRegistry } from "./telemetry.js";
 
+export interface IngestSummary {
+  /** Events handed to the store for this page. */
+  seen: number;
+  /** Events whose id was new (the outbox/webhook/projection work happened). */
+  inserted: number;
+  /** Events already journalled — a duplicate delivery, not an error. */
+  duplicates: number;
+  /** Projection writes suppressed because the row is already ahead. */
+  projectionSkips: number;
+}
+
 export class StreamStore {
   readonly db: Database.Database;
   readonly webhooks: WebhookStore;
@@ -60,15 +71,30 @@ export class StreamStore {
     this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken))();
   }
 
-  ingestPage(events: DecodedEvent[], cursor: string | undefined, latestLedger: number): void {
+  /**
+   * Commits one page of events inside a single transaction, so the event
+   * journal, the outbox intents and the stream projections either all exist or
+   * none do — the invariant the parallel ingester relies on when it replays a
+   * window after a crash.
+   */
+  ingestPage(events: DecodedEvent[], cursor: string | undefined, latestLedger: number): IngestSummary {
+    const summary: IngestSummary = { seen: events.length, inserted: 0, duplicates: 0, projectionSkips: 0 };
     this.db.transaction(() => {
-      for (const event of events) this.ingestWithinTransaction(event, cursor ?? event.pagingToken);
+      for (const event of events) {
+        const outcome = this.ingestWithinTransaction(event, cursor ?? event.pagingToken);
+        if (outcome.duplicate) summary.duplicates += 1;
+        else {
+          summary.inserted += 1;
+          if (outcome.projectionSkipped) summary.projectionSkips += 1;
+        }
+      }
       if (cursor) this.setState("cursor", cursor);
       this.setState("lastLedger", String(latestLedger));
     })();
+    return summary;
   }
 
-  private ingestWithinTransaction(event: DecodedEvent, ledgerCursor: string): void {
+  private ingestWithinTransaction(event: DecodedEvent, ledgerCursor: string): { duplicate: boolean; projectionSkipped: boolean } {
     const ingestSpan = globalIndexerTracer.startSpan("indexer.ingest_event", {
       kind: "CONSUMER",
       attributes: {
@@ -129,7 +155,7 @@ export class StreamStore {
         dbSpan.end();
         ingestSpan.setStatus("OK");
         ingestSpan.end();
-        return;
+        return { duplicate: true, projectionSkipped: false };
       }
 
       // Transactional outbox: the delivery-intent journal is committed in the
@@ -192,7 +218,12 @@ export class StreamStore {
         }
         case "stream_paused": patch.status = "paused"; break;
         case "stream_resumed": patch.status = "active"; break;
-        default: return;
+        // The event is still journalled; only the projection ignores it.
+        default:
+          dbSpan.setStatus("OK");
+          dbSpan.end();
+          ingestSpan.setStatus("OK");
+          return { duplicate: false, projectionSkipped: false };
       }
 
       const current = existing ?? {};
@@ -214,17 +245,25 @@ export class StreamStore {
         updated_at: event.ledgerClosedAt,
       };
 
-      this.db.prepare(`INSERT INTO streams(stream_id,sender,recipient,token,deposit,withdrawn,start_time,end_time,cancelable,status,cancelled_by,recipient_amount,sender_amount,last_ledger,updated_at)
+      // Monotonic projection: `WHERE excluded.last_ledger >= streams.last_ledger`
+      // makes the upsert a no-op for an event older than the state already
+      // committed for this stream, so an out-of-order or late delivery can never
+      // rewind status/deposit/withdrawn. Events in the same ledger as the
+      // current state still apply (>=), because one ledger can hold several
+      // events for one stream and they must land in order within it.
+      const upsert = this.db.prepare(`INSERT INTO streams(stream_id,sender,recipient,token,deposit,withdrawn,start_time,end_time,cancelable,status,cancelled_by,recipient_amount,sender_amount,last_ledger,updated_at)
         VALUES(@stream_id,@sender,@recipient,@token,@deposit,@withdrawn,@start_time,@end_time,@cancelable,@status,@cancelled_by,@recipient_amount,@sender_amount,@last_ledger,@updated_at)
         ON CONFLICT(stream_id) DO UPDATE SET sender=excluded.sender, recipient=excluded.recipient, token=excluded.token,
         deposit=excluded.deposit, withdrawn=excluded.withdrawn, start_time=excluded.start_time, end_time=excluded.end_time,
         cancelable=excluded.cancelable, status=excluded.status, cancelled_by=excluded.cancelled_by,
         recipient_amount=excluded.recipient_amount, sender_amount=excluded.sender_amount,
-        last_ledger=excluded.last_ledger, updated_at=excluded.updated_at`).run(row);
+        last_ledger=excluded.last_ledger, updated_at=excluded.updated_at
+        WHERE excluded.last_ledger >= streams.last_ledger`).run(row);
 
       dbSpan.setStatus("OK");
       dbSpan.end();
       ingestSpan.setStatus("OK");
+      return { duplicate: false, projectionSkipped: upsert.changes === 0 };
     } catch (err) {
       ingestSpan.recordException(err);
       ingestSpan.setStatus("ERROR", String(err));
@@ -232,6 +271,16 @@ export class StreamStore {
     } finally {
       ingestSpan.end();
     }
+  }
+
+  /**
+   * Highest ledger already projected per stream. The ingester seeds its
+   * in-memory sequencer with this after a restart so "late event" is measured
+   * against durable truth, not against an empty map.
+   */
+  maxLedgerByStream(): Map<string, number> {
+    const rows = this.db.prepare("SELECT stream_id, last_ledger FROM streams").all() as Array<{ stream_id: string; last_ledger: number }>;
+    return new Map(rows.map((row) => [row.stream_id, Number(row.last_ledger)]));
   }
 
   getStream(id: string): Stream | undefined {

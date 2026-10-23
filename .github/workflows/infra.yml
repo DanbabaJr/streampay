@@ -1,0 +1,167 @@
+name: Infra
+
+# Issue #105: a pull request that touches the IaC has to prove the minimal path
+# renders, that re-applying produces no drift, and that nothing that looks like a
+# secret value landed in the rendered output. None of that needs cloud
+# credentials, so it runs on every PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9.8"
+  # A syntactically valid testnet contract id used ONLY to render configs in CI.
+  # Nothing here talks to a chain, and the value is not a secret.
+  RENDER_CONTRACT_ID: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+jobs:
+  terraform:
+    name: Terraform — fmt / validate / render / zero drift
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          # The drift gate reads `terraform plan -detailed-exitcode`. The wrapper
+          # rewrites exit codes and swallows exactly that signal.
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Validate every stack (no credentials)
+        run: |
+          for stack in minimal-single-vm kubernetes aws-ec2; do
+            echo "::group::$stack"
+            (cd "stacks/$stack" && terraform init -backend=false -input=false && terraform validate)
+            echo "::endgroup::"
+          done
+
+      - name: Minimal path -- apply, then require an empty plan
+        run: |
+          sh infra/terraform/scripts/apply_and_check_drift.sh \
+            --stack minimal-single-vm -- \
+            -var "contract_id=$RENDER_CONTRACT_ID" \
+            -var apply_locally=true \
+            -var 'bootstrap_command=["sh","-c","echo rendered-bundle"]'
+        working-directory: ${{ github.workspace }}
+
+      - name: Kubernetes path -- apply, then require an empty plan
+        run: |
+          sh infra/terraform/scripts/apply_and_check_drift.sh \
+            --stack kubernetes -- \
+            -var "contract_id=$RENDER_CONTRACT_ID" \
+            -var manifest_dir=/tmp/sp-ci-k8s \
+            -var ingress_tls_mode=cert-manager \
+            -var cert_manager_cluster_issuer=letsencrypt-prod \
+            -var ingress_host=pay.example.org \
+            -var extender_enabled=true
+        working-directory: ${{ github.workspace }}
+
+      - name: Rendered compose parses (docker compose config)
+        working-directory: ${{ github.workspace }}
+        run: |
+          bundle=infra/terraform/stacks/minimal-single-vm/build
+          # The compose file points at the per-service 0600 secret files, which
+          # only exist on a real host. Create empty ones so `config` resolves the
+          # references; the no-plaintext step below proves they stay empty.
+          sudo mkdir -p /etc/streampay
+          for f in $(grep -rho '/etc/streampay/[A-Za-z0-9._-]*\.env' "$bundle/docker-compose.yml" | sort -u); do
+            sudo touch "$f"
+          done
+          docker compose -f "$bundle/docker-compose.yml" config --quiet
+          echo "compose config OK"
+
+      - name: Structural + hardening checks on the rendered artifacts
+        working-directory: ${{ github.workspace }}
+        run: |
+          npm ci --no-fund --no-audit --prefix infra/terraform/scripts
+          node infra/terraform/scripts/check_render.mjs \
+            --bundle infra/terraform/stacks/minimal-single-vm/build \
+            --manifests /tmp/sp-ci-k8s/manifests.yaml
+
+      - name: Rendered shell scripts parse
+        working-directory: ${{ github.workspace }}
+        run: |
+          find infra/terraform/stacks/minimal-single-vm/build -name '*.sh' -print0 |
+            xargs -0 -r -n1 sh -n
+          echo "sh -n OK"
+
+      - name: Caddyfile validates in the image the stack actually runs
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/infra/terraform/stacks/minimal-single-vm/build/Caddyfile:/tmp/Caddyfile:ro" \
+            caddy:2.8-alpine caddy validate --adapter caddyfile --config /tmp/Caddyfile
+
+      - name: systemd unit verification (best effort)
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! command -v systemd-analyze >/dev/null 2>&1; then
+            echo "systemd-analyze unavailable on this runner; unit structure is still"
+            echo "checked by check_render.mjs, which is the blocking gate."
+            exit 0
+          fi
+          # A warning rather than a failure: systemd resolves ExecStart paths and
+          # unit dependencies against the host it runs on, which a CI runner is
+          # not. check_render.mjs is the blocking gate for unit structure.
+          systemd-analyze verify infra/terraform/stacks/minimal-single-vm/build/systemd/*.service 2>&1 |
+            tee /tmp/systemd-verify.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::systemd-analyze exited $status on a runner that is not the target host"
+          fi
+
+      - name: No plaintext secrets anywhere in the rendered output
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          # check_render.mjs scans the assignment patterns; this catches the two
+          # shapes that are leaks wherever they appear: a Stellar secret seed and a
+          # PEM private key body. Both patterns are anchored so a doc that names the
+          # format does not trip it.
+          if grep -rEIn '(^|[^A-Z2-7])S[A-Z2-7]{55}([^A-Z2-7]|$)' \
+              infra/terraform/stacks/minimal-single-vm/build /tmp/sp-ci-k8s; then
+            echo "::error::a value that looks like a Stellar secret seed was rendered to disk"
+            exit 1
+          fi
+          if grep -rEin -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+              infra/terraform/stacks/minimal-single-vm/build /tmp/sp-ci-k8s; then
+            echo "::error::a PEM private key was rendered to disk"
+            exit 1
+          fi
+          # The secret files compose references must still be empty here: nothing on
+          # a CI runner delivered a value into them.
+          for f in $(grep -rho '/etc/streampay/[A-Za-z0-9._-]*\.env' \
+              infra/terraform/stacks/minimal-single-vm/build/docker-compose.yml | sort -u); do
+            if [ -s "$f" ]; then
+              echo "::error::$f is not empty on a machine that delivered no secrets"
+              exit 1
+            fi
+          done
+          echo "no plaintext secrets in the rendered output"
+
+      - name: Terraform state is never committed
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          if git ls-files | grep -E '(\.tfstate($|\.)|\.terraform/|\.tfvars$)'; then
+            echo "::error::terraform state, provider directories or tfvars are tracked in git"
+            exit 1
+          fi
+          echo "no tracked terraform state"

@@ -56,6 +56,13 @@ pub enum Branch {
     // --------------------------------------------------------------- top_up
     TopUpAmountNonPositive,
     TopUpDepositOverflow,
+    // ------------------------------------------------------------- disputes
+    CancelDuringDispute,
+    TopUpDuringDispute,
+    RaiseDisputeAlreadyActive,
+    DisputeNotOpen,
+    ExpireDisputeTooEarly,
+    ResolveCallerNotSender,
     // ------------------------------------------------- shared storage/math
     /// `stream.rs::get_stream` finds no stored entry.
     StreamNotFound,
@@ -198,13 +205,91 @@ pub enum Branch {
     NoPendingOwnership,
     /// `cancel_ownership_transfer`: the caller did not create the proposal.
     CancelProposalNotProposer,
+    // ------------------------------------------------------------ governance
+    // Issue #119: admin actions behind the two-key timelock. Named after the
+    // rule that refuses the call, because the rule *is* the security property.
+    /// A governance entrypoint called before the signer set was bootstrapped.
+    GovernanceNotInitialized,
+    /// `governance_bootstrap` on a contract that already has a signer set.
+    GovernanceAlreadyInitialized,
+    /// The caller is not in the signer set.
+    NotGovernanceSigner,
+    /// A proposed signer set lists the same address twice — one key in two slots.
+    GovernanceDuplicateSigner,
+    /// A proposed signer set is empty.
+    GovernanceSignerSetEmpty,
+    /// A proposed signer set exceeds MAX_SIGNERS.
+    GovernanceTooManySigners,
+    /// A proposed signer set cannot supply two distinct signatures.
+    GovernanceSignersNotDistinct,
+    /// No proposal is stored under the supplied id.
+    GovernanceProposalNotFound,
+    /// `governance_execute`: the veto window is still open.
+    GovernanceVetoWindowOpen,
+    /// `governance_veto`: the veto window has closed.
+    GovernanceVetoWindowClosed,
+    /// A configured veto window below MIN_VETO_WINDOW_SECONDS.
+    GovernanceVetoWindowTooShort,
+    /// The proposal was vetoed and is dead.
+    GovernanceAlreadyVetoed,
+    /// The proposal has already been executed.
+    GovernanceAlreadyExecuted,
+    /// `governance_sign`: this address already signed the proposal.
+    GovernanceDuplicateSignature,
+    /// `governance_execute`: not enough distinct, still-current signatures.
+    GovernanceSignaturesInsufficient,
+    /// A migrated admin entry point called directly after bootstrap.
+    GovernanceTimelockRequired,
+    // ---------------------------------------------- rate renegotiation
+    /// `propose_rate_change`: the caller is neither the sender nor the
+    /// recipient.
+    RateProposeNotAuthorized,
+    /// `propose_rate_change`: the proposed rate is zero or negative.
+    RateProposalAmountNonPositive,
+    /// `propose_rate_change`: the stream window has already elapsed, so there is
+    /// no future rate to agree on.
+    RateProposalWindowElapsed,
+    /// `propose_rate_change`: an unexpired rate proposal already exists.
+    RateProposalPending,
+    /// `accept_rate_change`: the caller is not the proposal's named counterparty.
+    RateAcceptNotTarget,
+    /// `accept_rate_change`: a proposal participant no longer holds a stream
+    /// role (an ownership transfer took the proposal out of scope).
+    RateAcceptStaleParties,
+    /// `accept_rate_change`: the proposal's acceptance window elapsed.
+    RateProposalExpired,
+    /// `accept_rate_change` / `cancel_rate_change`: no proposal is stored for
+    /// the stream.
+    NoPendingRateChange,
+    /// `cancel_rate_change`: the caller did not create the proposal.
+    RateCancelNotProposer,
+    /// `accept_rate_change`: `rate * remaining_seconds` (or the resulting
+    /// deposit) does not fit `i128`.
+    RateReserveOverflow,
+    /// `streamed_amount_at_segments`: the per-segment terms would overflow
+    /// `i128` when summed.
+    RateSegmentSumOverflow,
+    /// `accept_rate_change`: `deposit - owed` would underflow (an
+    /// invariant-violating stored stream).
+    RateHeadroomUnderflow,
+    /// `accept_rate_change`: the stream would exceed `MAX_RATE_SEGMENTS`.
+    RateSegmentLimitReached,
+    /// `accept_rate_change`: the new rate is below the governance policy floor.
+    RatePolicyBelowFloor,
+    /// `accept_rate_change`: the new rate exceeds the governance policy ceiling.
+    RatePolicyAboveCeiling,
+    /// `accept_rate_change`: the token refused the pull of the shortfall the
+    /// rate increase requires.
+    RateTopUpTransferFailed,
+    /// `accept_rate_change`: the token refused the refund of the freed escrow.
+    RateRefundFailed,
 }
 
 impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 77] = [
+    pub const ALL: [Branch; 116] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -216,6 +301,12 @@ impl Branch {
         Branch::CancelStreamNotAuthorized,
         Branch::TopUpAmountNonPositive,
         Branch::TopUpDepositOverflow,
+        Branch::CancelDuringDispute,
+        Branch::TopUpDuringDispute,
+        Branch::RaiseDisputeAlreadyActive,
+        Branch::DisputeNotOpen,
+        Branch::ExpireDisputeTooEarly,
+        Branch::ResolveCallerNotSender,
         Branch::StreamNotFound,
         Branch::StreamNotActive,
         Branch::CapacityOverflow,
@@ -282,6 +373,39 @@ impl Branch {
         Branch::OwnershipProposalExpired,
         Branch::NoPendingOwnership,
         Branch::CancelProposalNotProposer,
+        Branch::GovernanceNotInitialized,
+        Branch::GovernanceAlreadyInitialized,
+        Branch::NotGovernanceSigner,
+        Branch::GovernanceDuplicateSigner,
+        Branch::GovernanceSignerSetEmpty,
+        Branch::GovernanceTooManySigners,
+        Branch::GovernanceSignersNotDistinct,
+        Branch::GovernanceProposalNotFound,
+        Branch::GovernanceVetoWindowOpen,
+        Branch::GovernanceVetoWindowClosed,
+        Branch::GovernanceVetoWindowTooShort,
+        Branch::GovernanceAlreadyVetoed,
+        Branch::GovernanceAlreadyExecuted,
+        Branch::GovernanceDuplicateSignature,
+        Branch::GovernanceSignaturesInsufficient,
+        Branch::GovernanceTimelockRequired,
+        Branch::RateProposeNotAuthorized,
+        Branch::RateProposalAmountNonPositive,
+        Branch::RateProposalWindowElapsed,
+        Branch::RateProposalPending,
+        Branch::RateAcceptNotTarget,
+        Branch::RateAcceptStaleParties,
+        Branch::RateProposalExpired,
+        Branch::NoPendingRateChange,
+        Branch::RateCancelNotProposer,
+        Branch::RateReserveOverflow,
+        Branch::RateSegmentSumOverflow,
+        Branch::RateHeadroomUnderflow,
+        Branch::RateSegmentLimitReached,
+        Branch::RatePolicyBelowFloor,
+        Branch::RatePolicyAboveCeiling,
+        Branch::RateTopUpTransferFailed,
+        Branch::RateRefundFailed,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -302,6 +426,12 @@ impl Branch {
                 &["cancel_stream"]
             }
             Branch::TopUpAmountNonPositive | Branch::TopUpDepositOverflow => &["top_up"],
+            Branch::CancelDuringDispute => &["cancel_stream"],
+            Branch::TopUpDuringDispute => &["top_up"],
+            Branch::RaiseDisputeAlreadyActive => &["raise_dispute"],
+            Branch::DisputeNotOpen => &["get_dispute", "resolve_dispute", "expire_dispute"],
+            Branch::ExpireDisputeTooEarly => &["expire_dispute"],
+            Branch::ResolveCallerNotSender => &["resolve_dispute"],
             Branch::StreamNotFound => &[
                 "get_stream",
                 "available",
@@ -309,20 +439,29 @@ impl Branch {
                 "withdraw_max",
                 "cancel_stream",
                 "top_up",
+                "raise_dispute",
+                "expire_dispute",
+                "resolve_dispute",
+                "required_dispute_bond",
                 "sponsored_withdraw",
                 "propose_ownership_transfer",
                 "accept_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
             ],
             Branch::StreamNotActive => &[
                 "withdraw",
                 "withdraw_max",
                 "cancel_stream",
                 "top_up",
+                "raise_dispute",
                 "sponsored_withdraw",
                 "propose_ownership_transfer",
                 "accept_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
             ],
-            Branch::CapacityOverflow => &["create_stream", "top_up"],
+            Branch::CapacityOverflow => &["create_stream", "top_up", "accept_rate_change"],
             Branch::RateProductOverflow => &[
                 "streamed_at",
                 "available",
@@ -330,6 +469,7 @@ impl Branch {
                 "withdraw_max",
                 "cancel_stream",
                 "sponsored_withdraw",
+                "accept_rate_change",
             ],
             Branch::AvailableBalanceOverflow => &["available", "withdraw", "withdraw_max"],
             Branch::CancelSplitOverflow => &["cancel_stream"],
@@ -344,6 +484,7 @@ impl Branch {
                 "execute_upgrade",
                 "migrate_storage",
                 "set_stream_policy",
+                "governance_bootstrap",
             ],
             Branch::AcceptGovernorNoPending | Branch::AcceptGovernorNotNominee => {
                 &["accept_governor"]
@@ -406,6 +547,9 @@ impl Branch {
                 "propose_ownership_transfer",
                 "accept_ownership_transfer",
                 "cancel_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
+                "cancel_rate_change",
             ],
             Branch::MigrationNotFrozen | Branch::AlreadyMigrated => &["migrate_storage"],
             Branch::ExecuteUpgradeNoPending | Branch::TimelockNotExpired => &["execute_upgrade"],
@@ -431,6 +575,79 @@ impl Branch {
                 &["accept_ownership_transfer", "cancel_ownership_transfer"]
             }
             Branch::CancelProposalNotProposer => &["cancel_ownership_transfer"],
+            // ------------------------------------------------------------ governance
+            Branch::GovernanceNotInitialized => &[
+                "governance_propose",
+                "governance_sign",
+                "governance_veto",
+                "governance_execute",
+            ],
+            Branch::GovernanceAlreadyInitialized => &["governance_bootstrap"],
+            Branch::NotGovernanceSigner => {
+                &["governance_propose", "governance_sign", "governance_veto"]
+            }
+            Branch::GovernanceDuplicateSigner
+            | Branch::GovernanceSignerSetEmpty
+            | Branch::GovernanceTooManySigners
+            | Branch::GovernanceSignersNotDistinct => &[
+                "governance_bootstrap",
+                "governance_propose",
+                "governance_execute",
+            ],
+            Branch::GovernanceVetoWindowTooShort => &["governance_bootstrap", "governance_propose"],
+            Branch::GovernanceProposalNotFound => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceVetoWindowOpen | Branch::GovernanceSignaturesInsufficient => {
+                &["governance_execute"]
+            }
+            Branch::GovernanceVetoWindowClosed => &["governance_veto"],
+            Branch::GovernanceAlreadyVetoed => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceAlreadyExecuted => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceDuplicateSignature => &["governance_sign"],
+            Branch::GovernanceTimelockRequired => &[
+                "set_fee_bps",
+                "nominate_governor",
+                "withdraw_treasury",
+                "set_stream_policy",
+                "set_frozen",
+                "propose_upgrade",
+                "execute_upgrade",
+                "migrate_storage",
+                "set_oracle_config",
+            ],
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized
+            | Branch::RateProposalAmountNonPositive
+            | Branch::RateProposalPending => &["propose_rate_change"],
+            // A stream can reach `end_time` while an offer is open, so both
+            // sides of the handshake can find the window already elapsed.
+            Branch::RateProposalWindowElapsed => &["propose_rate_change", "accept_rate_change"],
+            Branch::RateAcceptNotTarget
+            | Branch::RateAcceptStaleParties
+            | Branch::RateProposalExpired
+            | Branch::RateReserveOverflow
+            | Branch::RateHeadroomUnderflow
+            | Branch::RateSegmentLimitReached
+            | Branch::RatePolicyBelowFloor
+            | Branch::RatePolicyAboveCeiling
+            | Branch::RateTopUpTransferFailed
+            | Branch::RateRefundFailed => &["accept_rate_change"],
+            Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
+            Branch::RateCancelNotProposer => &["cancel_rate_change"],
+            Branch::RateSegmentSumOverflow => &[
+                "available",
+                "withdraw",
+                "withdraw_max",
+                "cancel_stream",
+                "sponsored_withdraw",
+                "accept_rate_change",
+                "top_up",
+            ],
         }
     }
 
@@ -450,6 +667,12 @@ impl Branch {
             Branch::CancelStreamNotAuthorized => StreamError::NotAuthorized,
             Branch::TopUpAmountNonPositive => StreamError::ZeroAmount,
             Branch::TopUpDepositOverflow => StreamError::MathOverflow,
+            Branch::CancelDuringDispute => StreamError::DisputeActive,
+            Branch::TopUpDuringDispute => StreamError::DisputeActive,
+            Branch::RaiseDisputeAlreadyActive => StreamError::DisputeActive,
+            Branch::DisputeNotOpen => StreamError::DisputeNotFound,
+            Branch::ExpireDisputeTooEarly => StreamError::DisputeNotExpired,
+            Branch::ResolveCallerNotSender => StreamError::NotAuthorized,
             Branch::StreamNotFound => StreamError::StreamNotFound,
             Branch::StreamNotActive => StreamError::StreamNotActive,
             Branch::CapacityOverflow => StreamError::MathOverflow,
@@ -518,6 +741,42 @@ impl Branch {
             Branch::ProposeAlreadyPending => StreamError::OwnershipProposalPending,
             Branch::OwnershipProposalExpired => StreamError::OwnershipProposalExpired,
             Branch::NoPendingOwnership => StreamError::NoPendingOwnership,
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized
+            | Branch::RateAcceptNotTarget
+            | Branch::RateAcceptStaleParties
+            | Branch::RateCancelNotProposer => StreamError::NotAuthorized,
+            Branch::RateProposalAmountNonPositive => StreamError::ZeroAmount,
+            Branch::RateProposalWindowElapsed => StreamError::InvalidTimeRange,
+            Branch::RateProposalPending => StreamError::RateProposalPending,
+            Branch::RateProposalExpired => StreamError::RateProposalExpired,
+            Branch::NoPendingRateChange => StreamError::NoPendingRateChange,
+            Branch::RateReserveOverflow
+            | Branch::RateSegmentSumOverflow
+            | Branch::RateHeadroomUnderflow => StreamError::MathOverflow,
+            Branch::RateSegmentLimitReached => StreamError::TooManyRateSegments,
+            Branch::RatePolicyBelowFloor => StreamError::PolicyRateBelowFloor,
+            Branch::RatePolicyAboveCeiling => StreamError::PolicyRateAboveCeiling,
+            Branch::RateTopUpTransferFailed => StreamError::TopUpTransferFailed,
+            Branch::RateRefundFailed => StreamError::SenderRefundFailed,
+            Branch::GovernanceNotInitialized => StreamError::GovernanceNotInitialized,
+            Branch::GovernanceAlreadyInitialized => StreamError::GovernanceAlreadyInitialized,
+            Branch::NotGovernanceSigner => StreamError::NotGovernanceSigner,
+            Branch::GovernanceDuplicateSigner => StreamError::GovernanceDuplicateSigner,
+            Branch::GovernanceSignerSetEmpty => StreamError::GovernanceSignerSetEmpty,
+            Branch::GovernanceTooManySigners => StreamError::GovernanceTooManySigners,
+            Branch::GovernanceSignersNotDistinct => StreamError::GovernanceSignersNotDistinct,
+            Branch::GovernanceProposalNotFound => StreamError::GovernanceProposalNotFound,
+            Branch::GovernanceVetoWindowOpen => StreamError::GovernanceVetoWindowOpen,
+            Branch::GovernanceVetoWindowClosed => StreamError::GovernanceVetoWindowClosed,
+            Branch::GovernanceVetoWindowTooShort => StreamError::GovernanceVetoWindowTooShort,
+            Branch::GovernanceAlreadyVetoed => StreamError::GovernanceAlreadyVetoed,
+            Branch::GovernanceAlreadyExecuted => StreamError::GovernanceAlreadyExecuted,
+            Branch::GovernanceDuplicateSignature => StreamError::GovernanceDuplicateSignature,
+            Branch::GovernanceSignaturesInsufficient => {
+                StreamError::GovernanceSignaturesInsufficient
+            }
+            Branch::GovernanceTimelockRequired => StreamError::GovernanceTimelockRequired,
         }
     }
 
@@ -545,6 +804,14 @@ impl Branch {
             }
             Branch::TopUpAmountNonPositive => "top-up amount is zero or negative",
             Branch::TopUpDepositOverflow => "deposit + amount would overflow i128",
+            Branch::CancelDuringDispute => "an open dispute freezes cancel_stream",
+            Branch::TopUpDuringDispute => "an open dispute freezes top_up",
+            Branch::RaiseDisputeAlreadyActive => "raise_dispute called while a dispute is open",
+            Branch::DisputeNotOpen => "no open dispute exists on the stream",
+            Branch::ExpireDisputeTooEarly => {
+                "expire_dispute called before the dispute timelock elapsed"
+            }
+            Branch::ResolveCallerNotSender => "resolve_dispute called by a non-sender",
             Branch::StreamNotFound => "no stream is stored under the id",
             Branch::StreamNotActive => "the stream status is Cancelled or Depleted",
             Branch::CapacityOverflow => "deposit * duration would overflow u128",
@@ -665,6 +932,93 @@ impl Branch {
             Branch::CancelProposalNotProposer => {
                 "the caller did not create the pending ownership proposal"
             }
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized => {
+                "the caller is neither the current sender nor the current recipient"
+            }
+            Branch::RateProposalAmountNonPositive => {
+                "the proposed amount_per_second is zero or negative"
+            }
+            Branch::RateProposalWindowElapsed => {
+                "the stream's end_time is at or before the current time, so no window is left to re-rate"
+            }
+            Branch::RateProposalPending => {
+                "an unexpired rate-change proposal already exists for the stream"
+            }
+            Branch::RateAcceptNotTarget => {
+                "the caller is not the proposal's named counterparty"
+            }
+            Branch::RateAcceptStaleParties => {
+                "the proposal's proposer or counterparty no longer holds a role on the stream"
+            }
+            Branch::RateProposalExpired => {
+                "the rate proposal's acceptance window has elapsed"
+            }
+            Branch::NoPendingRateChange => "no rate-change proposal is stored for the stream",
+            Branch::RateCancelNotProposer => {
+                "the caller did not create the pending rate-change proposal"
+            }
+            Branch::RateReserveOverflow => {
+                "amount_per_second * remaining_seconds (or owed + that reserve) would overflow i128"
+            }
+            Branch::RateSegmentSumOverflow => {
+                "adding a per-segment term would overflow i128 (accrual sum, or a top-up onto a segment's allocation)"
+            }
+            Branch::RateHeadroomUnderflow => {
+                "deposit - owed would underflow (an invariant-violating stored stream)"
+            }
+            Branch::RateSegmentLimitReached => {
+                "the stream already carries MAX_RATE_SEGMENTS rate-change segments"
+            }
+            Branch::RatePolicyBelowFloor => {
+                "the new rate is below the governance policy rate floor"
+            }
+            Branch::RatePolicyAboveCeiling => {
+                "the new rate exceeds the governance policy rate ceiling"
+            }
+            Branch::RateTopUpTransferFailed => {
+                "the token refuses the pull of the shortfall a rate increase requires"
+            }
+            Branch::RateRefundFailed => {
+                "the token refuses the refund of the escrow a rate decrease frees"
+            }
+            // ------------------------------------------------------------ governance
+            Branch::GovernanceNotInitialized => {
+                "the governance signer set has not been bootstrapped"
+            }
+            Branch::GovernanceAlreadyInitialized => {
+                "governance_bootstrap was called but a signer set already exists"
+            }
+            Branch::NotGovernanceSigner => "the caller is not a member of the signer set",
+            Branch::GovernanceDuplicateSigner => {
+                "the signer set lists the same address twice (one key in two slots)"
+            }
+            Branch::GovernanceSignerSetEmpty => "the signer set is empty",
+            Branch::GovernanceTooManySigners => "the signer set exceeds MAX_SIGNERS",
+            Branch::GovernanceSignersNotDistinct => {
+                "the signer set holds fewer than two distinct keys"
+            }
+            Branch::GovernanceProposalNotFound => "no proposal is stored under the id",
+            Branch::GovernanceVetoWindowOpen => {
+                "execution was attempted before the veto window closed"
+            }
+            Branch::GovernanceVetoWindowClosed => {
+                "a veto was attempted after the veto window closed"
+            }
+            Branch::GovernanceVetoWindowTooShort => {
+                "the veto window is shorter than MIN_VETO_WINDOW_SECONDS"
+            }
+            Branch::GovernanceAlreadyVetoed => "the proposal was vetoed and is dead",
+            Branch::GovernanceAlreadyExecuted => "the proposal has already been executed",
+            Branch::GovernanceDuplicateSignature => {
+                "this address already signed the proposal; execution needs two distinct keys"
+            }
+            Branch::GovernanceSignaturesInsufficient => {
+                "fewer than the required distinct, still-current signatures are recorded"
+            }
+            Branch::GovernanceTimelockRequired => {
+                "the action requires an executed governance proposal now that governance is bootstrapped"
+            }
         }
     }
 
@@ -679,9 +1033,21 @@ impl Branch {
             //     a corrupt entry but never below `i128::MIN` (it equals
             //     `-withdrawn`, and `withdrawn <= i128::MAX`).
             //   * `cancel_amounts`: same bound on both subtractions.
+            //   * `streamed_amount_at_segments`: segment accrual is monotonic in
+            //     `now` and each window is elapsed at most once, so every partial
+            //     sum is bounded by the schedule at `end_time` — which is
+            //     `owed + reserved`, the deposit `accept_rate_change` just checked
+            //     against `i128::MAX`.
+            //   * `segments_after_topup`: `allocation + amount <= new_deposit`,
+            //     which the caller already checked against `i128::MAX`.
+            //   * `accept_rate_change`'s `deposit - owed`: `owed` is the accrued
+            //     amount at the boundary, so the difference is the unaccrued
+            //     remainder and cannot go negative.
             Branch::PayoutOverflow
             | Branch::AvailableBalanceOverflow
-            | Branch::CancelSplitOverflow => Reachability::Defensive,
+            | Branch::CancelSplitOverflow
+            | Branch::RateSegmentSumOverflow
+            | Branch::RateHeadroomUnderflow => Reachability::Defensive,
             _ => Reachability::Reachable,
         }
     }

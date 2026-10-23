@@ -201,7 +201,32 @@ StreamPay release workflows publish GitHub artifact attestations (`actions/attes
 
 ---
 
-## 7. How to Report a Digest Mismatch
+## 7. Expected Digest Changes and Operator Notification
+
+A legitimate source change (feature, refactor, or the size work in
+[`WASM_SIZE.md`](WASM_SIZE.md), issue #58) produces a new Wasm digest by
+design. The workflow for a digest change is:
+
+1. The PR that changes the bytes states so explicitly and links the before/
+   after size report; reviewers approve the digest move as part of the code
+   change — a digest difference against the previous release is *expected*,
+   not an incident.
+2. Operators and integrators pinning `wasm_sha256` / `SHA256SUMS` /
+   `UPGRADE_DIGESTS.txt` must repin to the new release asset **before** the
+   upgrade is promoted. Tools watching deployed code hashes should expect a
+   mismatch between the old pinned digest and the upgraded instance until
+   they refresh.
+3. The canonicalized interface hash (`scripts/contract_interface_hash.sh`)
+   also moves; the promote run must set `schema_change_ack: true` (CLI gate:
+   `SCHEMA_CHANGE_ACK=1`) so `deployments/interface/<env>.sha256` is
+   re-baselined and `canary_check.sh`'s schema-continuity check compares
+   against the new interface.
+4. If a digest mismatch appears on a rebuild of an **existing, unchanged**
+   tag, that is not this flow — follow section 8.
+
+---
+
+## 8. How to Report a Digest Mismatch
 
 If you rebuild the contract from a published release tag and obtain a digest that does not match the published `SHA256SUMS` or `release-metadata.json`:
 

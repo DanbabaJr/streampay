@@ -33,35 +33,62 @@ use crate::surface::{self, Branch};
 /// Default maximum staleness: 3600 seconds (1 hour).
 pub const DEFAULT_MAX_STALE_SECONDS: u64 = 3600;
 
-/// Oracle configuration stored in instance storage.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Oracle configuration stored in instance storage."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OracleConfig {
-    /// Authorized oracle publishers.
+    #[cfg_attr(not(target_family = "wasm"), doc = " Authorized oracle publishers.")]
     pub publishers: Vec<Address>,
-    /// Minimum number of fresh publisher reports required for quorum.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Minimum number of fresh publisher reports required for quorum."
+    )]
     pub threshold: u32,
-    /// Maximum staleness in seconds before a report is considered stale.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Maximum staleness in seconds before a report is considered stale."
+    )]
     pub max_stale_seconds: u64,
 }
 
-/// An individual report from an authorized publisher.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " An individual report from an authorized publisher."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OracleReport {
-    /// The external reference timestamp.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The external reference timestamp."
+    )]
     pub reported_time: u64,
-    /// Ledger timestamp when the report was recorded on-chain.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Ledger timestamp when the report was recorded on-chain."
+    )]
     pub ledger_time: u64,
 }
 
-/// Result of resolving reference time for a stream.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Result of resolving reference time for a stream."
+)]
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedTime {
-    /// The resolved reference timestamp.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The resolved reference timestamp."
+    )]
     pub timestamp: u64,
-    /// Whether the timestamp came from oracle aggregation (`true`) or ledger fallback (`false`).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Whether the timestamp came from oracle aggregation (`true`) or ledger fallback (`false`)."
+    )]
     pub is_oracle: bool,
 }
 

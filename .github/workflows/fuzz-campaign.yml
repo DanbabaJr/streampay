@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [campaign, campaign_wasm, differential, conservation, streamed_at]
+        target: [campaign, campaign_wasm, differential, conservation, rate_schedule, streamed_at]
     steps:
       - uses: actions/checkout@v4
         with:

@@ -10,6 +10,17 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 ┌────────────────────────────────────────────────────────────────────┐
 │                        StreamingPayments                           │
 │                                                                    │
+│  lib.rs      entrypoints: create_stream / withdraw / withdraw_max / │
+│              cancel_stream / top_up / raise_dispute /              │
+│              resolve_dispute / expire_dispute / get_stream /       │
+│              available / get_dispute / required_dispute_bond /     │
+│              recipient_streams / sender_streams / set_fee_bps /    │
+│              nominate_governor / accept_governor / withdraw_treasury│
+│              treasury_status / stream_fee / verify_treasury /       │
+│              total_streams                                         │
+│  stream.rs   Stream type, storage, checked accrual math            │
+│  dispute.rs  Dispute state, escalating bond math, expiry split     │
+│  lib.rs      entrypoints: create_stream(s) / withdraw / withdraw_max /│
 │  lib.rs      entrypoints: create_stream / create_streams /          │
 │              create_streams_batch / withdraw / withdraw_max /       │
 │              cancel_stream / top_up / get_stream / available /      │
@@ -20,16 +31,24 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 │              verify_treasury / total_streams /                      │
 │              propose_ownership_transfer / accept_ownership_transfer │
 │              cancel_ownership_transfer / pending_ownership_transfer │
-│  stream.rs   Stream + PendingOwnership types, storage, accrual math│
+│              propose_rate_change / accept_rate_change /             │
+│              cancel_rate_change / rate_segments /                   │
+│              pending_rate_change (views)                            │
+│  stream.rs   Stream + ownership/rate types, piecewise accrual       │
+│              RateSegment = (allocation, basis_seconds) per window   │
 │  schedule.rs ScheduledIntent type, validation, timing, escrow      │
 │  treasury.rs protocol-fee math, per-token accounting, governor,    │
 │              verification scan (see §11)                           │
 │  errors.rs   StreamError — stable numeric codes, append-only       │
 │  events.rs   StreamCreated / Withdrawn / StreamCancelled /         │
+│              StreamToppedUp / DisputeRaised / DisputeResolved /    │
+│              DisputeExpired (stream_id as topic), FeeCharged       │
+│              (stream_id as topic), FeeWithdrawn (token as topic)   │
 │              StreamToppedUp / StreamScheduled /                    │
 │              ScheduledStreamExecuted / ScheduledIntentCancelled /  │
 │              ScheduledIntentExpired / FeeCharged / StreamsCreated /│
-│              FeeWithdrawn / OwnershipProposed / OwnershipAccepted  │
+│              FeeWithdrawn / OwnershipProposed / Accepted /          │
+│              RateChangeProposed / RateChangeAccepted                │
 └──────────────────────────┬─────────────────────────────────────────┘
                            │ token interface (SAC-compatible)
                            ▼
@@ -52,7 +71,11 @@ reentrancy, TTL strategy, and the design decisions behind the v1 API. Read the
 | `DataKey::FeeBps` *(instance)* | `u32` | fee rate in basis points; absent = 0 (disabled) |
 | `DataKey::Treasury(token)` | `Treasury` | per-token fee accounting (`charged_total`, `withdrawn_total`) |
 | `DataKey::StreamFee(id)` | `StreamFeeRecord` | fee charged at creation: amount + token; absent = 0 |
+| `DisputeKey::Active(id)` | `Dispute` | the open dispute on `id` (bond, window) — its presence *is* the freeze flag |
+| `DisputeKey::Count(id)` | `u32` | disputes ever raised on `id`; persists across resolution, drives the escalating bond |
 | `DataKey::PendingOwnership(id)` | `PendingOwnership` | at most one unexpired role-proposal per stream |
+| `DataKey::PendingRateChange(id)` | `PendingRateChange` | at most one unexpired rate-proposal per stream; absent = no offer |
+| `DataKey::RateSegments(id)` | `Vec<RateSegment>` | accepted rate schedule, ≤ `MAX_RATE_SEGMENTS` windows; absent = never renegotiated |
 
 Streams live in **persistent** storage. Every mutating entrypoint that touches
 a stream extends its TTL (`TTL_THRESHOLD_LEDGERS = 200_000`, extend to
@@ -155,6 +178,48 @@ Safety properties:
 The window is **half-open** `[start_time, end_time)`: at `now == start_time`
 nothing has accrued, at `now ≥ end_time` the full duration has elapsed.
 
+### 3.1 Piecewise rates: a stream that renegotiated (issue #54)
+
+A renegotiation replaces the rate for the *remainder* of the window. The stream
+therefore carries a schedule of `RateSegment { start_time, end_time, allocation,
+basis_seconds }` windows that partition `[start_time, end_time)`, and accrual
+becomes a sum over them — still one pure function, still `streamed_at`:
+
+```rust
+streamed_amount_at_segments(stream, now, segments)
+    = Σ segment_accrual(segment, now)          // each is streamed_at(
+                                               //   allocation, basis_seconds,
+                                               //   elapsed inside its window)
+```
+
+- **An empty schedule is not a special case.** It short-circuits to
+  `streamed_amount_at`, the pre-#54 path, so a stream that never renegotiated
+  prices identically, to the token unit, error included.
+- **The past is not re-priced.** The window that existed before the change is
+  *clipped* at the boundary: only `end_time` moves, while `allocation` and
+  `basis_seconds` carry over untouched. Accrual at any `now ≤ boundary` is what
+  it would have been had no change happened — the property
+  `rate_change_never_reprices_the_past` pins, against the original
+  `(deposit, duration)` pair rather than against a second reading of contract
+  state.
+- **The new window has no rounding residue.** `accept_rate_change` writes
+  `allocation = amount_per_second * window_seconds` and `basis_seconds =
+  window_seconds`, so `streamed_at` divides an integer product by the very
+  number it was multiplied by: accrual is exactly `rate * elapsed`, and the
+  window reaches exactly `allocation` at `end_time`. The floor dust stays in the
+  original window, where property 4 above already accounts for it.
+- **Escrow and schedule always agree.** At acceptance, `owed` is the schedule's
+  accrual at the boundary and `reserved = new_rate * remaining_seconds`; the
+  deposit becomes `owed + reserved`, and the difference
+  `reserved − (deposit − owed)` is pulled from the sender (increase) or refunded
+  to them (decrease). `deposit == Σ allocations` therefore holds after the
+  change, which is what keeps `withdraw_max`, `cancel_stream` and the
+  conservation fuzz oracle exact at the endpoint.
+- **Bounded.** `MAX_RATE_SEGMENTS = 32` windows; past the cap acceptance reverts
+  with `TooManyRateSegments` (83) and the offer survives, so the worst-case
+  pricing cost is measurable rather than assumed
+  (`full_schedule_pricing_is_bounded`, `docs/FOOTPRINT.md`).
+
 ## 4. Auth model
 
 | Action | who may call | auth consumed |
@@ -167,6 +232,9 @@ nothing has accrued, at `now ≥ end_time` the full duration has elapsed.
 | `propose_ownership_transfer` | current sender or recipient | caller |
 | `accept_ownership_transfer` | named pending `new_owner` only | new owner |
 | `cancel_ownership_transfer` | pending proposer only | proposer |
+| `propose_rate_change` | current sender or recipient | caller |
+| `accept_rate_change` | the offer's named counterparty only; an increase additionally consumes the sender's auth, since funds move from them | counterparty (+ sender on an increase) |
+| `cancel_rate_change` | pending proposer only | proposer |
 | `schedule_stream` | anyone; `sender` must authorize | sender |
 | `execute_scheduled` | anyone (keeper) | keeper (the caller) |
 | `cancel_scheduled` | intent sender, before the window opens | sender |
@@ -207,6 +275,18 @@ happen **before** the token transfers:
   zero), persists, creates the stream, emits, *then* pays the keeper. A
   reentrant token callback finds the occurrence already consumed.
 - `cancel_scheduled` / `reclaim_expired`: mark terminal, refund, then emit.
+- `accept_rate_change` splits by direction, because the two directions move funds
+  to different counterparties. An **increase** is a top-up wearing a schedule:
+  price the change, `transfer_from` the shortfall from the sender, *then* write
+  `deposit` and the schedule, clear the offer, emit — so a reentrant token
+  callback can only ever see a stream whose escrow already covers it
+  (`accept_rate_increase_operation_order_matches_golden`). A **decrease** frees
+  escrow the new rate no longer needs, so it is effects-first: write the schedule
+  and the smaller `deposit`, emit, *then* `transfer` the refund — were the refund
+  to fail, the whole acceptance rolls back rather than half-applying a schedule
+  (`accept_rate_decrease_operation_order_matches_golden`). A failed pull is
+  checked *before* any effect, which is why "rate increase without funds" leaves
+  the stream, the schedule and the open offer exactly as they were.
 
 Additionally, `withdraw` and `cancel_stream` re-read `status` after auth: a
 malicious token contract that reenters `withdraw` during its own transfer
@@ -214,6 +294,13 @@ callback finds `withdrawn` already updated, and `available_amount` reverts to
 the *post-write* (smaller or zero) value. The suite contains a
 malicious-token test that attempts exactly this reentry.
 
+The dispute paths follow the same ordering: `resolve_dispute` deletes the
+`Dispute` entry and (on accept) finalizes the `Stream` **before** any of the
+bond/settlement transfers; `expire_dispute` deletes the entry before paying
+the split. A reentrant token callback during a bond transfer therefore never
+sees a half-closed dispute — and the freeze checks in `cancel_stream` /
+`top_up` re-read the dispute entry rather than trusting a caller-supplied
+state.
 **Token failures are caught and re-typed, never swallowed.** Every token call
 goes through the SDK's fallible (`try_`) client; any failure — missing
 allowance or balance, an asset that refuses to move, a non-SEP-41 callee — is
@@ -227,13 +314,18 @@ Tests assert this rollback per entrypoint (state, balances, and events after
 a refused transfer).
 
 **Balance invariant:** the contract's token balance is always
-`≥ Σ (deposit − withdrawn)` across live streams **plus** `Σ (charged_total −
+`≥ Σ (deposit − withdrawn)` across live (non-cancelled) streams, **plus** the
+sum of the outstanding dispute bonds, **plus** `Σ (charged_total −
 withdrawn_total)` across token treasuries. Funds enter only via
-`create_stream`/`top_up` and leave only via `withdraw`/`cancel_stream`
-(stream leg) and `withdraw_treasury` (fee leg), and every exit is bounded
-by `0 ≤ withdrawn ≤ streamed ≤ deposit` or by the collectible fee balance
-respectively. The two ledgers never mix: the fee a sender paid at creation
-is never part of any stream's `deposit`, so no payout path can reach it.
+`create_stream`/`top_up`/`raise_dispute` and leave only via
+`withdraw`/`cancel_stream`/`resolve_dispute`/`expire_dispute` (stream and
+bond legs) and `withdraw_treasury` (fee leg), and every exit is bounded by
+`0 ≤ withdrawn ≤ streamed ≤ deposit` or by the collectible fee balance
+respectively. The ledgers never mix: the fee a sender paid at creation and
+the bond a recipient posts are never part of any stream's `deposit`, so no
+payout path can reach them. A seeded random-scenario property test re-checks
+this exact equality after every operation
+(`property_contract_balance_equals_locks_plus_outstanding_bonds`).
 
 ## 6. Lifecycle states
 
@@ -260,6 +352,26 @@ is never part of any stream's `deposit`, so no payout path can reach it.
   pending proposal for a stream that later becomes terminal can never move a
   role (the failed call reverts, and a later proposal is rejected).
 
+### Disputed: an overlay, not a status
+
+A dispute never changes `StreamStatus`. It is an orthogonal *overlay* — the
+existence of a `DisputeKey::Active(id)` entry — layered on top of `Active`:
+
+```text
+ Active ──raise_dispute(bond)──▶ Active + Dispute ──resolve(accept=false)──▶ Active (bond → sender)
+    │                                 │     │
+    │                                 │     ├─resolve(accept=true)──▶ Cancelled (pro-rata unwind,
+    │                                 │     │                         bond → recipient)
+    │                                 │     └─expire_dispute (after 7 d)──▶ Active
+    │                                 │                                    (bond split 50/50)
+    │                                 └── withdraw / accrual keep working ──▶ (possibly Depleted)
+```
+
+While disputed: `cancel_stream` and `top_up` revert with `DisputeActive`;
+`withdraw`, `withdraw_max`, and accrual are unaffected. A stream *can* reach
+`Depleted` underneath an open dispute (the recipient withdrew everything);
+resolution then only settles the bond. `Depleted` and `Cancelled` streams can
+never be disputed (`StreamNotActive`).
 ### 6.1 Withdraw / cancel race semantics
 
 `withdraw` (recipient) and `cancel_stream` (sender) are strictly serial: each
@@ -313,6 +425,10 @@ the public interface:
 | 11 | `MathOverflow` | a checked computation would overflow |
 | 12 | `NotAuthorized` | caller is neither sender nor (cancelable) recipient |
 | 13 | `NothingToWithdraw` | `withdraw_max` with an empty accrued balance |
+| 14 | `DisputeActive` | cancel/top-up attempted while a dispute is open (also: second `raise_dispute`) |
+| 15 | `DisputeNotFound` | resolve/expire/get a stream without an open dispute |
+| 16 | `DisputeNotExpired` | `expire_dispute` called before the timelock elapsed |
+
 | 14 | `FeeRateTooHigh` | `set_fee_bps` above `MAX_FEE_BPS` |
 | 15 | `NotGovernor` | non-governor calls a governor-gated function (also: non-nominee `accept_governor`) |
 | 16 | `NoPendingGovernor` | `accept_governor` with no nomination pending |
@@ -326,17 +442,21 @@ the public interface:
 | 24 | `IntentParamsMismatch` | stored params no longer match `params_hash` |
 | 25 | `IntentNotExpired` | `reclaim_expired` before `expires_at` |
 | 26 | `DepositTransferFailed` | `create_stream` / `create_streams` token pull failed (allowance/balance, or the asset refused the transfer) |
-| 27 | `TopUpTransferFailed` | `top_up`'s token pull failed; `deposit` left unchanged |
+| 27 | `TopUpTransferFailed` | `top_up`'s or `accept_rate_change`'s token pull failed; `deposit` left unchanged |
 | 28 | `RecipientPayoutFailed` | token refused a payout to the recipient (`withdraw`, `withdraw_max`, or the recipient leg of `cancel_stream`) |
-| 29 | `SenderRefundFailed` | token refused the sender's refund at cancellation; the cancellation rolls back |
+| 29 | `SenderRefundFailed` | token refused the sender's refund at cancellation or at a rate decrease; the operation rolls back |
 | 30 | `TreasuryPayoutFailed` | token refused the payout of collected protocol fees in `withdraw_treasury`; the withdrawal record and event roll back |
 | 60 | `NoPendingOwnership` | accept/cancel called with no proposal stored |
 | 61 | `OwnershipProposalExpired` | accept after the proposal's seven-day window |
 | 62 | `InvalidTransferTarget` | proposing to the role's current holder |
 | 63 | `OwnershipProposalPending` | proposing while an unexpired proposal exists |
+| 80 | `NoPendingRateChange` | accept/cancel called with no rate offer stored |
+| 81 | `RateProposalExpired` | accept after the offer's seven-day window |
+| 82 | `RateProposalPending` | proposing while an unexpired offer exists |
+| 83 | `TooManyRateSegments` | acceptance would exceed `MAX_RATE_SEGMENTS` (32) windows; the offer survives |
 
-Codes 31–59 (policy, upgrades, batch limits, sponsorship, and oracle) are
-catalogued in [`docs/errors.md`](./errors.md).
+Codes 31–59 (policy, upgrades, batch limits, sponsorship, and oracle) and the
+two-key governance codes 64–79 are catalogued in [`docs/errors.md`](./errors.md).
 
 Codes 26–30 are *transfer-failure* codes: a token's own error number is
 deliberately never propagated (see §5), so clients can always branch on these
@@ -400,6 +520,61 @@ grows with that address's stream count and would break replay-based readers.
 Simplicity is a security feature; richer flows belong in composing contracts
 or off-chain UX.
 
+**Recipient-initiated disputes: freeze the lifecycle, never the earnings.**
+The recipient can flag an active stream (wrong address, coerced creation),
+which freezes `cancel_stream` and `top_up` for up to one timelock window.
+What the freeze *excludes* is deliberate: accrual keeps running and the
+recipient keeps full access to `withdraw` / `withdraw_max`. Reasoning — (a)
+accrued funds are property the recipient already earned by the stream's own
+rules; seizing them during a dispute the recipient initiated would punish
+the party we are trying to protect, and would make "coerced creation"
+strictly worse for the victim; (b) the dispute is a *hold on mutations*, not
+a clawback: the sender's funds keep flowing exactly as scheduled, so nothing
+about the stream's economics changes while the parties sort things out; (c)
+freezing withdrawals would also freeze the only action a disputed recipient
+can use to mitigate harm. A dispute is stored as a separate `Dispute` entry
+rather than a fourth `StreamStatus`, which keeps existing stream
+serialization stable and makes the withdraw path provably untouched.
+
+**Disputes are economically bounded, never free.** A free flag lets a
+recipient grief any sender — so raising pulls a bond via `transfer_from`:
+`bondₙ = max(1 unit, 5 % of deposit × n)`, where `n` is the dispute count on
+*that stream* (persisted in `DisputeKey::Count`). Outcomes: sender rejects
+(bad faith) → the bond is slashed to the sender as compensation for the
+frozen window and the stream resumes; sender accepts → the bond is refunded
+and the stream unwinds with the normal pro-rata cancel split; timelock
+expires with no verdict → the bond is **split 50/50** (sender rounds up).
+
+*Griefing-threshold math* (cost per blocked hour vs stream value `D`,
+timelock `T` = 7 days = 168 h, base bond `b` = 5 %·D):
+
+- Cheapest attack — the sender stays passive and every dispute dies at
+  expiry: the attacker loses `ceil(n·b/2)` per blocked week, i.e.
+  `n·b/(2·168) ≈ 0.0149 %·D·n` **per blocked hour** on round `n`.
+- Cumulative attacker cost after `k` griefing weeks:
+  `Σ n·b/2 = b·k(k+1)/4 ≈ 1.25 %·D·k²`. It crosses the *entire stream value*
+  at `k = 2·√(D/b) ≈ 9` weeks — after ~9 rounds the attacker has burned more
+  than the stream is worth, while the beneficiary (the recipient) has
+  meanwhile withdrawn everything accrued anyway.
+- If the sender instead actively rejects each dispute, the cost doubles
+  (full bond `n·b`, not half), crossing `D` after ≈ 6 rounds. The sender's
+  defense is therefore either one cheap transaction (`resolve_dispute`) or
+  simply waiting — both put the escalating cost on the attacker.
+- The passive-sender half-slashed expiry is the compromise that keeps the
+  legitimate case bounded too: a genuine victim whose coercer never responds
+  loses only half an escalating bond per window and always keeps accrued
+  funds; rejecting to zero (full refund at expiry) would make serial disputes
+  free, and full slashing at expiry would over-punish legitimate recipients
+  of unresponsive senders.
+
+Rejected alternatives: a fixed non-escalating bond (serial griefing settles
+into a constant hourly price); disputes as a `StreamStatus` variant (breaks
+"withdrawals always work" or requires special-casing the status enum);
+recipient-initiated *bond withdrawal* before expiry (turns the bond into a
+free option: freeze the stream, refund yourself, repeat); on-chain
+arbitration committees (out of scope — a dispute hold only needs to be long
+enough for the sender to choose: accept and unwind at the normal pro-rata
+cost, or reject and put the conflict on record while collecting the bond).
 **Scheduled intents: native auth at schedule time, funds escrowed up front.**
 The sender authorizes the *scheduling* call (a normal Soroban
 `require_auth()`), and the contract commits the exact parameters into a SHA-256
@@ -466,6 +641,34 @@ griefing) is in [`SCHEDULED_INTENTS.md`](./SCHEDULED_INTENTS.md).
   transfers with exact balance and `withdrawn` assertions, and index contents
   for both the old and new holders. The unknown-key read test pins the
   `extend_ttl` existence check.
+- **Rate renegotiation** (`test.rs`) covers the two-step handshake and its
+  money: an increase that pulls the exact shortfall, an increase that cannot be
+  funded and therefore changes nothing (stream, schedule and open offer all left
+  as they were), a decrease that refunds exactly the freed escrow, a decrease
+  accepted mid-second on a deposit that does not divide by its duration,
+  stranger/non-counterparty/expired/replacement/cancel paths, rejection on a
+  terminal stream and on one whose window already elapsed, invalidation of a
+  pending offer by a role transfer, the frozen gate, the 32-segment cap, event
+  payloads, and `available` / `withdraw_max` / the cancellation split all pricing
+  the same schedule.
+  - *Backwards compatibility by differential, not by assertion of
+    self-consistency*: `empty_plan_matches_single_window_formula` checks an empty
+    schedule against the single-window formula, the pure `streamed_at` and the
+    cancel split across 144 duration/deposit/offset combinations, and
+    `rate_change_never_reprices_the_past` checks the clipped head against the
+    original `(deposit, duration)` pair — a model that shares no code with the
+    contract path.
+  - *Rounding analysis*: `piecewise_accrual_matches_the_reference_models` prices
+    20,000 randomly shaped schedules at randomly probed timestamps against two
+    models at once — a `u128` long-division floor model for head-shaped windows
+    and a division-free `Σ rate × elapsed` model for windows a renegotiation
+    wrote — with zero divergence, plus monotonicity and the
+    `0 ≤ accrued ≤ Σ allocations` bound. The `--ignored` sibling repeats the same
+    analysis over 1,000,000 schedules for release evidence.
+  - *Fuzzing*: `fuzz/fuzz_targets/rate_schedule.rs` runs those oracles on
+    coverage-guided segment sequences, and `conservation.rs` now renegotiates
+    streams inside its random operation sequence and re-prices every stored
+    schedule against the reference model.
 - **Scheduled intents** (`schedule_test.rs`) cover the full lifecycle:
   one-shot and recurring execution, double-execution rejection, the
   cancel/execute race, expired-auth replay, permissionless reclaim, refund
@@ -480,6 +683,21 @@ griefing) is in [`SCHEDULED_INTENTS.md`](./SCHEDULED_INTENTS.md).
   always agrees), per-stream `stream_fee` reads match the model, and the
   contract's token balance equals outstanding stream funds plus collectible
   fees — the fee ledger and the stream ledger never mix.
+
+- **Disputes** are covered end to end in `test.rs`: the freeze policy
+  (cancel/top-up blocked, withdrawals and accrual alive), auth, double-raise
+  rejection, both resolution outcomes with exact bond accounting, expiry
+  timing and the odd-bond split, serial-griefing bond escalation, expiry on
+  a stream the recipient drained mid-dispute, and the event payloads. The
+  balance invariant is re-asserted after every step of a seeded random
+  operation script — `sum(deposit − withdrawn)` over live streams plus the
+  outstanding dispute bonds.
+- **Dispute-bond math is pure** (`required_bond`, `bond_shares` take no
+  `Env`), so the `dispute_bond` `cargo-fuzz` target
+  ([`fuzz/`](../fuzz/fuzz_targets/dispute_bond.rs)) fuzzes the anti-griefing
+  core: the floor, monotonic escalation in rounds and deposit, genuine
+  `MathOverflow` only, and the expiry split's conservation
+  (`sender + recipient == bond`).
 
 ## 10. Open problems / roadmap hooks
 
@@ -839,6 +1057,8 @@ Events are the off-chain ledger indexers consume; fields decode by position
 | `StreamToppedUp` | `stream_id: u64` | `sender: Address`; `amount: i128`; `new_deposit: i128` |
 | `FeeCharged` | `stream_id: u64` | `token: Address`; `payer: Address`; `amount: i128`; `fee_bps: u32` |
 | `FeeWithdrawn` | `token: Address` | `governor: Address`; `recipient: Address`; `amount: i128`; `withdrawn_total: i128` |
+| `RateChangeProposed` | `stream_id: u64` | `proposed_by`, `counterparty: Address`; `amount_per_second: i128`; `expires_at: u64` |
+| `RateChangeAccepted` | `stream_id: u64` | `accepted_by: Address`; `new_amount_per_second`, `owed_at_change`, `reserved_at_new_rate`, `adjustment`, `deposit: i128`; `effective_from: u64` |
 
 Never add, remove, reorder, or retype fields of an existing event; emit a
 new event type instead. Tests must filter by contract and compare typed XDR
@@ -1059,3 +1279,91 @@ The test suite exercises each step: recipient transfer mid-accrual followed by
 a withdrawal, sender transfer followed by top-up + cancel with exact balance
 assertions, expiry at the exact TTL boundary, proposal cancellation, and index
 contents for both old and new holders.
+
+## 18. Two-step rate renegotiation
+
+Either party can propose a new `amount_per_second` for the rest of a live
+stream. Like §17, the change is always propose → accept, so neither side can
+unilaterally re-price what is owed; unlike §17 it moves funds.
+
+```text
+propose(caller, id, amount_per_second)
+        │  caller must be the current sender or recipient
+        │  stream must be Active and its window not yet elapsed
+        │  amount_per_second must be > 0 and inside the policy rate bounds
+        │  stores PendingRateChange { stream_id, proposed_by, counterparty,
+        │                             amount_per_second, expires_at }
+        │  emits RateChangeProposed
+        ▼
+   pending offer ──── cancel(proposer) ──▶ (removed)
+        │
+        │  now >= expires_at
+        ├──────────────▶ accept reverts RateProposalExpired
+        │                (stale offer survives; a new proposal replaces it)
+        ▼
+accept(counterparty, id)
+        │  caller must equal pending.counterparty (else NotAuthorized), and the
+        │  recorded pair must still be the stream's parties in the same roles —
+        │  a §17 transfer invalidates an offer negotiated with an ex-party
+        │  boundary = resolve_stream_time(id).max(start_time); boundary < end_time
+        │  owed     = accrual of the current schedule at the boundary
+        │  reserved = amount_per_second · (end_time − boundary)      [exact]
+        │  adjustment = reserved − (deposit − owed)
+        │  increase: sender auth + transfer_from the shortfall  ← before effects
+        │  effects: deposit = owed + reserved, install the clipped schedule,
+        │           remove the offer, emit RateChangeAccepted
+        │  decrease: transfer the freed escrow back to the sender ← after effects
+        ▼
+   same window, new rate from the boundary forward
+```
+
+**Storage and TTL.** The offer lives under `DataKey::PendingRateChange(id)` and
+the accepted schedule under `DataKey::RateSegments(id)`, never inside `Stream`
+(§2, [ADR-0012](adr/0012-piecewise-rate-schedule-storage.md)). A stream that
+never renegotiated has neither key; a stream whose schedule reached
+`MAX_RATE_SEGMENTS = 32` refuses further acceptances with
+`TooManyRateSegments` and keeps the offer, so the ceiling is a bound on the
+cost of pricing, not just on storage.
+
+**Exactness (proof sketch).** Let `S = [w₁ … wₙ]` be the schedule before an
+acceptance at boundary `β` with rate `r`, where each window `wᵢ` prices
+`streamed_at(allocationᵢ, basis_secondsᵢ, ·)` over its own half-open slice, and
+accrual is `A_S(t) = Σᵢ streamed_at(…)`. Acceptance writes
+`S′ = [clip(wᵢ, β) for startᵢ < β] ++ [(β, end, r·(end−β), end−β)]`:
+
+1. **The past is untouched.** `clip` shortens only `end_time`, so for every
+   `t ≤ β` the elapsed term of each window is the same in `S` and `S′`:
+   `A_{S′}(t) = A_S(t)`. `owed = A_S(β)` is therefore also `A_{S′}(β)`, and
+   because `withdrawn` is not read or written, `available` at every `t ≤ β` is
+   unchanged. The clipped head keeps the *original* `(deposit, duration)` pair,
+   which is why a floor-division residue in the past is never re-based onto the
+   new rate.
+2. **The future has no residue.** For `t > β`, the tail window's basis equals
+   its own length, so `streamed_at(r·(end−β), end−β, t−β) = r·(t−β)` — an
+   integer product divided by the number it was multiplied by. Hence
+   `A_{S′}(t) = owed + r·(t−β)` exactly.
+3. **Escrow and schedule agree.** `deposit′ = owed + reserved = A_{S′}(end)`,
+   and the signed `adjustment` is the only token interaction, so the contract's
+   balance still covers `deposit′ − withdrawn`. `0 ≤ withdrawn ≤ A(t) ≤ deposit′`
+   survives the change: `withdrawn` is untouched and `A_{S′}` is monotone in `t`
+   because each window's accrual is and the windows are disjoint.
+4. **Terminal safety.** Propose and accept both require `Active` with
+   `boundary < end_time`, so a cancelled, depleted, or already-finished stream
+   cannot acquire a schedule; a stream whose window closed while it stayed
+   `Active` reverts `InvalidTimeRange` on both halves of the handshake.
+
+**Failure atomicity.** The pull of a shortfall is the last check before any
+effect, and the refund of a decrease is the last interaction after them: either
+way a refusing token rolls the whole acceptance back, so a half-applied schedule
+is unreachable. `rate_increase_without_funds_changes_nothing` pins the first
+case (deposit, schedule, offer and contract balance all identical afterwards).
+
+The test suite exercises each step: an increase that pulls exactly the
+shortfall, an unfundable increase, a decrease that refunds exactly the freed
+escrow, a decrease accepted mid-second on a deposit that does not divide by its
+duration, withdrawals and the cancellation split against the same schedule,
+top-up pro-rata onto the current window only, offer expiry/replacement/
+cancellation, stale parties after an ownership transfer (§17), the frozen gate,
+the segment cap, and the empty-schedule differential against the pre-#54
+formula. §3.1 covers the math; the rounding analysis across random schedules is
+§9.

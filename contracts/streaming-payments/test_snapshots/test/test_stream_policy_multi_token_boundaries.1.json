@@ -774,6 +774,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "use_oracle"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "withdrawn"
                     },
                     "val": {
@@ -882,6 +890,14 @@
                     },
                     "val": {
                       "address": "CD3FXVGYSLQFFTW3UH6WFF2OKZH7VERGZJZAMJHTGHBWO4F6URWEJL23"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "use_oracle"
+                    },
+                    "val": {
+                      "bool": false
                     }
                   },
                   {

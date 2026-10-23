@@ -23,10 +23,47 @@ use crate::sponsor;
 use crate::stream::{streamed_at, DataKey};
 use crate::surface::{trace, Branch, Reachability, RETIRED_CODES};
 use crate::test::{Fixture, RefusingFixture};
-use crate::{StreamError, MAX_DURATION_SECONDS, MAX_FEE_BPS, OWNERSHIP_PROPOSAL_TTL_SECONDS};
+use crate::{
+    StreamError, MAX_DURATION_SECONDS, MAX_FEE_BPS, MAX_RATE_SEGMENTS,
+    OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
+};
 
 const DAY: u64 = 24 * 60 * 60;
 const DEPOSIT: i128 = 10_000_000_000;
+
+/// `DEPOSIT` streamed evenly over ten days, floored to whole tokens. The rate a
+/// renegotiation repeats, so accepting it only ever frees a few tokens of escrow
+/// (the rounding residue of the floor) instead of demanding a fresh pull.
+const RATE_PER_SECOND: i128 = DEPOSIT / (10 * DAY) as i128;
+
+/// Applies `count` accepted rate changes, one per second, so the stream's
+/// schedule holds exactly `count + 1` windows.
+fn fill_rate_segments(f: &Fixture, id: u64, count: u32) {
+    for _ in 0..count {
+        f.advance_time(1);
+        f.client
+            .mock_all_auths()
+            .propose_rate_change(&f.sender, &id, &RATE_PER_SECOND);
+        f.client
+            .mock_all_auths()
+            .accept_rate_change(&f.recipient, &id);
+    }
+}
+
+/// Pins the governance rate bounds for the stream's token.
+fn set_rate_policy(f: &Fixture, min_rate: i128, max_rate: i128) {
+    f.client.mock_all_auths().set_stream_policy(
+        &f.governor,
+        &Some(f.token.clone()),
+        &crate::StreamPolicy {
+            min_deposit: 0,
+            min_duration: 0,
+            max_duration: 0,
+            min_rate,
+            max_rate,
+        },
+    );
+}
 
 fn schedule_intent(f: &Fixture, execute_after: u64, expires_at: u64) -> u64 {
     let now = f.env.ledger().timestamp();
@@ -105,6 +142,52 @@ fn sponsored_claim(
         &sig,
         &sig,
     )
+}
+
+// ------------------------------------------------------- governance probes ---
+//
+// Every governance branch except the bootstrap-time validation errors fires on a
+// contract whose signer set already exists, so the probes share one scaffolding
+// type rather than repeating the bootstrap ceremony 16 times.
+
+/// A quiet fixture with governance bootstrapped over two distinct signers.
+struct Governed {
+    f: Fixture,
+    a: Address,
+    b: Address,
+}
+
+impl Governed {
+    fn new() -> Self {
+        Self::with_window(crate::DEFAULT_VETO_WINDOW_SECONDS)
+    }
+
+    /// Bootstrap a quiet fixture over the two default distinct signers.
+    fn with_window(window: u64) -> Self {
+        let f = Fixture::setup_quiet();
+        let a = Address::generate(&f.env);
+        let b = Address::generate(&f.env);
+        let mut set = soroban_sdk::Vec::new(&f.env);
+        set.push_back(a.clone());
+        set.push_back(b.clone());
+        f.client
+            .mock_all_auths()
+            .governance_bootstrap(&f.governor, &set, &window);
+        Governed { f, a, b }
+    }
+
+    /// Propose a fee change from `caller` and return the proposal id.
+    fn propose_fee(&self, caller: &Address, new_fee_bps: u32) -> u64 {
+        self.f
+            .client
+            .mock_all_auths()
+            .governance_propose(caller, &crate::GovernanceAction::SetFeeBps(new_fee_bps))
+    }
+
+    /// Advance past the veto window.
+    fn mature(&self) {
+        self.f.advance_time(crate::DEFAULT_VETO_WINDOW_SECONDS + 1);
+    }
 }
 
 /// Triggers `branch` and returns the error the contract produced, or `None` for
@@ -232,6 +315,50 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .client
                 .mock_all_auths()
                 .try_top_up(&id, &i128::MAX)))
+        }
+        // ------------------------------------------------------------ disputes
+        Branch::CancelDuringDispute => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);
+            f.raise_dispute(id);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_cancel_stream(&f.sender, &id)))
+        }
+        Branch::TopUpDuringDispute => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.raise_dispute(id);
+            Some(rejected!(f.client.mock_all_auths().try_top_up(&id, &1)))
+        }
+        Branch::RaiseDisputeAlreadyActive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.raise_dispute(id);
+            Some(rejected!(f.client.mock_all_auths().try_raise_dispute(&id)))
+        }
+        Branch::DisputeNotOpen => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f.client.mock_all_auths().try_get_dispute(&id)))
+        }
+        Branch::ExpireDisputeTooEarly => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.raise_dispute(id);
+            Some(rejected!(f.client.mock_all_auths().try_expire_dispute(&id)))
+        }
+        Branch::ResolveCallerNotSender => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.raise_dispute(id);
+            // The recipient is not the sender: only senders resolve.
+            Some(rejected!(f.client.mock_all_auths().try_resolve_dispute(
+                &f.recipient,
+                &id,
+                &false
+            )))
         }
         // --------------------------------------------- shared storage / math
         Branch::StreamNotFound => {
@@ -969,13 +1096,397 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .mock_all_auths()
                 .try_cancel_ownership_transfer(&f.recipient, &id)))
         }
+        // --------------------------------------------- rate renegotiation
+        Branch::RateProposeNotAuthorized => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let stranger = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_rate_change(
+                    &stranger,
+                    &id,
+                    &(DEPOSIT / (10 * DAY) as i128)
+                )))
+        }
+        Branch::RateProposalAmountNonPositive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_rate_change(&f.sender, &id, &0)))
+        }
+        Branch::RateProposalWindowElapsed => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            // The window closed while the stream stayed Active (nothing was
+            // withdrawn), so there is no remaining window to re-rate.
+            f.advance_time(2 * DAY);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_rate_change(&f.sender, &id, &1)))
+        }
+        Branch::RateProposalPending => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let rate = (DEPOSIT / (10 * DAY) as i128) + 1;
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &rate);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_rate_change(&f.recipient, &id, &rate)))
+        }
+        Branch::RateAcceptNotTarget => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let stranger = soroban_sdk::Address::generate(&f.env);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &1);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&stranger, &id)))
+        }
+        Branch::RateAcceptStaleParties => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &1);
+            // The accepting recipient hands their role over before accepting:
+            // the offer was negotiated with them, not with their successor.
+            let heir = soroban_sdk::Address::generate(&f.env);
+            f.client
+                .mock_all_auths()
+                .propose_ownership_transfer(&f.recipient, &id, &heir);
+            f.client
+                .mock_all_auths()
+                .accept_ownership_transfer(&heir, &id);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateProposalExpired => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &1);
+            f.advance_time(RATE_PROPOSAL_TTL_SECONDS);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::NoPendingRateChange => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateCancelNotProposer => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &1);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_cancel_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateReserveOverflow => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            // The proposal itself only stores a rate; the overflow shows when
+            // acceptance prices it over the remaining window.
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &i128::MAX);
+            f.advance_time(2 * DAY);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateSegmentLimitReached => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+            // One accepted change adds one window; the cap refuses the next.
+            fill_rate_segments(&f, id, MAX_RATE_SEGMENTS - 1);
+            f.advance_time(1);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &RATE_PER_SECOND);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RatePolicyBelowFloor => {
+            let f = Fixture::setup_quiet();
+            set_rate_policy(&f, 1_000, 0);
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &5);
+            f.advance_time(2 * DAY);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RatePolicyAboveCeiling => {
+            let f = Fixture::setup_quiet();
+            set_rate_policy(&f, 0, 10);
+            // Deposited below the ceiling (its derived rate is 0 tokens/s), so
+            // the stream exists and the ceiling is what the *proposal* breaks.
+            let id = f.create_stream(100, DAY, 10 * DAY, false);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &20);
+            f.advance_time(2 * DAY);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateTopUpTransferFailed => {
+            let f = RefusingFixture::setup_quiet();
+            let id = f.create(DEPOSIT, 0, 10 * DAY);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &(RATE_PER_SECOND * 2));
+            f.advance_time(DAY);
+            f.refuse(false, true); // the asset stops accepting the shortfall pull
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
+        Branch::RateRefundFailed => {
+            let f = RefusingFixture::setup_quiet();
+            let id = f.create(DEPOSIT, 0, 10 * DAY);
+            f.client
+                .mock_all_auths()
+                .propose_rate_change(&f.sender, &id, &1);
+            f.advance_time(DAY);
+            f.refuse(true, false); // the asset stops paying out the freed escrow
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_accept_rate_change(&f.recipient, &id)))
+        }
         // Invariant-protected: a stored stream always satisfies
         // `0 <= withdrawn <= streamed <= deposit <= i128::MAX`, so these
         // checked subtractions/addition can never cross an i128 boundary —
         // not even for a corrupt entry, because `streamed - withdrawn` is
         // bounded below by `-i128::MAX`.
-        Branch::AvailableBalanceOverflow | Branch::CancelSplitOverflow | Branch::PayoutOverflow => {
-            None
+        Branch::AvailableBalanceOverflow
+        | Branch::CancelSplitOverflow
+        | Branch::PayoutOverflow
+        | Branch::RateSegmentSumOverflow
+        | Branch::RateHeadroomUnderflow => None,
+
+        // ------------------------------------------------------- governance
+        Branch::GovernanceNotInitialized => {
+            let f = Fixture::setup_quiet();
+            let stranger = Address::generate(&f.env);
+            Some(rejected!(f.client.mock_all_auths().try_governance_propose(
+                &stranger,
+                &crate::GovernanceAction::SetFeeBps(100)
+            )))
+        }
+        Branch::GovernanceAlreadyInitialized => {
+            let g = Governed::new();
+            let mut set = soroban_sdk::Vec::new(&g.f.env);
+            set.push_back(g.a.clone());
+            set.push_back(g.b.clone());
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &g.f.governor,
+                    &set,
+                    &crate::DEFAULT_VETO_WINDOW_SECONDS
+                )))
+        }
+        Branch::NotGovernanceSigner => {
+            let g = Governed::new();
+            let stranger = Address::generate(&g.f.env);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_propose(
+                    &stranger,
+                    &crate::GovernanceAction::SetFeeBps(100)
+                )))
+        }
+        Branch::GovernanceDuplicateSigner => {
+            let f = Fixture::setup_quiet();
+            let a = Address::generate(&f.env);
+            let mut set = soroban_sdk::Vec::new(&f.env);
+            set.push_back(a.clone());
+            set.push_back(a.clone());
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &f.governor,
+                    &set,
+                    &crate::DEFAULT_VETO_WINDOW_SECONDS,
+                )))
+        }
+        Branch::GovernanceSignerSetEmpty => {
+            let f = Fixture::setup_quiet();
+            let set = soroban_sdk::Vec::new(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &f.governor,
+                    &set,
+                    &crate::DEFAULT_VETO_WINDOW_SECONDS,
+                )))
+        }
+        Branch::GovernanceTooManySigners => {
+            let f = Fixture::setup_quiet();
+            let mut set = soroban_sdk::Vec::new(&f.env);
+            for _ in 0..crate::MAX_SIGNERS + 1 {
+                set.push_back(Address::generate(&f.env));
+            }
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &f.governor,
+                    &set,
+                    &crate::DEFAULT_VETO_WINDOW_SECONDS,
+                )))
+        }
+        Branch::GovernanceSignersNotDistinct => {
+            let f = Fixture::setup_quiet();
+            let mut set = soroban_sdk::Vec::new(&f.env);
+            set.push_back(Address::generate(&f.env));
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &f.governor,
+                    &set,
+                    &crate::DEFAULT_VETO_WINDOW_SECONDS,
+                )))
+        }
+        Branch::GovernanceProposalNotFound => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            assert_eq!(id, 1);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_sign(&g.b, &(id + 999))))
+        }
+        Branch::GovernanceVetoWindowOpen => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.f.client.mock_all_auths().governance_sign(&g.a, &id);
+            g.f.client.mock_all_auths().governance_sign(&g.b, &id);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_execute(&Address::generate(&g.f.env), &id)))
+        }
+        Branch::GovernanceVetoWindowClosed => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.mature();
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_veto(&g.b, &id)))
+        }
+        Branch::GovernanceVetoWindowTooShort => {
+            let f = Fixture::setup_quiet();
+            let mut set = soroban_sdk::Vec::new(&f.env);
+            set.push_back(Address::generate(&f.env));
+            set.push_back(Address::generate(&f.env));
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_governance_bootstrap(
+                    &f.governor,
+                    &set,
+                    &(crate::MIN_VETO_WINDOW_SECONDS - 1),
+                )))
+        }
+        Branch::GovernanceAlreadyVetoed => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.f.client.mock_all_auths().governance_veto(&g.b, &id);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_execute(&Address::generate(&g.f.env), &id)))
+        }
+        Branch::GovernanceAlreadyExecuted => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.f.client.mock_all_auths().governance_sign(&g.a, &id);
+            g.f.client.mock_all_auths().governance_sign(&g.b, &id);
+            g.mature();
+            let executor = Address::generate(&g.f.env);
+            g.f.client
+                .mock_all_auths()
+                .governance_execute(&executor, &id);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_execute(&executor, &id)))
+        }
+        Branch::GovernanceDuplicateSignature => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.f.client.mock_all_auths().governance_sign(&g.a, &id);
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_sign(&g.a, &id)))
+        }
+        Branch::GovernanceSignaturesInsufficient => {
+            let g = Governed::new();
+            let id = g.propose_fee(&g.a, 100);
+            g.f.client.mock_all_auths().governance_sign(&g.a, &id);
+            g.mature();
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_governance_execute(&Address::generate(&g.f.env), &id)))
+        }
+        Branch::GovernanceTimelockRequired => {
+            let g = Governed::new();
+            Some(rejected!(g
+                .f
+                .client
+                .mock_all_auths()
+                .try_set_fee_bps(&g.f.governor, &100)))
         }
     }
 }
@@ -1072,6 +1583,8 @@ fn defensive_branches_are_exactly_documented() {
             Branch::AvailableBalanceOverflow,
             Branch::CancelSplitOverflow,
             Branch::PayoutOverflow,
+            Branch::RateSegmentSumOverflow,
+            Branch::RateHeadroomUnderflow,
         ],
         "the defensive set changed; update the matrix test and docs/ERROR_SURFACE.md"
     );
@@ -1101,6 +1614,9 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::NotGovernor
             | StreamError::NoPendingGovernor
             | StreamError::InsufficientTreasuryBalance
+            | StreamError::DisputeActive
+            | StreamError::DisputeNotFound
+            | StreamError::DisputeNotExpired
             | StreamError::SponsorNotFound
             | StreamError::SponsorInactive
             | StreamError::BeneficiaryNotEnrolled
@@ -1146,7 +1662,27 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::NoPendingOwnership
             | StreamError::OwnershipProposalExpired
             | StreamError::InvalidTransferTarget
-            | StreamError::OwnershipProposalPending => StreamError::ALL.contains(&e),
+            | StreamError::OwnershipProposalPending
+            | StreamError::NoPendingRateChange
+            | StreamError::RateProposalExpired
+            | StreamError::RateProposalPending
+            | StreamError::TooManyRateSegments
+            | StreamError::GovernanceNotInitialized
+            | StreamError::GovernanceAlreadyInitialized
+            | StreamError::NotGovernanceSigner
+            | StreamError::GovernanceDuplicateSigner
+            | StreamError::GovernanceSignerSetEmpty
+            | StreamError::GovernanceTooManySigners
+            | StreamError::GovernanceSignersNotDistinct
+            | StreamError::GovernanceProposalNotFound
+            | StreamError::GovernanceVetoWindowOpen
+            | StreamError::GovernanceVetoWindowClosed
+            | StreamError::GovernanceVetoWindowTooShort
+            | StreamError::GovernanceAlreadyVetoed
+            | StreamError::GovernanceAlreadyExecuted
+            | StreamError::GovernanceDuplicateSignature
+            | StreamError::GovernanceSignaturesInsufficient
+            | StreamError::GovernanceTimelockRequired => StreamError::ALL.contains(&e),
         }
     }
 

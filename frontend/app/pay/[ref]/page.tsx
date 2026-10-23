@@ -16,14 +16,8 @@ import {
 } from "@/lib/stellar";
 import { computeAccruedAt } from "@/lib/accrual";
 import { checkWalletNetwork } from "@/lib/network";
-
-function formatUnits(amountStroops: string | bigint): string {
-  const n = Number(amountStroops) / 10_000_000;
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 7,
-  });
-}
+import { useLocale } from "@/lib/i18n/provider";
+import { formatDateTime, formatPercent } from "@/lib/i18n/amounts";
 
 function shortenAddress(addr: string): string {
   if (!addr || addr.length < 12) return addr;
@@ -37,6 +31,7 @@ export default function PaymentLinkPage({
 }) {
   const resolvedParams = use(params);
   const ref = resolvedParams.ref;
+  const { t, formatAmount, locale } = useLocale();
 
   const [loading, setLoading] = useState(true);
   const [resolution, setResolution] = useState<PaymentLinkResolution | null>(null);
@@ -106,12 +101,12 @@ export default function PaymentLinkPage({
     try {
       const { isConnected: connected, error: connErr } = await isConnected();
       if (connErr || !connected) {
-        setClaimError("Freighter wallet not detected. Please install Freighter to claim.");
+        setClaimError(t("pay.error.noWallet"));
         return;
       }
       const { address: addr, error: accessErr } = await requestAccess();
       if (accessErr || !addr) {
-        setClaimError(accessErr?.message ?? "Wallet authorization rejected.");
+        setClaimError(accessErr?.message ?? t("pay.error.rejected"));
         return;
       }
       setAddress(addr);
@@ -130,9 +125,7 @@ export default function PaymentLinkPage({
     if (!resolution?.stream || !resolution.decoded) return;
 
     if (isRecipientMatch === false) {
-      setClaimError(
-        "Connected wallet does not match the blinded recipient binding for this stream."
-      );
+      setClaimError(t("pay.error.bindingMismatch"));
       return;
     }
 
@@ -156,10 +149,8 @@ export default function PaymentLinkPage({
       <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
           <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <h1 className="text-xl font-bold tracking-tight mb-2">Resolving Payment Link</h1>
-          <p className="text-sm text-neutral-400">
-            Verifying cryptographic commitment on Stellar Soroban…
-          </p>
+          <h1 className="text-xl font-bold tracking-tight mb-2">{t("pay.loading.title")}</h1>
+          <p className="text-sm text-neutral-400">{t("pay.loading.body")}</p>
         </div>
       </main>
     );
@@ -172,15 +163,15 @@ export default function PaymentLinkPage({
           <div className="w-12 h-12 bg-red-500/10 text-red-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
             ✕
           </div>
-          <h1 className="text-xl font-bold text-red-300 mb-2">Invalid Payment Link</h1>
+          <h1 className="text-xl font-bold text-red-300 mb-2">{t("pay.invalid.title")}</h1>
           <p className="text-sm text-neutral-400 mb-6">
-            {resolution?.error || "This payment link reference is malformed, corrupted, or has expired."}
+            {resolution?.error || t("pay.invalid.body")}
           </p>
           <Link
             href="/"
             className="inline-block px-5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-sm font-medium transition"
           >
-            Back to Dashboard
+            {t("chrome.backToDashboard")}
           </Link>
         </div>
       </main>
@@ -218,28 +209,26 @@ export default function PaymentLinkPage({
           <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
             ✓
           </div>
-          <h1 className="text-2xl font-bold text-emerald-300 mb-2">Funds Claimed Successfully</h1>
-          <p className="text-sm text-neutral-400 mb-6">
-            Your accrued stream funds have been transferred directly to your wallet on Stellar.
-          </p>
+          <h1 className="text-2xl font-bold text-emerald-300 mb-2">{t("pay.receipt.title")}</h1>
+          <p className="text-sm text-neutral-400 mb-6">{t("pay.receipt.body")}</p>
 
           <div className="bg-neutral-950/70 border border-neutral-800 rounded-xl p-5 mb-6 text-left space-y-3">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-neutral-400">Stream ID</span>
+              <span className="text-neutral-400">{t("pay.terminal.streamId")}</span>
               <span className="font-mono font-medium text-neutral-200">#{receipt.streamId}</span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-neutral-400">Claimed Amount</span>
+              <span className="text-neutral-400">{t("pay.receipt.claimedAmount")}</span>
               <span className="font-mono font-bold text-emerald-400">
-                {formatUnits(receipt.amount)} Tokens
+                {formatAmount(receipt.amount)} {t("pay.invoice.unit.tokens")}
               </span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-neutral-400">Recipient Wallet</span>
+              <span className="text-neutral-400">{t("pay.receipt.recipientWallet")}</span>
               <span className="font-mono text-neutral-300">{shortenAddress(address || "")}</span>
             </div>
             <div className="border-t border-neutral-800/80 pt-3 flex flex-col gap-1 text-sm">
-              <span className="text-neutral-400">Transaction Hash</span>
+              <span className="text-neutral-400">{t("pay.receipt.txHash")}</span>
               <span className="font-mono text-xs text-neutral-400 break-all">{receipt.txHash}</span>
             </div>
           </div>
@@ -251,13 +240,13 @@ export default function PaymentLinkPage({
               rel="noopener noreferrer"
               className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold transition text-center shadow-lg shadow-emerald-900/30"
             >
-              View on Stellar Expert ↗
+              {t("pay.receipt.explorer")}
             </a>
             <Link
               href="/"
               className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-medium transition text-center"
             >
-              Dashboard
+              {t("chrome.dashboard")}
             </Link>
           </div>
         </div>
@@ -275,34 +264,34 @@ export default function PaymentLinkPage({
           </div>
           <h1 className="text-xl font-bold mb-2">
             {isCancelled
-              ? "Stream Cancelled"
+              ? t("pay.terminal.cancelledTitle")
               : isDepleted
-              ? "Stream Depleted"
-              : "Stream Completed"}
+              ? t("pay.terminal.depletedTitle")
+              : t("pay.terminal.completedTitle")}
           </h1>
           <p className="text-sm text-neutral-400 mb-6">
             {isCancelled
-              ? "This payment stream was cancelled on-chain. Remaining escrow was split and refunded."
+              ? t("pay.terminal.cancelledBody")
               : isDepleted
-              ? "All tokens locked in this stream have already been claimed by the recipient."
-              : "This stream has concluded and there is zero uncollected balance remaining."}
+              ? t("pay.terminal.depletedBody")
+              : t("pay.terminal.completedBody")}
           </p>
 
           <div className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-4 mb-6 text-left text-xs space-y-2 font-mono">
             <div className="flex justify-between">
-              <span className="text-neutral-500">Stream ID</span>
+              <span className="text-neutral-500">{t("pay.terminal.streamId")}</span>
               <span className="text-neutral-300">#{stream.id}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-neutral-500">Total Funded</span>
-              <span className="text-neutral-300">{formatUnits(stream.deposit)}</span>
+              <span className="text-neutral-500">{t("pay.terminal.totalFunded")}</span>
+              <span className="text-neutral-300">{formatAmount(stream.deposit)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-neutral-500">Total Withdrawn</span>
-              <span className="text-neutral-300">{formatUnits(stream.withdrawn)}</span>
+              <span className="text-neutral-500">{t("pay.terminal.totalWithdrawn")}</span>
+              <span className="text-neutral-300">{formatAmount(stream.withdrawn)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-neutral-500">Status</span>
+              <span className="text-neutral-500">{t("pay.terminal.status")}</span>
               <span className="capitalize text-amber-400">{stream.status}</span>
             </div>
           </div>
@@ -311,7 +300,7 @@ export default function PaymentLinkPage({
             href="/"
             className="inline-block px-5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-sm font-medium transition"
           >
-            Go to App Home
+            {t("chrome.goToAppHome")}
           </Link>
         </div>
       </main>
@@ -326,11 +315,11 @@ export default function PaymentLinkPage({
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
             S
           </div>
-          <span className="font-bold tracking-tight text-lg text-white">StreamPay</span>
+          <span className="font-bold tracking-tight text-lg text-white">{t("brand.name")}</span>
         </Link>
         <div className="flex items-center gap-2 text-xs">
           <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-            ● Stellar {NETWORK_LABEL}
+            {t("chrome.networkLive", { network: NETWORK_LABEL })}
           </span>
         </div>
       </header>
@@ -343,37 +332,38 @@ export default function PaymentLinkPage({
           <div className="flex justify-between items-start mb-6">
             <div>
               <span className="text-xs uppercase tracking-wider font-semibold text-indigo-400">
-                Payment Link Invoice
+                {t("pay.invoice.kicker")}
               </span>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-                Stream #{stream.id}
+                {t("pay.invoice.title", { id: stream.id })}
               </h1>
             </div>
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-              Active Stream
+              {t("pay.invoice.active")}
             </span>
           </div>
 
           {/* Accrued / Available Box */}
           <div className="bg-gradient-to-br from-indigo-950/40 via-neutral-900 to-neutral-950 border border-indigo-500/20 rounded-2xl p-6 mb-6 text-center shadow-inner">
             <span className="text-xs font-medium text-indigo-300 uppercase tracking-wide">
-              Available to Claim Right Now
+              {t("pay.invoice.availableLabel")}
             </span>
             <div className="text-3xl sm:text-4xl font-extrabold text-white font-mono my-2 tracking-tight">
-              {formatUnits(claimableNowBig)} <span className="text-sm font-sans font-medium text-neutral-400">Tokens</span>
+              {formatAmount(claimableNowBig)}{" "}
+              <span className="text-sm font-sans font-medium text-neutral-400">{t("pay.invoice.unit.tokens")}</span>
             </div>
             <div className="text-xs text-neutral-400 flex items-center justify-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Streaming linearly in real time
+              {t("pay.invoice.streaming")}
             </div>
           </div>
 
           {/* Progress Bar */}
           <div className="mb-6">
             <div className="flex justify-between text-xs text-neutral-400 mb-2">
-              <span>Progress: {progressPercent}%</span>
+              <span>{t("pay.invoice.progress", { percent: formatPercent(progressPercent, locale) })}</span>
               <span>
-                Total: {formatUnits(stream.deposit)} Tokens
+                {t("pay.invoice.total", { amount: formatAmount(stream.deposit), unit: "tokens" })}
               </span>
             </div>
             <div className="w-full bg-neutral-800 h-2.5 rounded-full overflow-hidden">
@@ -387,33 +377,33 @@ export default function PaymentLinkPage({
           {/* Details Table */}
           <div className="bg-neutral-950/60 border border-neutral-800/80 rounded-2xl p-4 sm:p-5 mb-6 space-y-3 text-sm">
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 text-xs sm:text-sm">Payer (Sender)</span>
+              <span className="text-neutral-400 text-xs sm:text-sm">{t("pay.invoice.payer")}</span>
               <span className="font-mono text-xs sm:text-sm text-neutral-200">
                 {shortenAddress(stream.sender)}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 text-xs sm:text-sm">Payee (Recipient)</span>
+              <span className="text-neutral-400 text-xs sm:text-sm">{t("pay.invoice.payee")}</span>
               <span className="inline-flex items-center gap-1.5 text-xs text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20">
-                🔒 Protected Blinded Binding
+                {t("pay.invoice.payeeProtected")}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 text-xs sm:text-sm">Token Contract</span>
+              <span className="text-neutral-400 text-xs sm:text-sm">{t("pay.invoice.token")}</span>
               <span className="font-mono text-xs text-neutral-400">
                 {shortenAddress(stream.token)}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 text-xs sm:text-sm">Already Claimed</span>
+              <span className="text-neutral-400 text-xs sm:text-sm">{t("pay.invoice.alreadyClaimed")}</span>
               <span className="font-mono text-xs sm:text-sm text-neutral-300">
-                {formatUnits(stream.withdrawn)} Tokens
+                {formatAmount(stream.withdrawn)} {t("pay.invoice.unit.tokens")}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-neutral-400 text-xs sm:text-sm">End Time</span>
+              <span className="text-neutral-400 text-xs sm:text-sm">{t("pay.invoice.endTime")}</span>
               <span className="text-xs text-neutral-400">
-                {new Date(stream.endTime * 1000).toLocaleString()}
+                {formatDateTime(stream.endTime, locale)}
               </span>
             </div>
           </div>
@@ -422,17 +412,17 @@ export default function PaymentLinkPage({
           {address && (
             <div className="mb-6 p-4 rounded-xl border text-xs flex items-center justify-between gap-3 bg-neutral-950/80 border-neutral-800">
               <div>
-                <span className="text-neutral-400 block mb-0.5">Connected Wallet</span>
+                <span className="text-neutral-400 block mb-0.5">{t("pay.wallet.connected")}</span>
                 <span className="font-mono text-neutral-200 font-medium">{shortenAddress(address)}</span>
               </div>
               {isRecipientMatch === true && (
                 <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                  ✓ Verified Claimant
+                  {t("pay.wallet.verified")}
                 </span>
               )}
               {isRecipientMatch === false && (
                 <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 font-semibold flex items-center gap-1">
-                  ✕ Recipient Mismatch
+                  {t("pay.wallet.mismatch")}
                 </span>
               )}
             </div>
@@ -445,7 +435,7 @@ export default function PaymentLinkPage({
               className="p-4 mb-6 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-1"
             >
               <div className="font-semibold flex items-center gap-1.5">
-                <span>⚠️</span> Verification or Claim Issue
+                <span>⚠️</span> {t("pay.error.heading")}
               </div>
               <p>{claimError}</p>
             </div>
@@ -459,7 +449,7 @@ export default function PaymentLinkPage({
               onClick={connectWallet}
               className="w-full py-4 px-6 rounded-2xl font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-base"
             >
-              Connect Freighter & Claim
+              {t("pay.action.connectAndClaim")}
             </button>
           ) : (
             <button
@@ -478,26 +468,26 @@ export default function PaymentLinkPage({
               {claiming ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Submitting Claim to Stellar…
+                  {t("pay.action.claiming")}
                 </>
               ) : isRecipientMatch === false ? (
-                "Switch Account (Recipient Mismatch)"
+                t("pay.action.switchAccount")
               ) : claimableNowBig === 0n ? (
-                "Zero Accrued Funds to Claim"
+                t("pay.action.nothingToClaim")
               ) : (
-                `Claim ${formatUnits(claimableNowBig)} Tokens`
+                t("pay.action.claim", { amount: formatAmount(claimableNowBig) })
               )}
             </button>
           )}
 
           <p className="text-center text-neutral-500 text-xs mt-4">
-            No password or account creation required. Secured by Stellar Soroban smart contracts.
+            {t("pay.note")}
           </p>
         </div>
       </div>
 
       <footer className="max-w-2xl mx-auto w-full text-center py-6 text-xs text-neutral-500 border-t border-neutral-900 mt-8">
-        StreamPay • Continuous streaming payments for the Stellar network
+        {t("brand.footer")}
       </footer>
     </main>
   );

@@ -45,6 +45,22 @@ The governor gates: `set_fee_bps`, `nominate_governor`, `accept_governor`,
 ([`lib.rs`](../contracts/streaming-payments/src/lib.rs)). Bound at deploy time
 by `__constructor`; rotated two-step.
 
+> **If governance has been bootstrapped (issue #119), step 2 below is itself a
+> proposal.** `nominate_governor` is one of the entry points the two-key timelock
+> closes: after `governance_bootstrap`, calling it directly reverts with
+> `GovernanceTimelockRequired` (code 79). Propose
+> `GovernanceAction::NominateGovernor(<NEW_GOVERNOR_ADDRESS>)` instead, collect
+> two distinct signer signatures, wait out the veto window, and execute — then
+> the nominee still calls `accept_governor` directly, because that step proves
+> the new key is usable and is performed by the *new* governor, not by
+> governance. Note that this runbook rotates the governor address; the signer
+> set that governs the timelock is a different role and rotates through
+> `GovernanceAction::SetSigners` (§3a) — deliberately slower, at 4× the veto
+> window, and executable on a single signature so that one honest keyholder can
+> replace a lost or stolen key in the open. The full gated surface is listed in
+> [`docs/UPGRADES.md`](./UPGRADES.md), §"Phases 2-6 After Governance Bootstrap".
+
+
 1. **Prepare** the new governor address per the ceremony
    ([`docs/ceremony.md`](./ceremony.md) §3). If it is a multisig account, fund
    it with dust and confirm its threshold before nominating.
@@ -146,6 +162,51 @@ signer set is a Stellar account operation, not a contract call:
    signature succeeds while the retired key alone fails (the ceremony §4.6
    probe).
 5. Record signer-set change in [`docs/SECURITY_LOG.md`](./SECURITY_LOG.md).
+
+## 3a. Governance signer rotation (the contract's two-key set)
+
+Distinct from §3: those are Soroban *account* signers; these are the addresses
+held in the contract's own governance set, which is what closes the admin entry
+points after bootstrap. Rotating them is the containment path for a lost or
+stolen signer key, so the contract gives it a longer window and a lower quorum:
+**4× the configured veto window, executable on a single signature.**
+
+A deployment that has never called `governance_bootstrap` has no signer set; the
+governor establishes one once, and it can never be re-set directly afterwards.
+
+```bash
+# 1. Propose the new set (a signer's key, not the governor's).
+stellar contract invoke --id <CONTRACT_ID> --source <SIGNER_A> --network <net> \
+  -- governance_propose --caller <SIGNER_A> \
+  --action '{"set_signers":["<SIGNER_B_ADDRESS>","<SIGNER_C_ADDRESS>"]}'
+
+# 2. The other keyholder signs — or vetoes, which one signer can do at any
+#    time before the window closes.
+stellar contract invoke --id <CONTRACT_ID> --source <SIGNER_B> --network <net> \
+  -- governance_sign --caller <SIGNER_B> --proposal_id 1
+
+# 3. After 4x the veto window, anyone may execute. It is permissionless on
+#    purpose: an offline or compromised keyholder cannot suppress a rotation.
+stellar contract invoke --id <CONTRACT_ID> --source <ANY_ACCOUNT> --network <net> \
+  -- governance_execute --executor <ANY_ACCOUNT> --proposal_id 1
+```
+
+Rules the contract enforces, so a ceremony cannot quietly create a set that is
+one key in two slots:
+
+* Sets are validated **at propose time**: empty, duplicated or larger than
+  `MAX_SIGNERS` (10) candidates revert.
+* Execution re-checks every recorded signature against the **live** set, so
+  rotating out a key invalidates the proposals that key had half-signed. Those
+  proposals stay permanently unexecutable — re-propose them under the new set.
+* A set of two distinct keys is the minimum; adding a third buys no additional
+  safety, because the property is distinctness, not headcount.
+
+**Verify:** `governance_signers` returns the intended set,
+`governance_is_initialized` is `true`, `governance_veto_window` still matches the
+advertised window, and a direct `set_fee_bps` from the *removed* key reverts with
+`GovernanceTimelockRequired` (code 79). Log the rotation with the
+`governance_signers_set` event ledger.
 
 ## 4. Live-stream implications (must-check list)
 

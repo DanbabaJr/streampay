@@ -1,0 +1,110 @@
+#!/bin/bash
+# Rendered by stacks/aws-ec2 -- cloud-init runs this once per instance.
+#
+# It is deliberately thin: everything with a decision in it lives in install.sh
+# from the same bundle the single-VM path uses, so there is exactly one
+# implementation of "deploy" in this repo. What is here is the three things only
+# this machine knows about: packages, the data volume, and where to fetch from.
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+# strategy=ssm resolves the instance profile through the CLI; an explicit region
+# keeps that call honest when the profile's own default region is something else.
+export AWS_DEFAULT_REGION="${region}"
+
+exec > >(tee -a /var/log/streampay-install.log) 2>&1
+echo "installing bundle ${bundle_sha256}"
+
+apt-get update -y -qq
+apt-get install -y --no-install-recommends ca-certificates curl docker.io docker-compose-v2 git awscli
+
+# docker.io + docker-compose-v2 rather than curl | sh: these are the two packages
+# install.sh checks for, they are the versions Ubuntu ships, and a distro package
+# is the one a security notice can reach you about.
+systemctl enable --now docker
+
+# Only for human debugging: the stack itself runs under systemd, which needs no
+# group membership.
+usermod -aG docker ubuntu || true
+
+# ---------------------------------------------------------------------------
+# Data volume: find it, format it once, mount it, survive the next boot.
+# ---------------------------------------------------------------------------
+VOL="${data_volume_id}"
+if [ -n "$VOL" ]; then
+  SERIAL="$${VOL#vol-}"
+  DEV=""
+  # Nitro exposes EBS as an nvme namespace whose serial is the volume id, which is
+  # the only dependable way to tell this volume from the root disk.
+  for n in /dev/nvme*n1; do
+    [ -e "$n" ] || continue
+    s="$(cat "/sys/class/block/$${n##*/}/device/serial" 2>/dev/null || true)"
+    if [ "$s" = "$SERIAL" ]; then DEV="$n"; break; fi
+  done
+  if [ -z "$DEV" ]; then
+    for d in /dev/sdf /dev/xvdf; do
+      if [ -b "$d" ]; then DEV="$d"; break; fi
+    done
+  fi
+  if [ -z "$DEV" ]; then
+    echo "data volume $VOL is not attached; refusing to put the ledger on the root disk" >&2
+    exit 1
+  fi
+
+  # Format only when the device carries no filesystem. Hitting this branch with a
+  # filesystem on it is the normal case after an instance replacement: the ledger
+  # comes back with the volume, which is the entire reason they are separate.
+  if [ -z "$(blkid -o value -s TYPE "$DEV" || true)" ]; then
+    mkfs.ext4 -q -L streampay-data "$DEV"
+  fi
+
+  mkdir -p "${data_root}"
+  UUID="$(blkid -o value -s UUID "$DEV")"
+  if ! grep -q "UUID=$UUID" /etc/fstab; then
+    # nofail: a volume that fails to attach must not drop the box into emergency
+    # mode. install.sh below then fails loudly instead of writing onto the root
+    # disk silently.
+    echo "UUID=$UUID ${data_root} ext4 defaults,nofail 0 2" >> /etc/fstab
+  fi
+  mountpoint -q "${data_root}" || mount "${data_root}"
+fi
+
+if [ ! -d "${data_root}" ]; then
+  echo "${data_root} is not a directory; aborting before install.sh writes into it" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Bundle
+# ---------------------------------------------------------------------------
+mkdir -p "${host_bundle_dir}"
+# sync rather than cp: the bundle has subdirectories (configs/, systemd/), and a
+# second run of this script should repair what is there, not duplicate it.
+aws s3 sync "s3://${bundle_bucket}/${bundle_prefix}/" "${host_bundle_dir}/" --only-show-errors
+chmod 0755 "${host_bundle_dir}/install.sh"
+if [ -f "${host_bundle_dir}/fetch-secrets.sh" ]; then
+  chmod 0755 "${host_bundle_dir}/fetch-secrets.sh"
+fi
+
+# install.sh builds the StreamPay images from a checkout when build_local is on;
+# the contexts in the Dockerfiles are repo-root relative, so this is the whole
+# repository, not a subset of it.
+if [ "${build_local}" = "true" ]; then
+  if [ ! -d "${repo_root}/.git" ]; then
+    git clone --depth 1 --branch "${repo_ref}" "${repo_url}" "${repo_root}"
+  else
+    git -C "${repo_root}" fetch --depth 1 origin "${repo_ref}"
+    # -f plus FETCH_HEAD rather than a branch checkout: repo_ref may be a tag, and
+    # a detached worktree is exactly what a rebuild wants.
+    git -C "${repo_root}" checkout -f FETCH_HEAD
+  fi
+fi
+
+sh "${host_bundle_dir}/install.sh"
+
+# install.sh already enabled and restarted the stack unit. This is the belt: a
+# first-boot converge that raced the volume mount is the failure mode that would
+# otherwise leave a machine that looks installed and observes nothing.
+systemctl daemon-reload
+systemctl restart "${stack_unit}.service"
+systemctl --no-pager --full status "${stack_unit}.service" || true

@@ -63,17 +63,32 @@ pub const BPS_DENOMINATOR: u32 = 10_000;
 /// explicit, auditable interface change).
 pub const MAX_FEE_BPS: u32 = 100;
 
-/// Per-token fee accounting.
-///
-/// Kept in persistent storage under [`DataKey::Treasury`], written only by
-/// fee-affecting entrypoints, so it changes strictly in step with the
-/// `FeeCharged` / `FeeWithdrawn` event streams.
+#[cfg_attr(not(target_family = "wasm"), doc = " Per-token fee accounting.")]
+#[cfg_attr(not(target_family = "wasm"), doc = "")]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Kept in persistent storage under [`DataKey::Treasury`], written only by"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " fee-affecting entrypoints, so it changes strictly in step with the"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " `FeeCharged` / `FeeWithdrawn` event streams."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Treasury {
-    /// Total fees ever charged for this token (Σ `FeeCharged` events).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total fees ever charged for this token (Σ `FeeCharged` events)."
+    )]
     pub charged_total: i128,
-    /// Total fees ever withdrawn for this token (Σ `FeeWithdrawn` events).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total fees ever withdrawn for this token (Σ `FeeWithdrawn` events)."
+    )]
     pub withdrawn_total: i128,
 }
 
@@ -87,9 +102,18 @@ impl Treasury {
     }
 }
 
-/// Stored per-stream fee: amount plus the token it was charged in. The
-/// token rides along so the shared id-space verification scan can filter one
-/// token's fees without a second lookup per id.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Stored per-stream fee: amount plus the token it was charged in. The"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " token rides along so the shared id-space verification scan can filter one"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " token's fees without a second lookup per id."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamFeeRecord {
@@ -231,49 +255,106 @@ pub fn stream_fee(env: &Env, stream_id: u64) -> i128 {
     record.map_or(0, |r| r.amount)
 }
 
-/// One call snapshot of the treasury state for a token: governance, current
-/// fee configuration, and the fee ledger totals that verifiers reconcile
-/// against events and per-stream fees.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " One call snapshot of the treasury state for a token: governance, current"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " fee configuration, and the fee ledger totals that verifiers reconcile"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " against events and per-stream fees."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TreasuryStatus {
-    /// The token this accounting belongs to.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The token this accounting belongs to."
+    )]
     pub token: Address,
-    /// Current treasury governor.
+    #[cfg_attr(not(target_family = "wasm"), doc = " Current treasury governor.")]
     pub governor: Address,
-    /// Pending governor nominee, if a rotation is awaiting acceptance.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Pending governor nominee, if a rotation is awaiting acceptance."
+    )]
     pub pending_governor: Option<Address>,
-    /// Currently configured fee rate in basis points (0 = fees disabled).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Currently configured fee rate in basis points (0 = fees disabled)."
+    )]
     pub fee_bps: u32,
-    /// The protocol cap on `fee_bps` (published so clients need no constant).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The protocol cap on `fee_bps` (published so clients need no constant)."
+    )]
     pub max_fee_bps: u32,
-    /// Total fees ever charged for this token (Σ `FeeCharged` events).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total fees ever charged for this token (Σ `FeeCharged` events)."
+    )]
     pub charged_total: i128,
-    /// Total fees ever withdrawn for this token (Σ `FeeWithdrawn` events).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total fees ever withdrawn for this token (Σ `FeeWithdrawn` events)."
+    )]
     pub withdrawn_total: i128,
-    /// Fees currently held: `charged_total - withdrawn_total`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Fees currently held: `charged_total - withdrawn_total`."
+    )]
     pub collectible: i128,
 }
 
-/// Result of one bounded verification scan over the stream-id space
-/// (see [`crate::StreamingPayments::verify_treasury`]).
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Result of one bounded verification scan over the stream-id space"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " (see [`crate::StreamingPayments::verify_treasury`])."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeeScan {
-    /// Token whose fees were scanned.
+    #[cfg_attr(not(target_family = "wasm"), doc = " Token whose fees were scanned.")]
     pub token: Address,
-    /// First stream id of the scan window.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " First stream id of the scan window."
+    )]
     pub start_id: u64,
-    /// Number of stream ids actually examined (window may be shorter than
-    /// requested near the end of the id space).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Number of stream ids actually examined (window may be shorter than"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " requested near the end of the id space)."
+    )]
     pub scanned_count: u32,
-    /// Sum of per-stream stored fees within the window.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Sum of per-stream stored fees within the window."
+    )]
     pub fees_in_range: i128,
-    /// Where the next scan window starts (scan is finished when
-    /// `done` is true).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Where the next scan window starts (scan is finished when"
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = " `done` is true).")]
     pub next_start: u64,
-    /// True when the window reached the end of the id space — paging from
-    /// id 1 until `done` visits every stream exactly once.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " True when the window reached the end of the id space — paging from"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " id 1 until `done` visits every stream exactly once."
+    )]
     pub done: bool,
 }
 

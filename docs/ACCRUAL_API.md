@@ -92,6 +92,31 @@ The API protects both server resources and the upstream Soroban RPC node from ra
 
 ---
 
+### 6. Renegotiated streams (#54) — current limitation
+Since issue #54, a stream's rate is no longer fixed at creation: an accepted
+`propose_rate_change` / `accept_rate_change` pair replaces the remaining window
+with a new one, and the schedule is stored under
+`DataKey::RateSegments(stream_id)` (readable with the `rate_segments` view).
+
+This endpoint still prices its curve from `(deposit, start_time, end_time)`
+alone, so for a stream that renegotiated:
+
+- the curve is the *pre-renegotiation* line. It is correct up to the boundary
+  (the head of a schedule is clipped with its original `allocation` /
+  `basis_seconds` pair, so past accrual never changes) and wrong after it;
+- `X-State-Hash`/`ETag` do capture the change whenever it moved `deposit`,
+  which is every case except an adjustment of exactly zero — a new rate whose
+  reserve equals the remaining escrow to the token. That single case can serve
+  a stale curve from cache until the request parameters change.
+
+`available` from the contract is always the truth: the on-chain payout paths
+price the schedule, and the frontend must never use this curve to decide a
+claim. Closing the gap means feeding `rate_segments` into
+`frontend/lib/accrual.ts` and the state hash — tracked as a follow-up to #54,
+not part of it.
+
+---
+
 ## Interactive Documentation & OpenAPI Specification
 
 - **Public Interactive Docs Page**: `/docs` (rendered via Swagger UI)

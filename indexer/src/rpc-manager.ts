@@ -93,7 +93,32 @@ export interface JsonRpcRequest {
 
 export type CallType = "read" | "mutate";
 
+/**
+ * A read-only view of the budget the manager enforces, meant for callers that
+ * want to size their own concurrency: the parallel ingester derives its
+ * in-flight depth from these numbers (`docs/INDEXER_INGEST.md`) instead of
+ * inventing a constant that can exceed what the endpoints are allowed to serve.
+ */
+export interface RateBudgetSnapshot {
+  /** Sustained requests per second across every caller in this process. */
+  maxRps: number;
+  /** Bucket size: tokens available for a short burst. */
+  burstCapacity: number;
+  /** Whole tokens payable right now. */
+  availableTokens: number;
+  /** EWMA of end-to-end request latency in ms (0 until the first response). */
+  observedLatencyMs: number;
+  /** Endpoints currently considered healthy. */
+  healthyEndpoints: number;
+  /** True when reads are hedged, i.e. one slow read can cost two requests. */
+  hedgedReads: boolean;
+}
+
 // ── Token bucket rate limiter ─────────────────────────────────────────────────
+
+/** Weight of the newest latency sample. Low enough that one slow call cannot
+ *  collapse the ingester's admission depth; high enough to react in ~5 calls. */
+const LATENCY_EWMA_ALPHA = 0.2;
 
 class TokenBucket {
   private tokens: number;
@@ -125,6 +150,14 @@ class TokenBucket {
     return Math.ceil(deficit / this.refillRatePerMs);
   }
 
+  /** Whole tokens currently payable. Used for admission control, never consumes. */
+  available(): number {
+    this.refill();
+    return Math.floor(this.tokens);
+  }
+
+  get capacity(): number { return this.maxTokens; }
+
   private refill(): void {
     const now = Date.now();
     const elapsed = now - this.lastRefill;
@@ -142,6 +175,7 @@ export class RpcManager {
   private opts: Required<ManagerOptions>;
   private healthTimer?: ReturnType<typeof setInterval>;
   private bestLedger = 0;
+  private ewmaLatencyMs = 0;
 
   constructor(options: ManagerOptions) {
     if (options.endpoints.length === 0) {
@@ -221,10 +255,19 @@ export class RpcManager {
       throw new Error("RpcManager: no healthy endpoints available");
     }
 
-    if (type === "read" && this.opts.hedgeDelayMs > 0) {
-      return this.hedgedCall<T>(req, primary);
+    const startedAt = Date.now();
+    try {
+      const result = type === "read" && this.opts.hedgeDelayMs > 0
+        ? await this.hedgedCall<T>(req, primary)
+        : await this.singleCall<T>(req, primary);
+      this.recordLatency(Date.now() - startedAt);
+      return result;
+    } catch (error) {
+      // Failures cost real wall-clock time too; ignoring them would report a
+      // rosy latency and make callers over-admit exactly during a degradation.
+      this.recordLatency(Date.now() - startedAt);
+      throw error;
     }
-    return this.singleCall<T>(req, primary);
   }
 
   // ── Read helpers (wrappers for common Soroban RPC methods) ─────────────────
@@ -261,16 +304,42 @@ export class RpcManager {
     return [...this.health.values()];
   }
 
+  /**
+   * Snapshot of the rate budget and measured latency, for callers that need to
+   * size their own concurrency. Purely observational: it never reserves tokens,
+   * so a caller that acts on it can still be rejected by `call()` and must
+   * honour the returned `RATE_EXHAUSTED.retryAfterMs`.
+   */
+  getRateBudget(): RateBudgetSnapshot {
+    return {
+      maxRps: this.opts.maxRps,
+      burstCapacity: this.bucket.capacity,
+      availableTokens: this.bucket.available(),
+      observedLatencyMs: Math.round(this.ewmaLatencyMs),
+      healthyEndpoints: [...this.health.values()].filter((h) => h.healthy).length,
+      hedgedReads: this.opts.hedgeDelayMs > 0,
+    };
+  }
+
   // ── Private implementation ─────────────────────────────────────────────────
+
+  /** Exponentially weighted moving average; the first sample seeds it. */
+  private recordLatency(elapsedMs: number): void {
+    this.ewmaLatencyMs = this.ewmaLatencyMs === 0
+      ? elapsedMs
+      : this.ewmaLatencyMs * (1 - LATENCY_EWMA_ALPHA) + elapsedMs * LATENCY_EWMA_ALPHA;
+  }
 
   /** Picks the healthiest endpoint (fewest failures, lowest lag). */
   private pickEndpoint(): string | null {
     const candidates = [...this.health.values()]
       .filter((h) => h.healthy)
       .sort((a, b) => {
-        // Prefer endpoints with less lag, then fewer failures.
-        if (a.lagSeconds !== b.lagSeconds) return a.lagSeconds - b.lagSeconds;
-        return a.failures - b.failures;
+        // Failures outrank lag: a node that just failed may fail again and cost
+        // the caller an error, while a lagging node still answers correctly and
+        // a reader can tell its window was short from its own `latestLedger`.
+        if (a.failures !== b.failures) return a.failures - b.failures;
+        return a.lagSeconds - b.lagSeconds;
       });
     return candidates[0]?.url ?? null;
   }
@@ -298,17 +367,14 @@ export class RpcManager {
       });
 
       if (resp.status === 429) {
-        this.recordFailure(url, "429");
         throw Object.assign(new Error(`${url}: HTTP 429 rate limited`), { code: "RATE_LIMITED" });
       }
       if (!resp.ok) {
-        this.recordFailure(url, `HTTP ${resp.status}`);
         throw new Error(`${url}: HTTP ${resp.status}`);
       }
 
       const json = (await resp.json()) as { result?: T; error?: { message: string } };
       if (json.error) {
-        this.recordFailure(url, json.error.message);
         throw new Error(`${url} RPC: ${json.error.message}`);
       }
 
@@ -320,8 +386,13 @@ export class RpcManager {
       this.recordSuccess(url);
       return json.result as T;
     } catch (e) {
-      if ((e as Error).name === "AbortError") {
-        this.recordFailure(url, "timeout");
+      // One place records every failure, including the ones with no HTTP status
+      // behind them: a `TypeError: fetch failed` from a dead node is exactly the
+      // signal that makes failover necessary, and it used to escape here
+      // unrecorded, leaving the endpoint "healthy" forever.
+      const aborted = (e as Error).name === "AbortError";
+      this.recordFailure(url, aborted ? "timeout" : (e as Error).message);
+      if (aborted) {
         throw Object.assign(new Error(`${url}: request timed out after ${this.opts.timeoutMs} ms`), { code: "TIMEOUT" });
       }
       throw e;
@@ -381,11 +452,12 @@ export class RpcManager {
     h.failures += 1;
     if (h.failures >= this.opts.failureThreshold) {
       h.healthy = false;
-      // Schedule a re-probe after 30 s.
+      // Schedule a re-probe after 30 s. unref() so a manager that was only ever
+      // constructed (tests, short-lived commands) cannot hold the process open.
       setTimeout(() => {
         const hh = this.health.get(url);
         if (hh && !hh.healthy) { hh.healthy = true; hh.failures = 0; }
-      }, 30_000);
+      }, 30_000).unref();
     }
     // Log without crashing — the manager must stay operational.
     if (process.env.NODE_ENV !== "test") {

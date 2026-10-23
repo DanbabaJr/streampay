@@ -1,0 +1,4 @@
+read instance ContractFrozen
+read persistent Stream(1)
+write persistent PendingRateChange(1)
+event RateChangeProposed

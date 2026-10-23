@@ -1,6 +1,10 @@
 name: Fuzz
 
-# Coverage-guided fuzzing of the pure accrual math. Scheduled and manual only;
+# Coverage-guided fuzzing of the pure accrual and dispute-bond math.
+# Scheduled and manual only; `continue-on-error` keeps a found crash from
+# blocking unrelated PRs — crashes must become regression tests (see
+# docs/GOOD_FIRST_ISSUES.md #4).
+# Coverage-guided fuzzing of the pure accrual math, single-window and segmented. Scheduled and manual only;
 # `continue-on-error` keeps a found crash from blocking unrelated PRs — crashes
 # must become regression tests (see docs/GOOD_FIRST_ISSUES.md #4).
 
@@ -37,6 +41,25 @@ jobs:
             -max_total_time=${{ github.event.inputs.max_total_time || '60' }} \
             -rss_limit_mb=4096
 
+  dispute_bond:
+    name: fuzz dispute_bond
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly toolchain + cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run dispute bond fuzz session
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run dispute_bond -- \
+            -max_total_time=${{ github.event.inputs.max_total_time || '60' }} \
+            -rss_limit_mb=4096
+
   conservation:
     name: fuzz conservation
     runs-on: ubuntu-latest
@@ -55,4 +78,19 @@ jobs:
           cargo +nightly fuzz run conservation -- \
             -max_total_time=${{ github.event.inputs.max_total_time || '60' }} \
             -rss_limit_mb=4096
+  rate_schedule:
+    name: fuzz rate_schedule
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
 
+      - name: Install nightly toolchain + cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run piecewise accrual fuzz session
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run rate_schedule --             -max_total_time=${{ github.event.inputs.max_total_time || '60' }}             -rss_limit_mb=4096

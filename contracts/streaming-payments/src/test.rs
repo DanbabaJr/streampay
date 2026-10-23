@@ -32,12 +32,16 @@ use soroban_sdk::{
     Address, Env, Event as _, IntoVal, MuxedAddress, String as SdkString,
 };
 
-use crate::stream::streamed_at;
+use crate::stream::{
+    available_amount_at_segments, cancel_amounts_at_segments, streamed_amount_at,
+    streamed_amount_at_segments, streamed_at, RateSegment,
+};
 use crate::test_client::StreamingPaymentsClient as Client;
 use crate::{
-    OwnershipRole, StreamError, StreamInput, StreamStatus, StreamingPayments,
-    INITIAL_SCHEMA_VERSION, MAX_DURATION_SECONDS, MIN_UPGRADE_DELAY_SECONDS,
-    OWNERSHIP_PROPOSAL_TTL_SECONDS, TARGET_SCHEMA_VERSION,
+    bond_shares, required_bond, OwnershipRole, PendingRateChange, RateChangeAccepted,
+    RateChangeProposed, Stream, StreamError, StreamInput, StreamStatus, StreamingPayments,
+    INITIAL_SCHEMA_VERSION, MAX_DURATION_SECONDS, MAX_RATE_SEGMENTS, MIN_UPGRADE_DELAY_SECONDS,
+    OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS, TARGET_SCHEMA_VERSION,
 };
 
 // ---------------------------------------------------------------- fixtures --
@@ -45,6 +49,81 @@ use crate::{
 const DAY: u64 = 24 * 60 * 60;
 /// 1000 tokens with 7 decimals (default for SAC-issued assets in tests).
 const DEPOSIT: i128 = 10_000_000_000;
+
+/// A minimal but valid contract wasm. The upgrade tests upload it so that a
+/// proposed `new_wasm_hash` really resolves in the test environment.
+#[rustfmt::skip]
+pub(crate) const UPGRADE_WASM: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x1b, 0x05, 0x60,
+    0x03, 0x7e, 0x7e, 0x7e, 0x01, 0x7e, 0x60, 0x02, 0x7e, 0x7e, 0x01, 0x7e,
+    0x60, 0x02, 0x7f, 0x7e, 0x00, 0x60, 0x01, 0x7e, 0x01, 0x7e, 0x60, 0x00,
+    0x00, 0x02, 0x19, 0x04, 0x01, 0x6c, 0x01, 0x5f, 0x00, 0x00, 0x01, 0x6c,
+    0x01, 0x30, 0x00, 0x01, 0x01, 0x6c, 0x01, 0x31, 0x00, 0x01, 0x01, 0x6c,
+    0x01, 0x32, 0x00, 0x01, 0x03, 0x06, 0x05, 0x01, 0x02, 0x03, 0x03, 0x04,
+    0x05, 0x03, 0x01, 0x00, 0x10, 0x06, 0x19, 0x03, 0x7f, 0x01, 0x41, 0x80,
+    0x80, 0xc0, 0x00, 0x0b, 0x7f, 0x00, 0x41, 0x80, 0x80, 0xc0, 0x00, 0x0b,
+    0x7f, 0x00, 0x41, 0x80, 0x80, 0xc0, 0x00, 0x0b, 0x07, 0x3b, 0x07, 0x06,
+    0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x03, 0x70, 0x75, 0x74,
+    0x00, 0x04, 0x03, 0x67, 0x65, 0x74, 0x00, 0x06, 0x03, 0x64, 0x65, 0x6c,
+    0x00, 0x07, 0x01, 0x5f, 0x00, 0x08, 0x0a, 0x5f, 0x5f, 0x64, 0x61, 0x74,
+    0x61, 0x5f, 0x65, 0x6e, 0x64, 0x03, 0x01, 0x0b, 0x5f, 0x5f, 0x68, 0x65,
+    0x61, 0x70, 0x5f, 0x62, 0x61, 0x73, 0x65, 0x03, 0x02, 0x0a, 0xd5, 0x02,
+    0x05, 0x66, 0x01, 0x01, 0x7f, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41,
+    0x20, 0x6b, 0x22, 0x02, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x02,
+    0x41, 0x10, 0x6a, 0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02,
+    0x40, 0x20, 0x02, 0x29, 0x03, 0x10, 0xa7, 0x0d, 0x00, 0x20, 0x02, 0x29,
+    0x03, 0x18, 0x21, 0x00, 0x20, 0x02, 0x20, 0x01, 0x10, 0x85, 0x80, 0x80,
+    0x80, 0x00, 0x20, 0x02, 0x29, 0x03, 0x00, 0xa7, 0x0d, 0x00, 0x20, 0x00,
+    0x20, 0x02, 0x29, 0x03, 0x08, 0x42, 0x01, 0x10, 0x80, 0x80, 0x80, 0x80,
+    0x00, 0x1a, 0x20, 0x02, 0x41, 0x20, 0x6a, 0x24, 0x80, 0x80, 0x80, 0x80,
+    0x00, 0x42, 0x02, 0x0f, 0x0b, 0x00, 0x00, 0x0b, 0x24, 0x01, 0x01, 0x7f,
+    0x20, 0x00, 0x20, 0x01, 0x37, 0x03, 0x08, 0x20, 0x00, 0x20, 0x01, 0xa7,
+    0x41, 0xff, 0x01, 0x71, 0x22, 0x02, 0x41, 0x0e, 0x47, 0x20, 0x02, 0x41,
+    0xca, 0x00, 0x47, 0x71, 0xad, 0x37, 0x03, 0x00, 0x0b, 0x7b, 0x02, 0x01,
+    0x7f, 0x01, 0x7e, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41, 0x20, 0x6b,
+    0x22, 0x01, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x01, 0x41, 0x10,
+    0x6a, 0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02, 0x40, 0x20,
+    0x01, 0x29, 0x03, 0x10, 0xa7, 0x0d, 0x00, 0x42, 0x02, 0x21, 0x00, 0x02,
+    0x40, 0x20, 0x01, 0x29, 0x03, 0x18, 0x22, 0x02, 0x42, 0x01, 0x10, 0x81,
+    0x80, 0x80, 0x80, 0x00, 0x42, 0x01, 0x52, 0x0d, 0x00, 0x20, 0x01, 0x20,
+    0x02, 0x42, 0x01, 0x10, 0x82, 0x80, 0x80, 0x80, 0x00, 0x10, 0x85, 0x80,
+    0x80, 0x80, 0x00, 0x20, 0x01, 0x29, 0x03, 0x00, 0xa7, 0x0d, 0x01, 0x20,
+    0x01, 0x29, 0x03, 0x08, 0x21, 0x00, 0x0b, 0x20, 0x01, 0x41, 0x20, 0x6a,
+    0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x00, 0x0f, 0x0b, 0x00, 0x00,
+    0x0b, 0x48, 0x01, 0x01, 0x7f, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41,
+    0x10, 0x6b, 0x22, 0x01, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x01,
+    0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02, 0x40, 0x20, 0x01,
+    0x29, 0x03, 0x00, 0xa7, 0x45, 0x0d, 0x00, 0x00, 0x00, 0x0b, 0x20, 0x01,
+    0x29, 0x03, 0x08, 0x42, 0x01, 0x10, 0x83, 0x80, 0x80, 0x80, 0x00, 0x1a,
+    0x20, 0x01, 0x41, 0x10, 0x6a, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x42,
+    0x02, 0x0b, 0x02, 0x00, 0x0b, 0x00, 0x9f, 0x01, 0x0e, 0x63, 0x6f, 0x6e,
+    0x74, 0x72, 0x61, 0x63, 0x74, 0x73, 0x70, 0x65, 0x63, 0x76, 0x30, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x70,
+    0x75, 0x74, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x03, 0x6b, 0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x76, 0x61, 0x6c, 0x00, 0x00,
+    0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x67, 0x65, 0x74, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x6b,
+    0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0x00, 0x03, 0xe8, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x64, 0x65, 0x6c, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x6b,
+    0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x1e, 0x11, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x65, 0x6e,
+    0x76, 0x6d, 0x65, 0x74, 0x61, 0x76, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x77, 0x0e, 0x63, 0x6f,
+    0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x6d, 0x65, 0x74, 0x61, 0x76, 0x30,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x72, 0x73, 0x76, 0x65,
+    0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x31, 0x2e, 0x38, 0x31,
+    0x2e, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
+    0x72, 0x73, 0x73, 0x64, 0x6b, 0x76, 0x65, 0x72, 0x00, 0x00, 0x00, 0x35,
+    0x32, 0x32, 0x2e, 0x30, 0x2e, 0x32, 0x23, 0x64, 0x66, 0x65, 0x38, 0x39,
+    0x39, 0x62, 0x63, 0x31, 0x32, 0x63, 0x32, 0x32, 0x39, 0x37, 0x35, 0x35,
+    0x31, 0x30, 0x36, 0x33, 0x65, 0x33, 0x30, 0x31, 0x35, 0x31, 0x66, 0x66,
+    0x36, 0x35, 0x34, 0x66, 0x39, 0x37, 0x62, 0x38, 0x32, 0x65, 0x38, 0x2d,
+    0x64, 0x69, 0x72, 0x74, 0x79, 0x00, 0x00, 0x00,
+];
 
 pub(crate) struct Fixture {
     pub(crate) env: Env,
@@ -3325,6 +3404,170 @@ fn run_fee_property(seed: u64, steps: usize) {
         }
     }
 }
+// ------------------------------------------------------------ disputes ------
+
+/// Base dispute bond for `DEPOSIT`: 5% (the first round; later rounds scale
+/// linearly with the stream's dispute count).
+const BOND: i128 = DEPOSIT / 20;
+const DISPUTE_TIMEOUT: u64 = crate::DISPUTE_TIMEOUT_SECONDS;
+
+impl Fixture {
+    /// Gives the recipient `amount` tokens and approves the contract to pull
+    /// it: dispute bonds are pulled with `transfer_from`, exactly like
+    /// `create_stream` pulls the deposit from the sender.
+    pub(crate) fn fund_recipient(&self, amount: i128) {
+        let sac = StellarAssetClient::new(&self.env, &self.token);
+        sac.mint(&self.recipient, &amount);
+        sac.approve(
+            &self.recipient,
+            &self.client.address,
+            &amount,
+            &1_000_000u32,
+        );
+    }
+
+    /// Funds the bond and raises a dispute on `id`, returning the recorded
+    /// dispute.
+    pub(crate) fn raise_dispute(&self, id: u64) -> crate::Dispute {
+        let bond = self.client.required_dispute_bond(&id);
+        self.fund_recipient(bond);
+        self.client.mock_all_auths().raise_dispute(&id)
+    }
+
+    fn contract_balance(&self) -> i128 {
+        TokenClient::new(&self.env, &self.token).balance(&self.client.address)
+    }
+
+    fn recipient_balance(&self) -> i128 {
+        TokenClient::new(&self.env, &self.token).balance(&self.recipient)
+    }
+
+    fn sender_balance(&self) -> i128 {
+        TokenClient::new(&self.env, &self.token).balance(&self.sender)
+    }
+}
+
+#[test]
+fn dispute_raise_pulls_bond_and_stores_state() {
+    let f = Fixture::setup();
+    let now = f.env.ledger().timestamp();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    // The view agrees with the on-chain bond actually posted.
+    assert_eq!(f.client.required_dispute_bond(&id), BOND);
+
+    let d = f.raise_dispute(id);
+    assert_eq!(d.stream_id, id);
+    assert_eq!(d.raised_by, f.recipient);
+    assert_eq!(d.bond, BOND);
+    assert_eq!(d.started_at, now);
+    assert_eq!(d.expires_at, now + DISPUTE_TIMEOUT);
+    assert_eq!(f.client.get_dispute(&id), d);
+
+    // Bond moved from the recipient into the contract, on top of the deposit.
+    assert_eq!(f.recipient_balance(), 0);
+    assert_eq!(f.contract_balance(), DEPOSIT + BOND);
+}
+
+#[test]
+fn dispute_freezes_cancel_and_top_up() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);
+    let d = f.raise_dispute(id);
+    assert_eq!(d.bond, BOND);
+
+    // Neither the sender nor the recipient can cancel while disputed.
+    for caller in [&f.sender, &f.recipient] {
+        let err = f
+            .client
+            .mock_all_auths()
+            .try_cancel_stream(caller, &id)
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(err, StreamError::DisputeActive);
+    }
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_top_up(&id, &1000)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DisputeActive);
+}
+
+#[test]
+fn dispute_keeps_accrual_and_withdrawals_alive() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(2 * DAY);
+    f.raise_dispute(id);
+
+    // Time keeps streaming while the dispute is open.
+    f.advance_time(DAY);
+    assert_eq!(f.client.available(&id), DEPOSIT * 3 / 10);
+
+    // The recipient can still claim what they earned during the dispute.
+    f.client.mock_all_auths().withdraw(&id, &1000);
+    let rest = f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(f.recipient_balance(), 1000 + rest);
+    assert_eq!(rest, DEPOSIT * 3 / 10 - 1000);
+}
+
+#[test]
+fn dispute_raise_requires_recipient_authorization() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    let attacker = Address::generate(&f.env);
+    f.env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "raise_dispute",
+            args: (id,).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(f.client.try_raise_dispute(&id).is_err());
+}
+
+#[test]
+fn dispute_raise_rejections() {
+    let f = Fixture::setup();
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_raise_dispute(&999)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotFound);
+
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let d = f.raise_dispute(id);
+    assert_eq!(d.bond, BOND);
+
+    // One open dispute at a time.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_raise_dispute(&id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DisputeActive);
+
+    // Terminal streams cannot be disputed.
+    let ended = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);
+    f.advance_time(20 * DAY);
+    f.client.mock_all_auths().withdraw(&ended, &DEPOSIT);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_raise_dispute(&ended)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotActive);
+}
 
 /// Property: every state-mutating entrypoint (`create_stream`, `create_streams`,
 /// `withdraw`, `withdraw_max`, `top_up`, `cancel_stream`, `withdraw_treasury`)
@@ -4158,6 +4401,471 @@ fn create_stream_without_balance_reports_deposit_transfer_failed() {
     assert!(f.client.mock_all_auths().try_get_stream(&1).is_err());
 }
 
+#[test]
+fn dispute_resolve_reject_slashes_bond_and_resumes_stream() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.raise_dispute(id);
+
+    // Only the sender resolves; the recipient calling it is rejected.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_resolve_dispute(&f.recipient, &id, &false)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
+
+    // The bond compensates the sender; the stream keeps running.
+    assert_eq!(f.sender_balance(), DEPOSIT + BOND);
+    assert_eq!(f.recipient_balance(), 0);
+    assert_eq!(f.contract_balance(), DEPOSIT);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).status,
+        StreamStatus::Active,
+    );
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_get_dispute(&id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DisputeNotFound);
+
+    // Mutations are live again.
+    f.client.mock_all_auths().top_up(&id, &1000);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+}
+
+#[test]
+fn dispute_resolve_accept_refunds_bond_and_unwinds_stream() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(3 * DAY);
+    f.raise_dispute(id);
+
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &true);
+
+    // Recipient: bond back + everything accrued. Sender: the unaccrued
+    // remainder. Contract holds nothing.
+    let accrued = DEPOSIT * 3 / 10;
+    assert_eq!(f.recipient_balance(), BOND + accrued);
+    assert_eq!(f.sender_balance(), DEPOSIT + (DEPOSIT - accrued));
+    assert_eq!(f.contract_balance(), 0);
+
+    let stream = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(stream.status, StreamStatus::Cancelled);
+    assert_eq!(stream.withdrawn, accrued);
+}
+
+#[test]
+fn dispute_expire_requires_full_timelock_then_splits_bond() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    f.raise_dispute(id);
+
+    // One second shy of the timelock: nobody can expire it yet.
+    f.advance_time(DISPUTE_TIMEOUT - 1);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_expire_dispute(&id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::DisputeNotExpired);
+
+    // At `expires_at` exactly, anyone can.
+    f.advance_time(1);
+    f.client.mock_all_auths().expire_dispute(&id);
+
+    assert_eq!(f.sender_balance(), DEPOSIT + BOND / 2);
+    assert_eq!(f.recipient_balance(), BOND / 2);
+    assert_eq!(f.contract_balance(), DEPOSIT);
+
+    // The stream resumed normally.
+    f.client.mock_all_auths().top_up(&id, &1000);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+}
+
+#[test]
+fn serial_disputes_escalate_the_bond_and_the_attacker_cost() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    let mut sender_gains = 0i128;
+    let mut posted = [0i128; 3];
+    for round in 1..=3i128 {
+        // The required bond scales linearly with the dispute count: the
+        // same recipient griefing week after week pays more each time.
+        let required = BOND * round;
+        assert_eq!(f.client.required_dispute_bond(&id), required);
+        let d = f.raise_dispute(id);
+        assert_eq!(d.bond, required);
+        posted[(round - 1) as usize] = required;
+
+        // Frozen the whole window, every round.
+        let err = f
+            .client
+            .mock_all_auths()
+            .try_top_up(&id, &1000)
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(err, StreamError::DisputeActive);
+
+        // The passive sender lets it expire: the attacker loses half the
+        // (escalating) bond per blocked week.
+        f.advance_time(DISPUTE_TIMEOUT);
+        f.client.mock_all_auths().expire_dispute(&id);
+        sender_gains += (required + 1) / 2;
+        assert_eq!(f.sender_balance(), DEPOSIT + sender_gains);
+    }
+    assert_eq!(posted, [BOND, 2 * BOND, 3 * BOND]);
+
+    // Cumulative attacker loss over three griefing weeks: Σ ceil(n·BOND/2),
+    // against a stream that only pays out 100% of DEPOSIT over its window.
+    let attacker_loss = (BOND + 1) / 2 + BOND + (3 * BOND + 1) / 2;
+    assert_eq!(attacker_loss, 3 * BOND);
+    assert_eq!(f.recipient_balance(), 6 * BOND - attacker_loss);
+    assert_eq!(f.contract_balance(), DEPOSIT);
+}
+
+#[test]
+fn dispute_expired_after_recipient_drained_stream_in_dispute() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 2 * DAY, false);
+    f.raise_dispute(id);
+
+    // The stream completes *during* the dispute and the recipient withdraws
+    // everything — the dispute entry and bond survive independently.
+    f.advance_time(3 * DAY);
+    let paid = f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(paid, DEPOSIT);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).status,
+        StreamStatus::Depleted,
+    );
+    assert_eq!(f.contract_balance(), BOND);
+
+    f.advance_time(DISPUTE_TIMEOUT);
+    f.client.mock_all_auths().expire_dispute(&id);
+    assert_eq!(f.sender_balance(), DEPOSIT + BOND / 2);
+    assert_eq!(f.recipient_balance(), DEPOSIT + BOND / 2);
+    assert_eq!(f.contract_balance(), 0);
+}
+
+#[test]
+fn dispute_accept_on_stream_depleted_during_dispute_only_refunds_bond() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 2 * DAY, false);
+    f.raise_dispute(id);
+    f.advance_time(3 * DAY);
+    f.client.mock_all_auths().withdraw_max(&id);
+
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &true);
+
+    // Bond back to the recipient; the depleted stream is left as-is (no
+    // cancel split, no `StreamCancelled` event).
+    assert_eq!(f.recipient_balance(), DEPOSIT + BOND);
+    assert_eq!(f.sender_balance(), DEPOSIT);
+    assert_eq!(f.contract_balance(), 0);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).status,
+        StreamStatus::Depleted,
+    );
+}
+
+#[test]
+fn dispute_events_are_emitted_with_expected_payloads() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+
+    // Drain StreamCreated.
+    let _ = f.env.events().all();
+
+    let d = f.raise_dispute(id);
+    let raised = crate::DisputeRaised {
+        stream_id: id,
+        recipient: f.recipient.clone(),
+        bond: BOND,
+        expires_at: d.expires_at,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [raised.to_xdr(&f.env, &f.client.address)],
+    );
+
+    let resolved = crate::DisputeResolved {
+        stream_id: id,
+        sender: f.sender.clone(),
+        accept: false,
+        bond: BOND,
+    };
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [resolved.to_xdr(&f.env, &f.client.address)],
+    );
+
+    let d2 = f.raise_dispute(id);
+    assert_eq!(d2.bond, 2 * BOND);
+    let expired = crate::DisputeExpired {
+        stream_id: id,
+        recipient: f.recipient.clone(),
+        bond: 2 * BOND,
+        sender_share: BOND,
+        recipient_share: BOND,
+    };
+    f.advance_time(3 * DISPUTE_TIMEOUT);
+    f.client.mock_all_auths().expire_dispute(&id);
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [expired.to_xdr(&f.env, &f.client.address)],
+    );
+}
+
+#[test]
+fn dispute_resolve_accept_emits_cancelled_then_resolved() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+    f.advance_time(2 * DAY);
+    f.raise_dispute(id);
+    let _ = f.env.events().all(); // drain through DisputeRaised
+
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &true);
+
+    let accrued = DEPOSIT * 2 / 10;
+    let cancelled = crate::StreamCancelled {
+        stream_id: id,
+        cancelled_by: f.sender.clone(),
+        recipient_amount: accrued,
+        sender_amount: DEPOSIT - accrued,
+    };
+    let resolved = crate::DisputeResolved {
+        stream_id: id,
+        sender: f.sender.clone(),
+        accept: true,
+        bond: BOND,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [
+            cancelled.to_xdr(&f.env, &f.client.address),
+            resolved.to_xdr(&f.env, &f.client.address),
+        ],
+    );
+}
+
+// ------------------------------------------------- dispute math (pure) ----
+
+#[test]
+fn required_bond_is_escalating_floored_and_checked() {
+    // 5% of the deposit, scaled by the dispute round.
+    assert_eq!(required_bond(20_000, 0).unwrap(), 1_000);
+    assert_eq!(required_bond(20_000, 2).unwrap(), 3_000);
+    // Floored at one token unit — disputes on dust streams are never free.
+    assert_eq!(required_bond(7, 0).unwrap(), 1);
+    assert_eq!(required_bond(0, 0).unwrap(), 1);
+    // Monotonic in both inputs.
+    let mut prev = 0;
+    for n in 0..16 {
+        let b = required_bond(123_456_789, n).unwrap();
+        assert!(b > prev);
+        prev = b;
+    }
+    // Overflow is reported, never panicked.
+    assert_eq!(
+        required_bond(i128::MAX, 0).unwrap_err(),
+        StreamError::MathOverflow
+    );
+}
+
+#[test]
+fn bond_shares_always_sum_to_the_bond_and_favor_the_sender() {
+    for bond in [1i128, 2, 3, 999, 1_000_000, i128::MAX] {
+        let (sender, recipient) = bond_shares(bond);
+        assert_eq!(sender + recipient, bond);
+        assert!(sender >= recipient);
+        assert!(sender - recipient <= 1);
+    }
+}
+
+#[test]
+fn raise_dispute_reports_bond_overflow_without_touching_state() {
+    let f = Fixture::setup();
+    // A deposit just past the `u128::MAX / BPS` boundary: `create_stream`
+    // admits it (duration 1 keeps the accrual product in range), but the
+    // bond computation must error, never panic, and pull nothing in.
+    let big = (u128::MAX / crate::DISPUTE_BOND_BPS + 1) as i128;
+    let now = f.env.ledger().timestamp();
+    let sac = StellarAssetClient::new(&f.env, &f.token);
+    sac.mint(&f.sender, &big);
+    sac.approve(&f.sender, &f.client.address, &big, &1_000_000u32);
+    let id = f.client.mock_all_auths().create_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &big,
+        &now,
+        &(now + 1),
+        &false,
+    );
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_raise_dispute(&id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::MathOverflow);
+    assert_eq!(
+        f.client
+            .mock_all_auths()
+            .try_get_dispute(&id)
+            .unwrap_err()
+            .unwrap(),
+        StreamError::DisputeNotFound,
+    );
+}
+
+// --------------------------------------------------- bond invariant -------
+
+/// Tiny deterministic PRNG (xorshift64) so the invariant scenario below is
+/// reproducible — and snapshot-stable.
+struct BondRng(u64);
+impl BondRng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// Invariant (extends the fuzz oracle to the dispute bonds): after *every*
+/// random operation, the contract's token balance must equal
+/// `sum(deposit - withdrawn)` over all streams **plus the sum of the
+/// outstanding dispute bonds**.
+#[test]
+fn property_contract_balance_equals_locks_plus_outstanding_bonds() {
+    let f = Fixture::setup();
+    let mut rng = BondRng(0x9E37_79B9_7F4A_7C15);
+
+    let mut ids = [0u64; 4];
+    for (i, slot) in ids.iter_mut().enumerate() {
+        *slot = f.create_stream(DEPOSIT / 2, i as u64, 30 * DAY, true);
+    }
+
+    // Per-stream model of the bonds the contract should be holding.
+    struct Open {
+        bond: i128,
+        expires_at: u64,
+    }
+    let mut open: [Option<Open>; 4] = Default::default();
+
+    for step in 0..60 {
+        let k = rng.below(4) as usize;
+        let id = ids[k];
+        match rng.below(7) {
+            0 => {
+                let _ = f
+                    .client
+                    .mock_all_auths()
+                    .try_withdraw(&id, &(step as i128 + 1));
+            }
+            1 => {
+                let _ = f.client.mock_all_auths().try_withdraw_max(&id);
+            }
+            2 => {
+                let _ = f.client.mock_all_auths().try_top_up(&id, &1000);
+            }
+            3 => {
+                if let Ok(Ok(r)) = f.client.try_required_dispute_bond(&id) {
+                    // Fund exactly this round's bond (approve overwrites).
+                    f.fund_recipient(r);
+                    if let Ok(Ok(d)) = f.client.mock_all_auths().try_raise_dispute(&id) {
+                        open[k] = Some(Open {
+                            bond: d.bond,
+                            expires_at: d.expires_at,
+                        });
+                    }
+                }
+            }
+            4 => {
+                if open[k].is_some() {
+                    let accept = rng.below(2) == 0;
+                    if f.client
+                        .mock_all_auths()
+                        .try_resolve_dispute(&f.sender, &id, &accept)
+                        .is_ok()
+                    {
+                        open[k] = None;
+                    }
+                }
+            }
+            5 => {
+                if open[k]
+                    .as_ref()
+                    .is_some_and(|o| f.env.ledger().timestamp() >= o.expires_at)
+                    && f.client.mock_all_auths().try_expire_dispute(&id).is_ok()
+                {
+                    open[k] = None;
+                }
+            }
+            _ => {
+                // Random walk through the clock: small ticks, occasionally a
+                // full dispute window so expiry paths actually get hit.
+                let jump = if rng.below(3) == 0 {
+                    DISPUTE_TIMEOUT
+                } else {
+                    6 * 60 * 60
+                };
+                f.advance_time(jump);
+            }
+        }
+
+        // The invariant, recomputed from on-chain state + the bond model.
+        // Cancelled streams hold nothing: their cancel split paid the
+        // sender the unaccrued remainder already, so only Active/Depleted
+        // streams still lock `deposit - withdrawn`.
+        let mut expected_locks = 0i128;
+        for (i, slot) in ids.iter().enumerate() {
+            let s = f.client.get_stream(slot);
+            if s.status != StreamStatus::Cancelled {
+                expected_locks += s.deposit - s.withdrawn;
+            }
+            if let Some(o) = &open[i] {
+                let d = f.client.get_dispute(slot);
+                assert_eq!(d.bond, o.bond, "stale bond model at step {step}");
+                expected_locks += o.bond;
+            } else {
+                assert!(
+                    f.client.try_get_dispute(slot).is_err(),
+                    "phantom dispute at step {step}"
+                );
+            }
+        }
+        assert_eq!(
+            f.contract_balance(),
+            expected_locks,
+            "lock invariant broken at step {step}"
+        );
+    }
+}
+
 /// A top-up the sender's balance cannot cover fails with its own code and
 /// leaves `deposit` and the contract's balance untouched; a retry within the
 /// balance then succeeds.
@@ -4852,6 +5560,12 @@ fn measure_batch_instruction_costs() {
 
 #[test]
 fn hot_path_footprint_harness() {
+    // Budgets are measured values plus ~1% headroom, not aspirational numbers.
+    // Rate renegotiation (#54) keeps its schedule under its own storage key, so
+    // every accrual path pays one extra persistent lookup even for a stream that
+    // never renegotiated. The cheaper alternative, a "has a schedule" flag,
+    // would mean a new `Stream` field: a layout change for every stored stream.
+    // See docs/FOOTPRINT.md.
     let f = Fixture::setup();
     let duration = 30 * DAY;
 
@@ -4871,7 +5585,7 @@ fn hot_path_footprint_harness() {
     f.client.mock_all_auths().withdraw(&id, &(DEPOSIT / 10));
     let cpu_withdraw = f.env.cost_estimate().budget().cpu_instruction_cost();
     assert!(
-        cpu_withdraw <= 360_000,
+        cpu_withdraw <= 370_000,
         "withdraw exceeded budget: {}",
         cpu_withdraw
     );
@@ -4882,7 +5596,10 @@ fn hot_path_footprint_harness() {
     f.client.mock_all_auths().cancel_stream(&f.sender, &id);
     let cpu_cancel = f.env.cost_estimate().budget().cpu_instruction_cost();
     assert!(
-        cpu_cancel <= 540_000,
+        // 540k pre-dispute; the freeze check adds one dispute-key storage lookup.
+        // The merged rate-renegotiation code path adds another ~3K of hot-path
+        // instructions through shared validation helpers.
+        cpu_cancel <= 570_000,
         "cancel_stream exceeded budget: {}",
         cpu_cancel
     );
@@ -4894,9 +5611,29 @@ fn hot_path_footprint_harness() {
     f.client.mock_all_auths().withdraw_max(&id2);
     let cpu_withdraw_max = f.env.cost_estimate().budget().cpu_instruction_cost();
     assert!(
-        cpu_withdraw_max <= 350_000,
+        cpu_withdraw_max <= 375_000,
         "withdraw_max exceeded budget: {}",
         cpu_withdraw_max
+    );
+
+    // 5. withdraw on a renegotiated stream: the price of reading one accepted
+    //    window instead of the single-window formula.
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &DEPOSIT);
+    let id3 = f.create_stream(DEPOSIT, 0, duration, true);
+    f.advance_time(5 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id3, &1_000);
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id3);
+    f.env.cost_estimate().budget().reset_unlimited();
+    f.client.mock_all_auths().withdraw(&id3, &(DEPOSIT / 100));
+    let cpu_scheduled_withdraw = f.env.cost_estimate().budget().cpu_instruction_cost();
+    assert!(
+        cpu_scheduled_withdraw <= 415_000,
+        "withdraw on a scheduled stream exceeded budget: {}",
+        cpu_scheduled_withdraw
     );
 }
 
@@ -5014,78 +5751,6 @@ fn freeze_and_unfreeze_governor_controls_and_mutation_gates() {
 fn upgrade_timelock_proposal_cancellation_and_execution() {
     let f = Fixture::setup();
     let stranger = Address::generate(&f.env);
-    #[rustfmt::skip]
-    const UPGRADE_WASM: &[u8] = &[
-        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x1b, 0x05, 0x60,
-        0x03, 0x7e, 0x7e, 0x7e, 0x01, 0x7e, 0x60, 0x02, 0x7e, 0x7e, 0x01, 0x7e,
-        0x60, 0x02, 0x7f, 0x7e, 0x00, 0x60, 0x01, 0x7e, 0x01, 0x7e, 0x60, 0x00,
-        0x00, 0x02, 0x19, 0x04, 0x01, 0x6c, 0x01, 0x5f, 0x00, 0x00, 0x01, 0x6c,
-        0x01, 0x30, 0x00, 0x01, 0x01, 0x6c, 0x01, 0x31, 0x00, 0x01, 0x01, 0x6c,
-        0x01, 0x32, 0x00, 0x01, 0x03, 0x06, 0x05, 0x01, 0x02, 0x03, 0x03, 0x04,
-        0x05, 0x03, 0x01, 0x00, 0x10, 0x06, 0x19, 0x03, 0x7f, 0x01, 0x41, 0x80,
-        0x80, 0xc0, 0x00, 0x0b, 0x7f, 0x00, 0x41, 0x80, 0x80, 0xc0, 0x00, 0x0b,
-        0x7f, 0x00, 0x41, 0x80, 0x80, 0xc0, 0x00, 0x0b, 0x07, 0x3b, 0x07, 0x06,
-        0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x03, 0x70, 0x75, 0x74,
-        0x00, 0x04, 0x03, 0x67, 0x65, 0x74, 0x00, 0x06, 0x03, 0x64, 0x65, 0x6c,
-        0x00, 0x07, 0x01, 0x5f, 0x00, 0x08, 0x0a, 0x5f, 0x5f, 0x64, 0x61, 0x74,
-        0x61, 0x5f, 0x65, 0x6e, 0x64, 0x03, 0x01, 0x0b, 0x5f, 0x5f, 0x68, 0x65,
-        0x61, 0x70, 0x5f, 0x62, 0x61, 0x73, 0x65, 0x03, 0x02, 0x0a, 0xd5, 0x02,
-        0x05, 0x66, 0x01, 0x01, 0x7f, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41,
-        0x20, 0x6b, 0x22, 0x02, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x02,
-        0x41, 0x10, 0x6a, 0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02,
-        0x40, 0x20, 0x02, 0x29, 0x03, 0x10, 0xa7, 0x0d, 0x00, 0x20, 0x02, 0x29,
-        0x03, 0x18, 0x21, 0x00, 0x20, 0x02, 0x20, 0x01, 0x10, 0x85, 0x80, 0x80,
-        0x80, 0x00, 0x20, 0x02, 0x29, 0x03, 0x00, 0xa7, 0x0d, 0x00, 0x20, 0x00,
-        0x20, 0x02, 0x29, 0x03, 0x08, 0x42, 0x01, 0x10, 0x80, 0x80, 0x80, 0x80,
-        0x00, 0x1a, 0x20, 0x02, 0x41, 0x20, 0x6a, 0x24, 0x80, 0x80, 0x80, 0x80,
-        0x00, 0x42, 0x02, 0x0f, 0x0b, 0x00, 0x00, 0x0b, 0x24, 0x01, 0x01, 0x7f,
-        0x20, 0x00, 0x20, 0x01, 0x37, 0x03, 0x08, 0x20, 0x00, 0x20, 0x01, 0xa7,
-        0x41, 0xff, 0x01, 0x71, 0x22, 0x02, 0x41, 0x0e, 0x47, 0x20, 0x02, 0x41,
-        0xca, 0x00, 0x47, 0x71, 0xad, 0x37, 0x03, 0x00, 0x0b, 0x7b, 0x02, 0x01,
-        0x7f, 0x01, 0x7e, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41, 0x20, 0x6b,
-        0x22, 0x01, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x01, 0x41, 0x10,
-        0x6a, 0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02, 0x40, 0x20,
-        0x01, 0x29, 0x03, 0x10, 0xa7, 0x0d, 0x00, 0x42, 0x02, 0x21, 0x00, 0x02,
-        0x40, 0x20, 0x01, 0x29, 0x03, 0x18, 0x22, 0x02, 0x42, 0x01, 0x10, 0x81,
-        0x80, 0x80, 0x80, 0x00, 0x42, 0x01, 0x52, 0x0d, 0x00, 0x20, 0x01, 0x20,
-        0x02, 0x42, 0x01, 0x10, 0x82, 0x80, 0x80, 0x80, 0x00, 0x10, 0x85, 0x80,
-        0x80, 0x80, 0x00, 0x20, 0x01, 0x29, 0x03, 0x00, 0xa7, 0x0d, 0x01, 0x20,
-        0x01, 0x29, 0x03, 0x08, 0x21, 0x00, 0x0b, 0x20, 0x01, 0x41, 0x20, 0x6a,
-        0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x00, 0x0f, 0x0b, 0x00, 0x00,
-        0x0b, 0x48, 0x01, 0x01, 0x7f, 0x23, 0x80, 0x80, 0x80, 0x80, 0x00, 0x41,
-        0x10, 0x6b, 0x22, 0x01, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x20, 0x01,
-        0x20, 0x00, 0x10, 0x85, 0x80, 0x80, 0x80, 0x00, 0x02, 0x40, 0x20, 0x01,
-        0x29, 0x03, 0x00, 0xa7, 0x45, 0x0d, 0x00, 0x00, 0x00, 0x0b, 0x20, 0x01,
-        0x29, 0x03, 0x08, 0x42, 0x01, 0x10, 0x83, 0x80, 0x80, 0x80, 0x00, 0x1a,
-        0x20, 0x01, 0x41, 0x10, 0x6a, 0x24, 0x80, 0x80, 0x80, 0x80, 0x00, 0x42,
-        0x02, 0x0b, 0x02, 0x00, 0x0b, 0x00, 0x9f, 0x01, 0x0e, 0x63, 0x6f, 0x6e,
-        0x74, 0x72, 0x61, 0x63, 0x74, 0x73, 0x70, 0x65, 0x63, 0x76, 0x30, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x70,
-        0x75, 0x74, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x03, 0x6b, 0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x76, 0x61, 0x6c, 0x00, 0x00,
-        0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x67, 0x65, 0x74, 0x00, 0x00,
-        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x6b,
-        0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x01, 0x00,
-        0x00, 0x03, 0xe8, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x64, 0x65, 0x6c, 0x00, 0x00,
-        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x6b,
-        0x65, 0x79, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x1e, 0x11, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x65, 0x6e,
-        0x76, 0x6d, 0x65, 0x74, 0x61, 0x76, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x77, 0x0e, 0x63, 0x6f,
-        0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x6d, 0x65, 0x74, 0x61, 0x76, 0x30,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x72, 0x73, 0x76, 0x65,
-        0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x31, 0x2e, 0x38, 0x31,
-        0x2e, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-        0x72, 0x73, 0x73, 0x64, 0x6b, 0x76, 0x65, 0x72, 0x00, 0x00, 0x00, 0x35,
-        0x32, 0x32, 0x2e, 0x30, 0x2e, 0x32, 0x23, 0x64, 0x66, 0x65, 0x38, 0x39,
-        0x39, 0x62, 0x63, 0x31, 0x32, 0x63, 0x32, 0x32, 0x39, 0x37, 0x35, 0x35,
-        0x31, 0x30, 0x36, 0x33, 0x65, 0x33, 0x30, 0x31, 0x35, 0x31, 0x66, 0x66,
-        0x36, 0x35, 0x34, 0x66, 0x39, 0x37, 0x62, 0x38, 0x32, 0x65, 0x38, 0x2d,
-        0x64, 0x69, 0x72, 0x74, 0x79, 0x00, 0x00, 0x00,
-    ];
     let wasm_hash = f.env.deployer().upload_contract_wasm(UPGRADE_WASM);
 
     assert_eq!(f.client.pending_upgrade(), None);
@@ -6518,4 +7183,959 @@ fn ownership_events_are_emitted_with_expected_payloads() {
         f.env.events().all().filter_by_contract(&f.client.address),
         [accepted.to_xdr(&f.env, &f.client.address)],
     );
+}
+
+// ------------------------------------------------ rate renegotiation (#54) --
+
+/// A ten-day window, so whole-day boundaries produce exact `owed` values.
+const RENEGOTIATION_DURATION: u64 = 10 * DAY;
+
+/// A stream funded at ledger time 0, advanced `at` seconds into its window.
+fn schedule_fixture(deposit: i128, duration: u64, at: u64) -> (Fixture, u64) {
+    let f = Fixture::setup_quiet();
+    let id = f.create_stream(deposit, 0, duration, false);
+    f.advance_time(at);
+    (f, id)
+}
+
+/// A window priced at `allocation` tokens over exactly its own length: the
+/// shape a renegotiation writes, where accrual has no rounding residue.
+fn window(start_time: u64, end_time: u64, allocation: i128) -> RateSegment {
+    RateSegment {
+        start_time,
+        end_time,
+        allocation,
+        basis_seconds: end_time - start_time,
+    }
+}
+
+/// Zero segments is not a special case of the schedule math: it must return the
+/// single-window formula for every input, error included. Pinned around the
+/// window edges and against the pure `streamed_at` the pre-feature contract
+/// called, which is the differential the old-vs-new comparison needs.
+#[test]
+fn empty_plan_matches_single_window_formula() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+    let start = 1_000u64;
+    let empty = soroban_sdk::Vec::<RateSegment>::new(&env);
+
+    for duration in [
+        1u64,
+        2,
+        60,
+        DAY,
+        RENEGOTIATION_DURATION,
+        MAX_DURATION_SECONDS,
+    ] {
+        for deposit in [1i128, 999, DEPOSIT, i128::MAX / 2] {
+            let s = Stream {
+                id: 1,
+                sender: sender.clone(),
+                recipient: recipient.clone(),
+                token: token.clone(),
+                deposit,
+                withdrawn: 0,
+                start_time: start,
+                end_time: start + duration,
+                cancelable: false,
+                status: StreamStatus::Active,
+                use_oracle: false,
+            };
+            for offset in [0u64, 1, duration / 2, duration - 1, duration, duration + 1] {
+                let now = start + offset;
+                let single = streamed_amount_at(&s, now);
+                let plan = streamed_amount_at_segments(&s, now, &empty);
+                assert_eq!(
+                    single, plan,
+                    "empty schedule diverged at offset {offset} of a {duration}s window"
+                );
+                assert_eq!(
+                    streamed_at(deposit, duration, offset.min(duration)),
+                    plan,
+                    "empty schedule diverged from the pure rate function"
+                );
+                assert_eq!(available_amount_at_segments(&s, now, &empty), single);
+                if let Ok(streamed) = single {
+                    let (recipient_leg, sender_leg) =
+                        cancel_amounts_at_segments(&s, now, &empty).unwrap();
+                    assert_eq!(recipient_leg, streamed);
+                    assert_eq!(recipient_leg + sender_leg, deposit);
+                } else {
+                    assert!(cancel_amounts_at_segments(&s, now, &empty).is_err());
+                }
+            }
+        }
+    }
+}
+
+/// A rate increase is priced out of the unaccrued remainder, and the shortfall
+/// is pulled from the sender in the same transaction that installs the window.
+#[test]
+fn rate_increase_pulls_the_exact_shortfall() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    let owed = DEPOSIT * 3 / 10; // three of ten days accrued
+    let reserved = 20_000i128 * (RENEGOTIATION_DURATION - 3 * DAY) as i128;
+    let shortfall = reserved - (DEPOSIT - owed);
+
+    let before_sender = TokenClient::new(&f.env, &f.token).balance(&f.sender);
+    let before_contract = TokenClient::new(&f.env, &f.token).balance(&f.client.address);
+
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+    assert_eq!(
+        f.client.pending_rate_change(&id),
+        Some(PendingRateChange {
+            stream_id: id,
+            proposed_by: f.sender.clone(),
+            counterparty: f.recipient.clone(),
+            amount_per_second: 20_000,
+            expires_at: 3 * DAY + RATE_PROPOSAL_TTL_SECONDS,
+        })
+    );
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+
+    let s = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(s.deposit, owed + reserved);
+    assert_eq!(s.withdrawn, 0);
+    assert_eq!(s.status, StreamStatus::Active);
+    assert_eq!(f.client.rate_segments(&id), {
+        let mut expected = soroban_sdk::Vec::new(&f.env);
+        // The head keeps the original `(deposit, duration)` pair, which is
+        // what preserves the accrual computed before the change.
+        expected.push_back(RateSegment {
+            start_time: 0,
+            end_time: 3 * DAY,
+            allocation: DEPOSIT,
+            basis_seconds: RENEGOTIATION_DURATION,
+        });
+        expected.push_back(window(3 * DAY, 10 * DAY, reserved));
+        expected
+    });
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        before_sender - shortfall
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        before_contract + shortfall
+    );
+    assert!(f.client.pending_rate_change(&id).is_none());
+    assert_eq!(f.client.mock_all_auths().available(&id), owed);
+}
+
+/// The "rate increase without funds" case: the pull is the last check before the
+/// effects, so a sender who cannot cover the shortfall leaves a stream that
+/// looks exactly as if the negotiation never happened — including the offer,
+/// which stays open for a retry once the balance is there.
+#[test]
+fn rate_increase_without_funds_changes_nothing() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &DEPOSIT);
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::TopUpTransferFailed);
+
+    assert_eq!(f.client.mock_all_auths().get_stream(&id).deposit, DEPOSIT);
+    assert_eq!(f.client.rate_segments(&id).len(), 0);
+    assert!(f.client.pending_rate_change(&id).is_some());
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        DEPOSIT
+    );
+}
+
+/// A decrease frees exactly the escrow the new rate no longer needs. The refund
+/// is the last interaction: were it to fail, the whole acceptance would roll
+/// back rather than half-apply a schedule.
+#[test]
+fn rate_decrease_refunds_the_freed_escrow() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    let owed = DEPOSIT * 3 / 10;
+    let reserved = 5_000i128 * (RENEGOTIATION_DURATION - 3 * DAY) as i128;
+    let refund = (DEPOSIT - owed) - reserved;
+
+    let before_sender = TokenClient::new(&f.env, &f.token).balance(&f.sender);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.recipient, &id, &5_000);
+    f.client.mock_all_auths().accept_rate_change(&f.sender, &id);
+
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).deposit,
+        owed + reserved
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender),
+        before_sender + refund
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        owed + reserved
+    );
+}
+
+/// The funds-bug property, checked against the formula the stream used before
+/// the change rather than a second reading of contract state: every timestamp
+/// at or before the boundary still prices out of the original
+/// `(deposit, duration)` pair, and every timestamp after it prices the new rate
+/// with no rounding residue.
+#[test]
+fn rate_change_never_reprices_the_past() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    let boundary = 3 * DAY;
+    let owed = DEPOSIT * 3 / 10;
+    let new_rate = 20_000i128;
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &new_rate);
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+
+    let s = f.client.mock_all_auths().get_stream(&id);
+    let segments = f.client.rate_segments(&id);
+    for offset in (0..=boundary).step_by(3_600) {
+        assert_eq!(
+            streamed_amount_at_segments(&s, offset, &segments),
+            streamed_at(DEPOSIT, RENEGOTIATION_DURATION, offset),
+            "accrual at {offset} changed retroactively"
+        );
+    }
+    for offset in (boundary..=10 * DAY).step_by(7_331) {
+        assert_eq!(
+            streamed_amount_at_segments(&s, offset, &segments).unwrap(),
+            owed + new_rate * (offset - boundary) as i128,
+            "the new rate is not exact at {offset}"
+        );
+    }
+    // The window ends fully funded: the endpoint of the schedule is the deposit
+    // acceptance wrote, so nothing is left unstreamable and nothing overdrawn.
+    assert_eq!(
+        streamed_amount_at_segments(&s, 10 * DAY, &segments).unwrap(),
+        s.deposit
+    );
+
+    // The on-chain read agrees at the boundary and after a day of the new rate.
+    assert_eq!(f.client.mock_all_auths().available(&id), owed);
+    f.advance_time(DAY);
+    assert_eq!(
+        f.client.mock_all_auths().available(&id),
+        owed + new_rate * DAY as i128
+    );
+}
+
+/// Whole-token flooring lives only in the original window. A deposit that does
+/// not divide by its duration still leaves `owed` untouched at the boundary,
+/// and the rest of the stream prices to the token.
+#[test]
+fn rate_decrease_mid_second_keeps_the_floor_where_it_belongs() {
+    // 3_000_000_000 over 7 seconds: 428_571_428.57 tokens per second.
+    let (f, id) = schedule_fixture(3_000_000_000, 7, 3);
+    let owed = 3_000_000_000i128 * 3 / 7;
+    assert_eq!(f.client.mock_all_auths().available(&id), owed);
+
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &1);
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+
+    let s = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(s.deposit, owed + 4);
+    assert_eq!(f.client.mock_all_auths().available(&id), owed);
+    for second in 1..=4u64 {
+        f.advance_time(1);
+        assert_eq!(
+            f.client.mock_all_auths().available(&id),
+            owed + second as i128
+        );
+    }
+    // Cancelled at the endpoint: the recipient's claim is the whole deposit and
+    // the sender's refund is zero.
+    let before_recipient = TokenClient::new(&f.env, &f.token).balance(&f.recipient);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient) - before_recipient,
+        owed + 4
+    );
+}
+
+#[test]
+fn rate_proposal_follows_the_two_step_window() {
+    // Twenty days so the seven-day acceptance window closes before the stream
+    // does: expiry and elapsed-window are different rejections.
+    let (f, id) = schedule_fixture(DEPOSIT, 20 * DAY, 3 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &1);
+
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&stranger, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+
+    // Only one offer at a time, and neither party may overwrite the other's.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_propose_rate_change(&f.recipient, &id, &2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::RateProposalPending);
+
+    // An expired offer is unacceptible but replaceable, and a replacement is
+    // cancellable by its own proposer only.
+    f.advance_time(RATE_PROPOSAL_TTL_SECONDS);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::RateProposalExpired);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &2);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_cancel_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+    f.client.mock_all_auths().cancel_rate_change(&f.sender, &id);
+    assert!(f.client.pending_rate_change(&id).is_none());
+
+    // Accepting with no offer stored is its own code, not `NotAuthorized`.
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NoPendingRateChange);
+}
+
+#[test]
+fn rate_change_requires_an_active_stream_and_a_window_to_rate() {
+    let f = Fixture::setup_quiet();
+    let cancelled = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, true);
+    f.client
+        .mock_all_auths()
+        .cancel_stream(&f.sender, &cancelled);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_propose_rate_change(&f.sender, &cancelled, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::StreamNotActive);
+
+    // A stream whose window closed while it stayed Active has nothing left to
+    // re-rate: both halves of the handshake refuse it, and the open offer
+    // changes nothing.
+    let ended = f.create_stream(DEPOSIT, 0, 4 * DAY, false);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &ended, &1);
+    f.advance_time(4 * DAY + 1);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_propose_rate_change(&f.sender, &ended, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::InvalidTimeRange);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &ended)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::InvalidTimeRange);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&ended).deposit,
+        DEPOSIT
+    );
+    assert_eq!(f.client.rate_segments(&ended).len(), 0);
+
+    // A stranger cannot open an offer at all. Checked on a live stream: the
+    // window guard above fires first, and it is not an authorization failure.
+    let live = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, false);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_propose_rate_change(&Address::generate(&f.env), &live, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+    assert!(f.client.pending_rate_change(&live).is_none());
+}
+
+/// A role transfer changes the counterparty: the successor inherits the stream,
+/// not a deal they never agreed to, and the stale offer still gets cleaned up by
+/// whoever made it.
+#[test]
+fn ownership_transfer_invalidates_a_pending_rate_change() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+
+    let heir = Address::generate(&f.env);
+    f.client
+        .mock_all_auths()
+        .propose_ownership_transfer(&f.recipient, &id, &heir);
+    f.client
+        .mock_all_auths()
+        .accept_ownership_transfer(&heir, &id);
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+    assert_eq!(f.client.mock_all_auths().get_stream(&id).deposit, DEPOSIT);
+
+    // The successor is not bound, but is not blocked either: the original
+    // proposer can drop the offer, and a fresh one is accepted normally.
+    f.client.mock_all_auths().cancel_rate_change(&f.sender, &id);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+    f.client.mock_all_auths().accept_rate_change(&heir, &id);
+    assert_eq!(f.client.rate_segments(&id).len(), 2);
+    assert_eq!(f.client.mock_all_auths().get_stream(&id).recipient, heir);
+}
+
+/// The read paths must not disagree with the money: `available`, `withdraw_max`
+/// and the cancellation split all price the same schedule, and the two payouts
+/// still add up to the deposit.
+#[test]
+fn withdrawals_and_cancellation_honor_the_schedule() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    let owed = DEPOSIT * 3 / 10;
+    let new_rate = 5_000i128;
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &new_rate);
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+
+    let deposit = f.client.mock_all_auths().get_stream(&id).deposit;
+    f.advance_time(DAY); // four of ten days in
+    let accrued = owed + new_rate * DAY as i128;
+    assert_eq!(f.client.mock_all_auths().available(&id), accrued);
+    assert_eq!(f.client.mock_all_auths().withdraw_max(&id), accrued);
+
+    let s = f.client.mock_all_auths().get_stream(&id);
+    assert_eq!(s.withdrawn, accrued);
+    assert_eq!(s.status, StreamStatus::Active);
+    assert_eq!(f.client.mock_all_auths().available(&id), 0);
+
+    let before_sender = TokenClient::new(&f.env, &f.token).balance(&f.sender);
+    f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.sender) - before_sender,
+        deposit - accrued,
+        "the cancel split must refund exactly the remainder of the schedule"
+    );
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        0
+    );
+}
+
+/// A top-up on a renegotiated stream grows the window being streamed, priced
+/// pro-rata exactly as it is on a single-window stream, and leaves every
+/// accepted window before it alone.
+#[test]
+fn top_up_after_a_rate_change_grows_only_the_current_window() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    let owed = DEPOSIT * 3 / 10;
+    let reserved = 20_000i128 * (RENEGOTIATION_DURATION - 3 * DAY) as i128;
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+
+    f.advance_time(2 * DAY); // two days of the new window have streamed
+    let tail_seconds = RENEGOTIATION_DURATION - 3 * DAY;
+    let top_up = 1_000i128;
+    let before = f.client.mock_all_auths().available(&id);
+    f.client.mock_all_auths().top_up(&id, &top_up);
+
+    let segments = f.client.rate_segments(&id);
+    assert_eq!(segments.len(), 2);
+    let head = segments.get(0).unwrap();
+    let tail = segments.get(1).unwrap();
+    assert_eq!(head.allocation, DEPOSIT);
+    assert_eq!(head.basis_seconds, RENEGOTIATION_DURATION);
+    assert_eq!(tail.allocation, reserved + top_up);
+    assert_eq!(tail.basis_seconds, tail_seconds);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).deposit,
+        owed + reserved + top_up
+    );
+    // The added funds accrue pro-rata over the window they were added to: two
+    // of the seven remaining days, floored to whole tokens.
+    assert_eq!(
+        f.client.mock_all_auths().available(&id) - before,
+        top_up * (2 * DAY as i128) / tail_seconds as i128
+    );
+}
+
+/// The schedule is bounded so `available`/`withdraw` stay cheap to price: one
+/// window more than `MAX_RATE_SEGMENTS` refuses, and the refusal leaves the
+/// stream exactly as it was. Renegotiating at the floored original rate keeps
+/// every adjustment negative, so no party ever needs new funds here.
+#[test]
+fn rate_segment_limit_is_enforced() {
+    let rate = DEPOSIT / RENEGOTIATION_DURATION as i128;
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 0);
+    for _ in 1..MAX_RATE_SEGMENTS {
+        f.advance_time(1);
+        f.client
+            .mock_all_auths()
+            .propose_rate_change(&f.sender, &id, &rate);
+        f.client
+            .mock_all_auths()
+            .accept_rate_change(&f.recipient, &id);
+    }
+    assert_eq!(f.client.rate_segments(&id).len(), MAX_RATE_SEGMENTS);
+
+    let before = f.client.mock_all_auths().get_stream(&id);
+    let escrow = TokenClient::new(&f.env, &f.token).balance(&f.client.address);
+    f.advance_time(1);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &rate);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::TooManyRateSegments);
+
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).deposit,
+        before.deposit
+    );
+    assert_eq!(f.client.rate_segments(&id).len(), MAX_RATE_SEGMENTS);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.client.address),
+        escrow
+    );
+    // The rejected offer is still cancellable: hitting the cap never strands a
+    // proposal on the stream.
+    f.client.mock_all_auths().cancel_rate_change(&f.sender, &id);
+    assert!(f.client.pending_rate_change(&id).is_none());
+}
+
+#[test]
+fn rate_change_events_are_emitted_with_expected_payloads() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, false);
+    f.advance_time(3 * DAY);
+    let now = f.env.ledger().timestamp();
+    let _ = f.env.events().all();
+
+    let new_rate = 20_000i128;
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &new_rate);
+    let proposed = RateChangeProposed {
+        stream_id: id,
+        proposed_by: f.sender.clone(),
+        counterparty: f.recipient.clone(),
+        amount_per_second: new_rate,
+        expires_at: now + RATE_PROPOSAL_TTL_SECONDS,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [proposed.to_xdr(&f.env, &f.client.address)],
+    );
+
+    let owed = DEPOSIT * 3 / 10;
+    let reserved = new_rate * (RENEGOTIATION_DURATION - 3 * DAY) as i128;
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+    let accepted = RateChangeAccepted {
+        stream_id: id,
+        accepted_by: f.recipient.clone(),
+        new_amount_per_second: new_rate,
+        effective_from: now,
+        owed_at_change: owed,
+        reserved_at_new_rate: reserved,
+        adjustment: reserved - (DEPOSIT - owed),
+        deposit: owed + reserved,
+    };
+    assert_eq!(
+        f.env.events().all().filter_by_contract(&f.client.address),
+        [accepted.to_xdr(&f.env, &f.client.address)],
+    );
+}
+
+/// A frozen contract settles nothing: the offer can be neither placed nor
+/// accepted, and the stream's schedule is untouched by the attempt.
+#[test]
+fn rate_change_is_blocked_while_frozen() {
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 3 * DAY);
+    f.client.mock_all_auths().set_frozen(&f.governor, &true);
+
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_propose_rate_change(&f.sender, &id, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::ContractFrozen);
+
+    f.client.mock_all_auths().set_frozen(&f.governor, &false);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+    f.client.mock_all_auths().set_frozen(&f.governor, &true);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_accept_rate_change(&f.recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::ContractFrozen);
+    assert_eq!(f.client.mock_all_auths().get_stream(&id).deposit, DEPOSIT);
+    assert_eq!(f.client.rate_segments(&id).len(), 0);
+}
+
+/// Placing an offer settles nothing: the trace pins that a proposal moves no
+/// tokens and writes no stream state, only the offer and its event.
+#[test]
+fn propose_rate_change_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let id = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, false);
+    f.advance_time(3 * DAY);
+
+    crate::cei_trace::begin();
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/propose_rate_change.txt").trim_end()
+    );
+}
+
+/// An increase pulls the shortfall *before* any effect: schedule, deposit and
+/// offer are written only once the funds have arrived, so a token that refuses
+/// the pull leaves the negotiation exactly where it was.
+#[test]
+fn accept_rate_increase_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let id = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, false);
+    f.advance_time(3 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.sender, &id, &20_000);
+
+    crate::cei_trace::begin();
+    f.client
+        .mock_all_auths()
+        .accept_rate_change(&f.recipient, &id);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/accept_rate_increase.txt").trim_end()
+    );
+}
+
+/// A decrease is the mirror image: every effect lands first and the refund is
+/// the last interaction, so a token that refuses it rolls the whole acceptance
+/// back rather than half-applying a schedule.
+#[test]
+fn accept_rate_decrease_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let id = f.create_stream(DEPOSIT, 0, RENEGOTIATION_DURATION, false);
+    f.advance_time(3 * DAY);
+    f.client
+        .mock_all_auths()
+        .propose_rate_change(&f.recipient, &id, &5_000);
+
+    crate::cei_trace::begin();
+    f.client.mock_all_auths().accept_rate_change(&f.sender, &id);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/accept_rate_decrease.txt").trim_end()
+    );
+}
+
+/// `MAX_RATE_SEGMENTS` is a gas bound, not a tidiness rule: pricing a schedule
+/// that is at the cap must stay predictable, so the worst case is measured here
+/// rather than argued about. The number this asserts is the honest one -- a full
+/// 32-window schedule costs a small multiple of the single-window path, and it
+/// is what any client has to budget for before accepting a 32nd renegotiation.
+#[test]
+fn full_schedule_pricing_is_bounded() {
+    let rate = DEPOSIT / RENEGOTIATION_DURATION as i128;
+    let (f, id) = schedule_fixture(DEPOSIT, RENEGOTIATION_DURATION, 0);
+    for _ in 1..MAX_RATE_SEGMENTS {
+        f.advance_time(1);
+        f.client
+            .mock_all_auths()
+            .propose_rate_change(&f.sender, &id, &rate);
+        f.client
+            .mock_all_auths()
+            .accept_rate_change(&f.recipient, &id);
+    }
+    assert_eq!(f.client.rate_segments(&id).len(), MAX_RATE_SEGMENTS);
+
+    f.advance_time(DAY);
+    f.env.cost_estimate().budget().reset_unlimited();
+    f.client.mock_all_auths().withdraw(&id, &(DEPOSIT / 50));
+    let cpu_full = f.env.cost_estimate().budget().cpu_instruction_cost();
+    assert!(
+        cpu_full <= 850_000,
+        "withdraw at the segment cap exceeded budget: {}",
+        cpu_full
+    );
+}
+
+/// MMIX 64-bit linear congruential generator: the schedule shapes in
+/// [`piecewise_accrual_matches_the_reference_models`] must be reproducible from
+/// the seed alone, so a CI failure can be re-run exactly without a corpus file.
+struct ScheduleRng(u64);
+
+impl ScheduleRng {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.0 >> 1
+    }
+
+    fn below(&mut self, bound: u64) -> u64 {
+        if bound == 0 {
+            0
+        } else {
+            self.next_u64() % bound
+        }
+    }
+}
+
+/// Seconds of `segment`'s window elapsed at `now`, written straight from the
+/// definition rather than through the contract's helper.
+fn window_elapsed(window_start: u64, window_end: u64, now: u64) -> u64 {
+    if now <= window_start {
+        0
+    } else if now >= window_end {
+        window_end - window_start
+    } else {
+        now - window_start
+    }
+}
+
+/// The rounding-error analysis for piecewise accrual: `trials_count` randomly
+/// shaped schedules, priced at randomly probed timestamps, against two models
+/// that share no code with the contract path.
+///
+/// * A segment in the shape `accept_rate_change` writes (`allocation = rate *
+///   window`, `basis_seconds = window`) must accrue *exactly* `rate * elapsed`:
+///   an integer product with no division and therefore no residue. Every diff
+///   against this model is the funds bug #54 warns about, and it is asserted to
+///   be zero.
+/// * A segment that carries an old `allocation / basis_seconds` pair through a
+///   clip (the head of a schedule, whose basis is the original full duration)
+///   does not divide evenly, so it is checked against a `u128` long-division
+///   model, floor included.
+///
+/// Each trial also re-checks the invariants a wrong rounding would break:
+/// accrual is monotone in `now`, never exceeds the sum of the allocations, and
+/// for an all-exact schedule reaches exactly that sum at `end_time`. Returns the
+/// number of windows priced, so a caller can report the size of its run.
+fn price_random_schedules(trials_count: usize) -> usize {
+    // Host objects live per-`Env`, so schedules are built in chunks and each
+    // chunk's environment is dropped before the next one starts.
+    const TRIALS_PER_ENV: usize = 1_000;
+    let mut windows = 0usize;
+
+    /// One window of a randomly shaped schedule, in the model's own terms.
+    struct Shape {
+        start_time: u64,
+        length: u64,
+        allocation: i128,
+        basis_seconds: u64,
+        /// `Some(rate)` for a window `accept_rate_change` wrote, `None` for a
+        /// clipped head whose basis is the original, longer duration.
+        rate: Option<i128>,
+    }
+
+    let mut rng = ScheduleRng(0x5EED_54F5_0000_0001);
+    let mut trials = 0usize;
+    while trials < trials_count {
+        let env = Env::default();
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        for _ in 0..TRIALS_PER_ENV.min(trials_count - trials) {
+            trials += 1;
+
+            let start_time = rng.below(1_000);
+            let mut cursor = start_time;
+            let mut totals = 0i128;
+            let mut exact = true;
+            let mut shapes: Vec<Shape> = Vec::new();
+            let mut segments = soroban_sdk::Vec::new(&env);
+            for _ in 0..1 + rng.below(5) {
+                let length = 1 + rng.below(500);
+                let rate = 1 + rng.below(1_000_000) as i128;
+                // Half the windows carry the shape acceptance writes, the rest
+                // a clipped head: a basis longer than the window it covers.
+                let head_shaped = rng.below(2) == 0;
+                exact &= !head_shaped;
+                let basis_seconds = if head_shaped {
+                    length * (1 + rng.below(3))
+                } else {
+                    length
+                };
+                let allocation = rate * length as i128;
+                shapes.push(Shape {
+                    start_time: cursor,
+                    length,
+                    allocation,
+                    basis_seconds,
+                    rate: if head_shaped { None } else { Some(rate) },
+                });
+                segments.push_back(RateSegment {
+                    start_time: cursor,
+                    end_time: cursor + length,
+                    allocation,
+                    basis_seconds,
+                });
+                totals += allocation;
+                cursor += length;
+                windows += 1;
+            }
+            let end_time = cursor;
+            let stream = Stream {
+                id: 1,
+                sender: sender.clone(),
+                recipient: recipient.clone(),
+                token: token.clone(),
+                deposit: totals,
+                withdrawn: 0,
+                start_time,
+                end_time,
+                cancelable: false,
+                status: StreamStatus::Active,
+                use_oracle: false,
+            };
+
+            // Ascending probes, so the monotonicity assertion has an ordering
+            // to check: before the window, inside it, and past its end.
+            let mut probes: Vec<u64> = Vec::new();
+            probes.push(start_time.saturating_sub(1));
+            probes.push(end_time + 1);
+            for _ in 0..4 {
+                probes.push(rng.below(end_time + 2));
+            }
+            probes.sort_unstable();
+
+            let mut previous = 0i128;
+            for now in probes.iter() {
+                let mut floor_model = 0i128;
+                let mut exact_model = 0i128;
+                for shape in shapes.iter() {
+                    let elapsed =
+                        window_elapsed(shape.start_time, shape.start_time + shape.length, *now);
+                    let product = (shape.allocation as u128) * (elapsed as u128);
+                    floor_model += (product / shape.basis_seconds as u128)
+                        .min(shape.allocation as u128) as i128;
+                    exact_model += shape.rate.map_or(0, |rate| rate * elapsed as i128);
+                }
+                let accrued = streamed_amount_at_segments(&stream, *now, &segments)
+                    .unwrap_or_else(|error| panic!("{error:?} in trial {trials} at {now}"));
+
+                assert!(
+                    accrued >= 0 && accrued <= totals,
+                    "trial {trials} at {now}: {accrued} escaped [0, {totals}]"
+                );
+                assert!(
+                    accrued >= previous,
+                    "trial {trials}: accrual went backwards at {now}"
+                );
+                previous = accrued;
+                assert_eq!(
+                    accrued, floor_model,
+                    "trial {trials} at {now}: contract disagreed with the u128 model"
+                );
+                if exact {
+                    assert_eq!(
+                        accrued, exact_model,
+                        "trial {trials} at {now}: an exact schedule rounded"
+                    );
+                }
+            }
+
+            if exact {
+                assert_eq!(
+                    streamed_amount_at_segments(&stream, end_time, &segments).unwrap(),
+                    totals,
+                    "trial {trials}: an exact schedule did not settle at its deposit"
+                );
+            }
+        }
+    }
+    assert_eq!(trials, trials_count);
+    windows
+}
+
+/// The suite-facing run: enough random schedules to catch a rounding change the
+/// moment it lands, without turning `cargo test` into a benchmark.
+#[test]
+fn piecewise_accrual_matches_the_reference_models() {
+    let windows = price_random_schedules(20_000);
+    std::println!("ROUNDING ANALYSIS: 20_000 segment sets, {windows} windows priced, 0 diffs");
+}
+
+/// The review-facing run: 10^6 random segment sets, the number #54 asks a rate
+/// change to be checked against. Ignored in the default suite because pricing a
+/// million host-object schedules takes minutes; run it deliberately with
+/// `cargo test --lib -- --ignored --nocapture` when a schedule change needs the
+/// full analysis in the PR.
+#[test]
+#[ignore]
+fn piecewise_accrual_rounding_analysis_over_a_million_schedules() {
+    let windows = price_random_schedules(1_000_000);
+    std::println!("ROUNDING ANALYSIS: 1_000_000 segment sets, {windows} windows priced, 0 diffs");
 }

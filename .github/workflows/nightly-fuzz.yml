@@ -69,4 +69,28 @@ jobs:
             fuzz/artifacts/conservation/
             fuzz/corpus/conservation/
           if-no-files-found: ignore
+  rate_schedule_fuzz:
+    name: Piecewise Accrual Fuzz (renegotiated schedules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
+      - name: Install nightly toolchain + cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run rate_schedule fuzz session
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run rate_schedule --             -max_total_time=${{ github.event.inputs.max_total_time || '300' }}             -rss_limit_mb=4096
+
+      - name: Persist failing seeds / crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rate-schedule-fuzz-artifacts
+          path: |
+            fuzz/artifacts/rate_schedule/
+            fuzz/corpus/rate_schedule/
+          if-no-files-found: ignore

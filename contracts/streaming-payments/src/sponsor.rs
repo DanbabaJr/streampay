@@ -66,54 +66,120 @@ use crate::StreamStatus;
 /// interval.
 pub const MIN_WINDOW_SECONDS: u64 = 1;
 
-/// Storage keys for the sponsorship subsystem, kept separate from the stream
-/// index so budget state and stream state evolve independently.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Storage keys for the sponsorship subsystem, kept separate from the stream"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " index so budget state and stream state evolve independently."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SponsorKey {
-    /// A sponsor's budget configuration.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " A sponsor's budget configuration."
+    )]
     SponsorConfig(Address),
-    /// The single ed25519 key the sponsor authorizes to sign relay requests.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The single ed25519 key the sponsor authorizes to sign relay requests."
+    )]
     OperatorKey(Address),
-    /// The sponsor's spend within the current budget window.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The sponsor's spend within the current budget window."
+    )]
     SponsorPeriod(Address),
-    /// A beneficiary's enrolled ed25519 consent key.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " A beneficiary's enrolled ed25519 consent key."
+    )]
     BeneficiaryKey(Address),
-    /// A beneficiary's spend within the sponsor's current budget window.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " A beneficiary's spend within the sponsor's current budget window."
+    )]
     BeneficiarySpend(Address, Address),
-    /// A spent claim nonce, keyed by `(sponsor, beneficiary, nonce)`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " A spent claim nonce, keyed by `(sponsor, beneficiary, nonce)`."
+    )]
     ClaimNonce(Address, Address, u64),
 }
 
-/// A sponsor's budget policy. The sponsor address is the map key, so it is not
-/// repeated here.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " A sponsor's budget policy. The sponsor address is the map key, so it is not"
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = " repeated here.")]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SponsorConfig {
-    /// The single token this sponsor will fund claims against. A claim whose
-    /// stream uses any other token is rejected: caps are per-token, otherwise a
-    /// sponsor capping cheap tokens could be drained on expensive ones.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The single token this sponsor will fund claims against. A claim whose"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " stream uses any other token is rejected: caps are per-token, otherwise a"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " sponsor capping cheap tokens could be drained on expensive ones."
+    )]
     pub token: Address,
-    /// Maximum total payout the sponsor will absorb per `window_seconds`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Maximum total payout the sponsor will absorb per `window_seconds`."
+    )]
     pub per_period_limit: i128,
-    /// Maximum payout to a single beneficiary per `window_seconds`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Maximum payout to a single beneficiary per `window_seconds`."
+    )]
     pub per_beneficiary_limit: i128,
-    /// Budget period length in seconds. Spend counters reset when the ledger
-    /// timestamp crosses `period_start + window_seconds`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Budget period length in seconds. Spend counters reset when the ledger"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " timestamp crosses `period_start + window_seconds`."
+    )]
     pub window_seconds: u64,
-    /// When false, all claims against this sponsor are rejected. Lets a sponsor
-    /// stop the bleeding without deleting (or losing) its budget state.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " When false, all claims against this sponsor are rejected. Lets a sponsor"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " stop the bleeding without deleting (or losing) its budget state."
+    )]
     pub active: bool,
 }
 
-/// Spend accumulated within one budget window. Reused for both the
-/// sponsor-global and the per-beneficiary counters.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Spend accumulated within one budget window. Reused for both the"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " sponsor-global and the per-beneficiary counters."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeriodSpend {
-    /// Ledger timestamp at which the current window began.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Ledger timestamp at which the current window began."
+    )]
     pub period_start: u64,
-    /// Total payout absorbed in the current window.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Total payout absorbed in the current window."
+    )]
     pub spend: i128,
 }
 
@@ -226,6 +292,7 @@ pub fn mark_nonce(env: &Env, sponsor: &Address, beneficiary: &Address, nonce: u6
 
 // ------------------------------------------------ canonical message ---------
 
+#[allow(clippy::too_many_arguments)] // the full signed-payload surface is intentional
 /// Builds the canonical signed payload as a heterogeneous `Vec<Val>`: a fixed
 /// domain tag, then the four strkeys (contract, sponsor, beneficiary, token)
 /// and the four numeric fields (stream id, amount, nonce, deadline), in that
@@ -233,7 +300,6 @@ pub fn mark_nonce(env: &Env, sponsor: &Address, beneficiary: &Address, nonce: u6
 /// single source of truth for both signer and verifier — every field is a
 /// self-delimiting ScVal, so the encoding is injective and no field boundary
 /// can shift into another.
-#[allow(clippy::too_many_arguments)] // the full signed-payload surface is intentional
 pub fn message(
     env: &Env,
     contract_id: &Address,
@@ -393,6 +459,7 @@ pub fn enroll_beneficiary(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // the full relay surface is the intended client API
 /// The sponsored claim path: pays `amount` of a stream's accrued balance to
 /// its recipient, funded with the *operator's* gas rather than the
 /// beneficiary's. Any account can submit this — no `require_auth` — because
@@ -403,7 +470,6 @@ pub fn enroll_beneficiary(
 /// get an explainable rejection for malformed business inputs, and effects
 /// (nonce, budget, stream) are recorded before the payout (checks-effects-
 /// interactions) so a reentrant token callback cannot over-withdraw.
-#[allow(clippy::too_many_arguments)] // the full relay surface is the intended client API
 pub fn sponsored_withdraw(
     env: Env,
     sponsor: Address,
@@ -434,7 +500,7 @@ pub fn sponsored_withdraw(
         return Err(surface::reject(Branch::SponsoredWithdrawAmountNonPositive));
     }
     let resolved = crate::oracle::resolve_stream_time(&env, stream_id, s.use_oracle);
-    let available = stream::available_amount_at(&s, resolved.timestamp)?;
+    let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
     if amount > available {
         return Err(surface::reject(
             Branch::SponsoredWithdrawAmountExceedsAvailable,

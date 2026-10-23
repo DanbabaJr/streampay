@@ -2,9 +2,10 @@ import express from "express";
 import { nativeToScVal } from "@stellar/stellar-sdk";
 import { decodeEvent } from "./decoder.js";
 import { StreamStore } from "./store.js";
-import type { RpcEvent } from "./types.js";
 import { getGlobalRpcManager } from "./rpc-manager.js";
-import type { EndpointHealth } from "./rpc-manager.js";
+import type { EndpointHealth, RateBudgetSnapshot } from "./rpc-manager.js";
+import { IngestPipeline, type EventsPage, type TickReport } from "./ingest/pipeline.js";
+import type { SequencerMetrics } from "./ingest/sequencer.js";
 import { WebhookDispatcher } from "./webhooks/dispatcher.js";
 import { validateWebhookUrl } from "./webhooks/ssrf.js";
 import { OutboxDispatcher } from "./outbox/dispatcher.js";
@@ -22,12 +23,45 @@ function parseLimit(raw: unknown, def: number, max: number): number {
   return Number.isInteger(value) && value >= 1 && value <= max ? value : def;
 }
 
+function envInt(name: string, def: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return def;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
+  return value;
+}
+
+/** Same as `envInt`, but 0 is a legitimate value. */
+function envNonNegativeInt(name: string, def: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return def;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`);
+  return value;
+}
+
+/** Ledger to index from on a fresh database; unset means "start at the tip". */
+function configuredStartLedger(): number | undefined {
+  const raw = process.env.START_LEDGER;
+  if (raw === undefined || raw === "") return undefined;
+  if (!/^\d+$/.test(raw)) throw new Error("START_LEDGER must be an integer ledger sequence");
+  return Number(raw) > 0 ? Number(raw) : undefined;
+}
+
+/** What the ingestion pipelines report on `/health` and `/api/ingest/stats`. */
+export interface IngestStats {
+  lastTick: TickReport | null;
+  sequencer: SequencerMetrics;
+  budget: RateBudgetSnapshot;
+}
+
 export function createApp(
   store: StreamStore,
   dispatcher?: WebhookDispatcher,
   outboxDispatcher?: OutboxDispatcher,
   outboxMetrics?: OutboxMetrics,
-  rpcHealth?: () => EndpointHealth[]
+  rpcHealth?: () => EndpointHealth[],
+  ingestStats?: () => IngestStats
 ): express.Express {
   const app = express();
   app.use(express.json());
@@ -38,6 +72,7 @@ export function createApp(
       status: "ok",
       lastLedger: store.getState("lastLedger") ?? null,
       cursor: store.getState("cursor") ?? null,
+      ingest: ingestStats?.() ?? null,
       rpcEndpoints: rpcHealth?.() ?? [],
     });
   });
@@ -60,6 +95,15 @@ export function createApp(
       return res.status(404).json({ error: "correlation not found" });
     }
     return res.json({ ok: true, context });
+  });
+
+  // Full ingestion accounting for the parallel ingester (issue #117): the depth
+  // the budget allowed, how deep the reorder buffer actually got, and the
+  // late/duplicate/gap counters that tell an operator whether the ordering
+  // guards are being exercised in production.
+  app.get("/api/ingest/stats", (_req, res) => {
+    const stats = ingestStats?.();
+    return stats ? res.json(stats) : res.status(503).json({ error: "ingestion not running" });
   });
 
   // GET /streams?recipient=<address>
@@ -301,13 +345,6 @@ export async function run(): Promise<void> {
   const dispatcher = new WebhookDispatcher(store.webhooks);
   dispatcher.start();
 
-  const envInt = (name: string, def: number): number => {
-    const raw = process.env[name];
-    if (raw === undefined) return def;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 1) throw new Error(`${name} must be a positive integer`);
-    return value;
-  };
   const outboxMetrics = new OutboxMetrics({
     alarmWindow: envInt("OUTBOX_ALARM_WINDOW", 8),
     alarmMinDepth: envInt("OUTBOX_ALARM_MIN_DEPTH", 1000),
@@ -320,37 +357,54 @@ export async function run(): Promise<void> {
   });
   outboxDispatcher.start();
 
-  const app = createApp(store, dispatcher, outboxDispatcher, outboxMetrics, () => manager.getHealth());
-
   const eventNames = ["stream_created", "withdrawn", "stream_cancelled", "stream_topped_up", "stream_paused", "stream_resumed"];
   const topicFilters = eventNames.map((name) => [nativeToScVal(name, { type: "symbol" }).toXDR("base64")]);
 
-  interface EventsResult {
-    events: RpcEvent[];
-    cursor: string;
-    latestLedger: number;
-  }
+  // ── Parallel ledger-window ingestion (issue #117) ──────────────────────────
+  // Concurrency is not a constant here: the pipeline reads the same rate budget
+  // the RPC manager enforces (issue #56/#100) and never plans more in-flight
+  // requests than that budget can fund. INGEST_MAX_IN_FLIGHT only lowers the
+  // ceiling, it cannot raise the budget.
+  let lastTick: TickReport | undefined;
+  const pipeline = new IngestPipeline({
+    source: {
+      getLatestLedger: () => manager.getLatestLedger(),
+      getEvents: (params) => manager.getEvents(params) as Promise<EventsPage>,
+      getRateBudget: () => manager.getRateBudget(),
+    },
+    sink: store,
+    decode: decodeEvent,
+    filters: [{ type: "contract", contractIds: [contractId], topics: topicFilters }],
+    initialLedger: configuredStartLedger(),
+    pageLimit: envInt("INGEST_PAGE_LIMIT", 1000),
+    windowLedgers: envInt("INGEST_WINDOW_LEDGERS", 20),
+    maxWindowLedgers: envInt("INGEST_MAX_WINDOW_LEDGERS", 5_000),
+    maxWindowsPerTick: envInt("INGEST_MAX_WINDOWS_PER_TICK", 200),
+    maxInFlight: envInt("INGEST_MAX_IN_FLIGHT", 8),
+    confirmations: envNonNegativeInt("INGEST_CONFIRMATIONS", 0),
+    maxPagesPerWindow: envInt("INGEST_MAX_PAGES_PER_WINDOW", 8),
+    parallel: process.env.INGEST_PARALLEL !== "0",
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  });
+
+  const app = createApp(
+    store,
+    dispatcher,
+    outboxDispatcher,
+    outboxMetrics,
+    () => manager.getHealth(),
+    () => ({
+      lastTick: lastTick ?? null,
+      sequencer: pipeline.metrics(),
+      budget: manager.getRateBudget(),
+    })
+  );
 
   async function poll(): Promise<void> {
-    let cursor = store.getState("cursor");
-    let startLedger: number | undefined;
-    if (!cursor) {
-      const configured = process.env.START_LEDGER;
-      if (configured && !/^\d+$/.test(configured)) throw new Error("START_LEDGER must be an integer ledger sequence");
-      startLedger = configured ? Number(configured) : (await manager.getLatestLedger()).sequence;
-    }
-    for (;;) {
-      const params = {
-        ...(cursor ? { cursor } : { startLedger }),
-        filters: [{ type: "contract", contractIds: [contractId], topics: topicFilters }],
-        pagination: { limit: 1000 },
-        xdrFormat: "base64",
-      };
-      const page = await manager.getEvents(params) as EventsResult;
-      const nextCursor = page.cursor || cursor;
-      store.ingestPage(page.events.map(decodeEvent), nextCursor, page.latestLedger);
-      cursor = nextCursor;
-      if (page.events.length < 1000 || !cursor) break;
+    lastTick = await pipeline.runTick();
+    if (!lastTick.ok) throw new Error(`ingest tick failed: ${lastTick.error ?? "unknown error"}`);
+    if (!lastTick.caughtUp) {
+      console.warn(`[indexer] tick stopped at ledger ${lastTick.resumeAt ?? "?"} with a lagging endpoint or dense window; resuming next tick`);
     }
   }
 

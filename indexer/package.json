@@ -8,7 +8,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "npm run build && node dist/index.js",
     "build": "tsc --outDir dist",
-    "test": "npm run build && node --test dist/decoder.test.js dist/store.test.js dist/indexer.test.js dist/webhooks.test.js dist/outbox/outbox.test.js dist/telemetry.test.js",
+    "test": "npm run build && node --test dist/decoder.test.js dist/store.test.js dist/indexer.test.js dist/webhooks.test.js dist/outbox/outbox.test.js dist/telemetry.test.js dist/rpc-manager.test.js dist/ingest/pipeline.test.js",
+    "test:ingest": "npm run build && node --test dist/ingest/pipeline.test.js",
+    "bench:ingest": "npm run build && node ../perf/harness/indexer_parallel_bench.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

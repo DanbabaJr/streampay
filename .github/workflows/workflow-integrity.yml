@@ -1,0 +1,143 @@
+name: Workflow integrity
+
+# GitHub only reads a workflow after it parses, and a workflow that never parsed
+# can never report its own failure: Actions answers with a run *named*
+# ".github/workflows/<file>.yml", conclusion failure, zero jobs, no annotations.
+# Three PRs hit that in October 2026 (#241 inserted a second `uses:` into one
+# step, #182 broke a `run: |` block scalar in a schedule-only workflow so the
+# damage landed on main after merge), and a fourth (#416) deleted twelve named CI
+# steps, which cannot fail either because the steps were no longer there to run.
+# This job parses every workflow, verifies the step shapes, checks the required
+# gate inventory in .github/ci-gates.json against the merge base, and refuses
+# text files that git would treat as binary. It runs on every pull request, so
+# the failure is attached to the PR that caused it instead of to main at 03:00.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    name: Workflow integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The gate inventory is compared against the merge base, so the history
+          # has to be here to resolve it.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml==6.0.2
+
+      # A detector that cannot fire is worse than no detector: it is green
+      # forever. Each check runs against a fixture built to violate exactly it.
+      - name: "Self-test: the checker can still fail"
+        run: python3 scripts/check_ci_integrity.py --self-test
+
+      - name: Workflows parse and every step is well-formed
+        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps
+
+      - name: Resolve the comparison base
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_BASE_SHA:-}" ]; then
+            if base="$(git merge-base "${PR_BASE_SHA}" HEAD 2>/dev/null)"; then
+              echo "Comparing gates and text files against merge base ${base}."
+              echo "base=${base}" >> "${GITHUB_OUTPUT}"
+            else
+              echo "::warning::merge base with ${PR_BASE_SHA} is not in this clone; the required-gate floor still applies, the merge-base step diff does not."
+            fi
+          fi
+
+      - name: Every required CI gate is still wired
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=gates --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=gates
+          fi
+
+      - name: No text file is committed as UTF-16 or with a BOM
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          # On a pull request only what the PR touched; on main, the whole tree.
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=encoding --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=encoding
+          fi
+
+      - name: Explain a workflow-integrity failure
+        if: failure()
+        run: |
+          set -eu
+          cat <<'EOF'
+          ## What just failed
+
+          This job does not build or test the product. It checks that the CI
+          description itself is intact, which is the part that cannot report a
+          problem on its own.
+
+          - `[parse]` A workflow does not load as YAML. GitHub rejects the whole
+            file, so Actions shows a run named `.github/workflows/<file>.yml`
+            with **0 jobs** and no step output. The usual cause is a multi-line
+            script whose lines are not indented deeper than the `run: |` header:
+            the first flush-left line ends the block scalar and the rest of the
+            file is read as YAML. In a workflow that only triggers on
+            `schedule:` or `workflow_dispatch:` nothing here goes red on the PR
+            that broke it -- it goes red silently on main after the merge, so
+            this check runs on every pull request.
+          - `[dupkeys]` A mapping key is defined twice in one mapping, e.g. a
+            re-pinned `uses:` inserted above the existing one instead of
+            replacing it. Locally PyYAML keeps the last value and says nothing;
+            GitHub's parser refuses the file. Replace the line, do not add one.
+          - `[steps]` A step carries both `run:` and `uses:`, or neither, or a
+            `with:` with nothing to pass it to. Also a `needs:` pointing at a job
+            that does not exist, and an action referenced by `@main` / `@master`.
+          - `[gates]` A named CI step that existed at the merge base, or that
+            `.github/ci-gates.json` lists as required, is no longer in the
+            workflow. A deleted gate cannot fail -- it simply stops running, and
+            the pull request stays green. Restore the step. If the gate really is
+            being retired, move its name into `retired` in
+            `.github/ci-gates.json` with a reason, in this same PR, so the
+            deletion is visible in the diff instead of quiet.
+          - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
+            file is stored as UTF-16, carries a UTF-8 BOM, or contains a NUL
+            byte. git then calls it binary: `git diff` prints "Binary files
+            differ", the change is unreviewable, and a workflow can be gutted
+            without a reviewer seeing a single line. Re-save as UTF-8 without a
+            BOM (`* text=auto eol=lf` in `.gitattributes` handles the rest).
+
+          Reproduce locally, no push needed:
+
+              pip install pyyaml==6.0.2
+              python3 scripts/check_ci_integrity.py
+              python3 scripts/check_ci_integrity.py --self-test
+
+          The checker's own fixtures are in the script; if it ever reports 0
+          problems while CI is broken, run the self-test first -- it fails when
+          a detector has been weakened.
+          EOF
