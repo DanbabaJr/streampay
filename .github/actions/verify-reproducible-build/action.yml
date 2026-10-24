@@ -1,0 +1,42 @@
+name: "Verify Reproducible Wasm Build"
+description: "Rebuilds StreamPay Soroban contract Wasm from a Git tag and verifies byte-for-byte SHA-256 digest equality against the release digest"
+author: "StreamPay Maintainers"
+
+inputs:
+  tag:
+    description: "The release tag to rebuild and verify (e.g., v0.3.0)"
+    required: true
+  expected_digest:
+    description: "Expected SHA-256 digest of the published Wasm"
+    required: true
+  use_docker:
+    description: "Build strategy: 'auto' (default: uses Docker if available), 'true' (force hermetic Docker), or 'false' (force native)"
+    required: false
+    default: "auto"
+
+outputs:
+  computed_digest:
+    description: "The computed SHA-256 digest of the rebuilt Wasm"
+    value: ${{ steps.verify.outputs.computed_digest }}
+  match:
+    description: "Whether the computed digest matches expected_digest ('true' or 'false')"
+    value: ${{ steps.verify.outputs.match }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository at tag
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.tag }}
+
+    - name: Run verification
+      id: verify
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        USE_DOCKER: ${{ inputs.use_docker }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        bash "${ACTION_PATH}/verify.sh"

@@ -1,0 +1,25 @@
+{
+  "name": "streampay-reconciler",
+  "version": "1.0.0",
+  "description": "Dual-read reconciliation service comparing Horizon (classic-bridge effects) vs Soroban RPC contract state",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "dev": "node --import=tsx src/index.ts",
+    "test": "node --test tests/**/*.test.js",
+    "soak": "node tests/soak-test.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

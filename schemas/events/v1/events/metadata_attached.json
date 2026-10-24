@@ -1,0 +1,66 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/metadata_attached.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a party attaches a hash-linked metadata attestation to a stream. Append-only: this event is the durable record that `attester` claimed `content_hash` (tagged `tag`) at `timestamp`.",
+  "properties": {
+    "attester": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "content_hash": {
+      "contentEncoding": "base64",
+      "description": "32-byte hash, base64-encoded on the registry surface.",
+      "type": "string",
+      "x-soroban-type": "BytesN<32>"
+    },
+    "index": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "tag": {
+      "description": "Soroban string (UTF-8 bytes; contract-bounded length).",
+      "type": "string",
+      "x-soroban-type": "String"
+    },
+    "timestamp": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "index",
+    "attester",
+    "content_hash",
+    "tag",
+    "timestamp"
+  ],
+  "title": "MetadataAttached",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "metadata_attached",
+    "fingerprint": "sha256:39833b8e7e3ff670a30c1836777e4eb09fdfea215e46c42dd99e139793bce9d2",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

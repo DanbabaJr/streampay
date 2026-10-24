@@ -36,7 +36,18 @@ struct Fixture {
 
 impl Fixture {
     fn setup() -> Self {
-        let env = Env::default();
+        Self::setup_with_snapshot(true)
+    }
+
+    fn setup_quiet() -> Self {
+        Self::setup_with_snapshot(false)
+    }
+
+    fn setup_with_snapshot(capture_snapshots: bool) -> Self {
+        let mut env = Env::default();
+        env.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: capture_snapshots,
+        });
         env.mock_all_auths();
         let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = sac.address();
@@ -102,6 +113,66 @@ impl Fixture {
             &(now + 365 * DAY),
         )
     }
+}
+
+#[test]
+fn execute_scheduled_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let id = f.schedule_one_shot(DEPOSIT, DAY, DAY, FEE);
+
+    crate::cei_trace::begin();
+    f.client.mock_all_auths().execute_scheduled(&id, &f.keeper);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/execute_scheduled.txt").trim_end()
+    );
+}
+
+#[test]
+fn cancel_scheduled_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let now = f.now();
+    let id = f.client.mock_all_auths().schedule_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &DEPOSIT,
+        &(now + 2 * DAY),
+        &(now + 3 * DAY),
+        &false,
+        &0,
+        &1,
+        &FEE,
+        &(now + DAY),
+        &(now + 30 * DAY),
+    );
+
+    crate::cei_trace::begin();
+    f.client.mock_all_auths().cancel_scheduled(&f.sender, &id);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/cancel_scheduled.txt").trim_end()
+    );
+}
+
+#[test]
+fn reclaim_expired_operation_order_matches_golden() {
+    let f = Fixture::setup_quiet();
+    let id = f.schedule_one_shot(DEPOSIT, DAY, DAY, FEE);
+    f.advance(365 * DAY + 1);
+
+    crate::cei_trace::begin();
+    f.client.reclaim_expired(&id);
+    let actual = crate::cei_trace::finish();
+
+    assert_eq!(
+        actual,
+        include_str!("../test_orderings/reclaim_expired.txt").trim_end()
+    );
 }
 
 // ------------------------------------------------------------ scheduling ----

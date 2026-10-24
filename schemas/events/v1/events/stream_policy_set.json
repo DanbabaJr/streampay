@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "StreamPolicy": {
+      "additionalProperties": false,
+      "description": "Contract struct `StreamPolicy` referenced by event fields.",
+      "properties": {
+        "max_duration": {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        "max_rate": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        },
+        "min_deposit": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        },
+        "min_duration": {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        "min_rate": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        }
+      },
+      "required": [
+        "min_rate",
+        "max_rate",
+        "min_duration",
+        "max_duration",
+        "min_deposit"
+      ],
+      "title": "StreamPolicy",
+      "type": "object"
+    }
+  },
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_policy_set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a stream policy floor/ceiling configuration is updated.",
+  "properties": {
+    "new_policy": {
+      "$ref": "#/$defs/StreamPolicy",
+      "x-soroban-type": "StreamPolicy"
+    },
+    "old_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StreamPolicy",
+          "x-soroban-type": "StreamPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "x-soroban-type": "Option<StreamPolicy>"
+    },
+    "token": {
+      "anyOf": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "x-soroban-type": "Option<Address>"
+    }
+  },
+  "required": [
+    "token",
+    "old_policy",
+    "new_policy"
+  ],
+  "title": "StreamPolicySet",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_policy_set",
+    "fingerprint": "sha256:b351d5e8904e7e12bdd4a02f67b7d93fd47f2c8609661a1414965244a22fcb20",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [],
+      "type": "array"
+    },
+    "topics": []
+  }
+}

@@ -1,0 +1,7 @@
+read instance ContractFrozen
+read persistent Stream(1)
+transfer_from token
+write persistent Stream(1)
+write persistent RateSegments(1)
+remove persistent PendingRateChange(1)
+event RateChangeAccepted

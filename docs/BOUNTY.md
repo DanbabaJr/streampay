@@ -28,10 +28,18 @@ required to operate the program**.
 | **Public security issue** | Non-exploitable hardening, already-fixed/already-disclosed issues, informational | [`.github/ISSUE_TEMPLATE/security-report.yml`](../.github/ISSUE_TEMPLATE/security-report.yml) |
 | **`security@` + PGP** | Not yet live; published before mainnet (v1.0) | — |
 
-A public security issue is automatically classified, labeled, assigned, and
-acknowledged by the triage bot; its logic is in
-[`.github/workflows/security-triage.yml`](../.github/workflows/security-triage.yml)
-and is written to be reviewed alongside this document.
+A public security issue **submitted through the form above** is automatically
+classified, labeled, assigned, and acknowledged by the triage bot; its logic is
+in [`.github/workflows/security-triage.yml`](../.github/workflows/security-triage.yml)
+and is written to be reviewed alongside this document. An issue that merely
+titles itself "[Security] …" without the form gets `security` + `needs-triage`
+and nothing else — no acknowledgement, no self-assessed severity promoted to a
+label, no assignee. Bulk, formless reports are closed as out-of-program.
+
+No label in this repository is a promise of payment. `bounty` is applied by a
+maintainer only after the reproduction has been run and the finding confirmed
+(§4, §8). Do not paste wallet addresses into issues or PRs (§8); they are not a
+payment instruction and, in practice, are the signature of program farming.
 
 A **reproduction is mandatory**. GitHub marks the `Reproduction` field required
 in the issue form, and the triage bot adds `repro-missing` if an edited report
@@ -266,4 +274,7 @@ loop that keeps the tier table honest.
 
 - Awards are paid after the fix is merged and verified, normally within 30 days.
 - Identity/KYC and tax handling are agreed privately per award.
+- A wallet address pasted into a public issue or PR body is never a payment
+  instruction and is never used. Payment details are exchanged only in the
+  private thread opened once an award is approved.
 - Reporters are credited in release notes unless they ask to stay anonymous.

@@ -1,5 +1,18 @@
 name: Security triage
 
+# Public security intake. Two rules keep this channel from being farmed:
+#
+#   1. Only reports that came through the security-report FORM are processed.
+#      A free-text issue whose title merely starts with "[Security]" gets
+#      `security` + `needs-triage` and stops there — no acknowledgement, no
+#      severity taxonomy, no assignee.
+#   2. Nothing in here promises money. The `bounty` label is applied by a
+#      maintainer after the reproduction has actually been run (docs/BOUNTY.md
+#      §4, §8), never by a bot on day one.
+#
+# Exploitable findings are not meant for this channel at all — they go to
+# private vulnerability reporting (docs/BOUNTY.md §1).
+
 on:
   issues:
     types: [opened, edited, reopened]
@@ -37,6 +50,35 @@ jobs:
             const isPostmortem = issue.title.startsWith("[Postmortem]");
             if (!isSecurity && !isPostmortem) {
               core.info(`Issue #${issue.number} is not a security report; skipping.`);
+              return;
+            }
+
+            // --- form-origin gate (anti-farming) ------------------------------
+            // The intake form renders every answer as a "### <label>" block, so
+            // those markers are the cheapest reliable proof of provenance. In
+            // October 2026 this tracker received ~50 machine-generated
+            // "[Security]" issues in a single morning — free text, no form, each
+            // fishing for an automatic acknowledgement and a bounty promise. They
+            // still get labelled for a human to read, but the bot stops there:
+            // no ack comment, no severity/scope taxonomy, no assignment.
+            const FORM_MARKERS = [
+              "### Severity (self-assessed)",
+              "### Affected component",
+              "### Reproduction",
+              "### Summary",
+            ];
+            const fromForm = FORM_MARKERS.some((m) => (issue.body || "").includes(m));
+            if (!isPostmortem && !fromForm) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: ["security", "needs-triage"],
+              });
+              core.info(
+                `Issue #${issue.number} did not come from the security intake form; ` +
+                  `labelled for human triage, no automated acknowledgement.`
+              );
               return;
             }
 
@@ -119,7 +161,10 @@ jobs:
               `severity:${severity.toLowerCase()}`,
               `scope:${scope}`,
             ];
-            if (severity === "Critical" || severity === "High") labels.push("bounty");
+            // `bounty` is deliberately NOT applied here. A bot tagging an
+            // unverified report "eligible for a bug-bounty award" is an open
+            // invitation to volume farming; eligibility is a human call made
+            // after the reproduction is actually run (docs/BOUNTY.md §3, §5).
             if (!reproduction) labels.push("repro-missing");
 
             // --- duplicate detection (deterministic + reviewable) ------------
@@ -243,7 +288,7 @@ jobs:
               "|---|---|",
               `| Severity | \`${severity}\` |`,
               `| Scope | \`${scope}\` |`,
-              `| Bounty eligible | ${labels.includes("bounty") ? "yes (pending triage)" : "under review"} |`,
+              `| Bounty | assessed by a maintainer after the repro is verified — this comment is not an award |`,
               `| Reproduction | ${reproduction ? "present" : "**missing** (`repro-missing` applied)"} |`,
               `| Acknowledgement SLA | **${ackBy.toISOString()}** (72h from filing) |`,
               "",

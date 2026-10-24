@@ -9,9 +9,19 @@ publish = false
 [package.metadata]
 cargo-fuzz = true
 
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Builds `campaign_wasm`, which embeds the release wasm named by STREAMPAY_WASM.
+wasm = []
+
 [dependencies]
 libfuzzer-sys = "0.4"
-streampay-contract = { path = "../contracts/streaming-payments" }
+streampay-contract = { path = "../contracts/streaming-payments", features = ["testutils"] }
+streampay-model = { path = "../model", features = ["arbitrary"] }
+soroban-sdk = { version = "29", features = ["testutils"] }
+arbitrary = { version = "~1.3.0", features = ["derive"] }
 
 [[bin]]
 name = "streamed_at"
@@ -19,3 +29,47 @@ path = "fuzz_targets/streamed_at.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "dispute_bond"
+path = "fuzz_targets/dispute_bond.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "conservation"
+path = "fuzz_targets/conservation.rs"
+test = false
+doc = false
+bench = false
+
+
+[[bin]]
+name = "rate_schedule"
+path = "fuzz_targets/rate_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "campaign"
+path = "fuzz_targets/campaign.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "campaign_wasm"
+path = "fuzz_targets/campaign_wasm.rs"
+test = false
+doc = false
+bench = false
+required-features = ["wasm"]

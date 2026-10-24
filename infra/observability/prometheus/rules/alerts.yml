@@ -126,3 +126,57 @@ groups:
           description: "The reconciler daemon has not completed an audit cycle in {{ $value | printf \"%.0f\" }} seconds (expected interval: 60s)."
           runbook_url: "docs/RUNBOOK.md#reconcilerjobstalled"
           soak_justification: "Reconciliation runs every 60s under normal operation. A 5-minute silence indicates daemon death, unhandled Promise rejection, or deadlock."
+
+  - name: streampay_outbox_alerts
+    rules:
+      - alert: IndexerOutboxDepthDiverging
+        expr: streampay_outbox_divergence_alarm == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: indexer
+          component: outbox
+        annotations:
+          summary: "StreamPay outbox depth is growing unbounded (divergence alarm)"
+          description: "Outbox pending+in-flight depth has grown strictly monotonically across every alarm sample; the dispatcher drain rate has durably fallen below ingestion. Inspect GET /api/outbox/stats for the state breakdown."
+          runbook_url: "docs/RUNBOOK.md#indexeroutboxdepthdiverging"
+          soak_justification: "Load validation (issue #212) drained a 10,000-intent backlog in ~3.5s (~2,900 intents/sec). Steady monotonic growth means sustained ingestion beyond even that headroom and risks unbounded replay lag."
+
+      - alert: IndexerOutboxDeliveryLagHigh
+        expr: streampay_outbox_lag_seconds > 60
+        for: 3m
+        labels:
+          severity: warning
+          service: indexer
+          component: outbox
+        annotations:
+          summary: "Oldest undelivered outbox intent is older than 60s"
+          description: "The oldest pending outbox intent has waited {{ $value | printf \"%.0f\" }}s. Downstream consumers are receiving stale or delayed event streams."
+          runbook_url: "docs/RUNBOOK.md#indexeroutboxdeliverylaghigh"
+          soak_justification: "At ~2,900 intents/sec drain capacity, a healthy queue keeps the oldest pending intent under a few seconds; 60s for 3m means a consumer endpoint is timing out or throttling."
+
+      - alert: IndexerOutboxDeadLetterRateHigh
+        expr: increase(streampay_outbox_dispatch_total{outcome="dead"}[10m]) > 50
+        for: 0m
+        labels:
+          severity: warning
+          service: indexer
+          component: outbox
+        annotations:
+          summary: "Outbox dead-letter rate is elevated (> 50 intents/10m)"
+          description: "{{ $value | printf \"%.0f\" }} intents dead-lettered in the last 10 minutes. Check consumer endpoint health and the dead-letter queue via GET /api/outbox/intents?state=dead."
+          runbook_url: "docs/RUNBOOK.md#indexeroutboxdeadletterratehigh"
+          soak_justification: "Soak/load runs produced zero dead letters for healthy endpoints; a nonzero rate means a consumer is persistently failing its retry budget."
+
+      - alert: IndexerOutboxBackpressured
+        expr: increase(streampay_outbox_dispatch_total{outcome="rejected_backpressure"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: indexer
+          component: outbox
+        annotations:
+          summary: "Outbox dispatcher is refusing claims under OUTBOX_MAX_DEPTH backpressure"
+          description: "Total outbox depth crossed the configured OUTBOX_MAX_DEPTH threshold; dispatch is paused to protect the downstream. Intents remain durable in pending state."
+          runbook_url: "docs/RUNBOOK.md#indexeroutboxbackpressured"
+          soak_justification: "Backpressure only engages when a downstream consumer is degraded faster than the ~2,900 intents/sec drain capacity; any activation is actionable."

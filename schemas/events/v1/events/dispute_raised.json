@@ -1,0 +1,51 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/dispute_raised.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the recipient raises a dispute, freezing the stream's cancel/top-up mutations until resolution or expiry. The bond (stream token, held by the contract) accompanies the flag.",
+  "properties": {
+    "bond": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "expires_at": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "recipient",
+    "bond",
+    "expires_at"
+  ],
+  "title": "DisputeRaised",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "dispute_raised",
+    "fingerprint": "sha256:399f281f403122278e57a262ca22eb3ec626ba378130459f10789bd9179721c9",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

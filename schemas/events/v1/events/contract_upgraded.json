@@ -1,0 +1,41 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/contract_upgraded.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a contract upgrade is executed after its timelock has elapsed.",
+  "properties": {
+    "executed_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "executed_by"
+  ],
+  "title": "ContractUpgraded",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "contract_upgraded",
+    "fingerprint": "sha256:0228c88243ed185f32359dd32f813d0c1df5ef393fbe5416fc120720020dc2fe",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "contentEncoding": "base64",
+          "description": "32-byte hash, base64-encoded on the registry surface.",
+          "type": "string",
+          "x-soroban-type": "BytesN<32>"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "new_wasm_hash",
+        "type": "BytesN<32>"
+      }
+    ]
+  }
+}

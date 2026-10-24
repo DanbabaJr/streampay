@@ -12,9 +12,27 @@ categories = ["cryptography::cryptocurrencies"]
 # Rust consumers) can link the pure rate math natively.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+testutils = ["soroban-sdk/testutils"]
+
 [dependencies]
 soroban-sdk.workspace = true
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+# Out-of-band ed25519 signer for the sponsored-claim tests: the contract
+# verifies real signatures, so tests must produce real ones.
+ed25519-dalek = "2.2.0"
 proptest = "1.6"
+serde_json = "1"
+streampay-model = { version = "0.1.0", path = "../../model" }
+# Event-schema registry (`src/event_registry.rs` + `schemas/events/`):
+# syn parses the `#[contractevent]` structs out of the crate sources so the
+# generated schemas can never drift from the code, and walks every `publish()`
+# call site so no event can be emitted that the registry does not declare.
+# sha2 fingerprints each event shape for the CI compatibility gate. Dev-only:
+# nothing here reaches the Wasm build.
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
+quote = "1"
+sha2 = "0.10"
+

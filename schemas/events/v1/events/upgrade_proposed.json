@@ -1,0 +1,47 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/upgrade_proposed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a contract upgrade is proposed with a timelock delay.",
+  "properties": {
+    "proposer": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "unlock_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "unlock_time",
+    "proposer"
+  ],
+  "title": "UpgradeProposed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "upgrade_proposed",
+    "fingerprint": "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "contentEncoding": "base64",
+          "description": "32-byte hash, base64-encoded on the registry surface.",
+          "type": "string",
+          "x-soroban-type": "BytesN<32>"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "new_wasm_hash",
+        "type": "BytesN<32>"
+      }
+    ]
+  }
+}

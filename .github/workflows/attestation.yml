@@ -1,0 +1,247 @@
+name: Attestation
+
+# Two things, on purpose kept in one workflow because they guard one chain:
+#
+#   1. tamper-audit — proves the verifier actually rejects tampering. Runs on
+#      every change to the chain, because a verifier that has never been shown a
+#      flipped byte is an untested control.
+#   2. verify-release — nightly, re-verifies the attestation on the latest
+#      published release asset, so a release that was valid when published is
+#      still provable today (and a quietly rewritten asset stops being).
+#
+# Neither job needs a Rust toolchain, Docker or stellar-cli: verification only
+# requires bash, openssl and coreutils, which is the whole point of the scheme
+# (docs/adr/0003-attestation-signing-scheme.md).
+#
+# The chain is bootstrapped by a key ceremony, not by this workflow: the trust
+# anchor has to be committed (attestations/README.md -> scripts/attestation_keygen.sh).
+# Until that key exists there is nothing to verify against, so verify-release
+# warns and records the state on the run summary instead of failing. The push
+# that lands the key turns this into a hard gate — a bootstrapped repo whose
+# release cannot be verified fails, deliberately.
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # nightly at 03:30 UTC
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (default: the latest release)"
+        required: false
+        type: string
+      rebuild:
+        description: "Also re-run the reproducible double build for that tag"
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "scripts/attest.sh"
+      - "scripts/verify_wasm.sh"
+      - "scripts/attestation_lib.sh"
+      - "scripts/attestation_keygen.sh"
+      - "scripts/reproducible_build.sh"
+      - "tests/attestation_tamper_audit.sh"
+      - "attestations/**"
+      - ".github/workflows/attestation.yml"
+  pull_request:
+    paths:
+      - "scripts/attest.sh"
+      - "scripts/verify_wasm.sh"
+      - "scripts/attestation_lib.sh"
+      - "scripts/attestation_keygen.sh"
+      - "scripts/reproducible_build.sh"
+      - "tests/attestation_tamper_audit.sh"
+      - "attestations/**"
+      - ".github/workflows/attestation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tamper-audit:
+    name: Tamper audit — the verifier must reject a modified artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Enough history to tell whether this ref changed the trust anchor.
+          fetch-depth: 2
+
+      - name: Run the tamper audit
+        run: bash tests/attestation_tamper_audit.sh
+
+      # A public key is only a trust anchor if it changed when someone said it
+      # would. Any diff here is surfaced in the run summary for review.
+      - name: Report the pinned signing key fingerprint
+        if: hashFiles('attestations/signing-key.pub') != ''
+        run: |
+          fp=$(openssl pkey -pubin -in attestations/signing-key.pub -outform DER | sha256sum | awk '{print $1}')
+          echo "pinned signing key fingerprint: sha256:$fp"
+          {
+            echo "### Attestation signing key"
+            echo ""
+            echo "Fingerprint on this ref: \`sha256:$fp\`"
+            echo ""
+            echo "Compare against the fingerprint published in the release notes."
+            echo "A change that nobody announced is a key substitution."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! git rev-parse --verify -q HEAD~1 >/dev/null; then
+            echo "no parent commit available — cannot compare the key against history"
+          elif git diff --quiet HEAD~1 -- attestations/signing-key.pub; then
+            echo "signing key unchanged from the parent commit"
+          else
+            echo "::warning::attestations/signing-key.pub differs from the parent commit — confirm this rotation was announced"
+          fi
+
+  verify-release:
+    name: Nightly — verify the latest published release attestation
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the release to verify
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::warning::no published release to verify yet"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "enforce=false" >> "$GITHUB_OUTPUT"
+            echo "state=no-release" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "latest release: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # Is the chain bootstrapped on this ref? The trust anchor is committed,
+          # never downloaded (see attestations/README.md: "No key is committed by
+          # this README's authors on your behalf"), so a missing key means the
+          # ceremony has not happened yet — it does not mean a release is forged.
+          # Verification becomes a hard requirement on the push that lands a key.
+          if [ -f attestations/signing-key.pub ] \
+             || find attestations/keys -name '*.pub' -type f 2>/dev/null | grep -q .; then
+            echo "enforce=true" >> "$GITHUB_OUTPUT"
+            echo "state=bootstrapped" >> "$GITHUB_OUTPUT"
+            echo "attestation chain is bootstrapped — verifying release $tag"
+          else
+            echo "enforce=false" >> "$GITHUB_OUTPUT"
+            echo "state=unbootstrapped" >> "$GITHUB_OUTPUT"
+            echo "::warning::attestation chain is NOT bootstrapped on this ref (no attestations/signing-key.pub) — release $tag cannot be signature-verified yet. Run scripts/attestation_keygen.sh, set the ATTESTATION_SIGNING_KEY secret, and commit the public half; this job starts failing on any unverifiable release the moment that key lands."
+          fi
+
+      - name: Download the published Wasm and attestation
+        if: steps.rel.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/rel
+          tag="${{ steps.rel.outputs.tag }}"
+          # The artifact and its digest list must exist on any release, bootstrapped
+          # chain or not — `gh release download` fails the whole call if one pattern
+          # matches nothing, so the attestation pair is fetched separately.
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'streampay_contract.wasm' \
+            --pattern 'SHA256SUMS' \
+            --dir /tmp/rel \
+            || { echo "::error::release $tag carries no Wasm / SHA256SUMS asset"; exit 1; }
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'attestation.json' \
+            --pattern 'attestation.json.sig' \
+            --dir /tmp/rel \
+            || echo "release $tag carries no attestation asset"
+          if [ ! -f /tmp/rel/attestation.json ] && [ "${{ steps.rel.outputs.enforce }}" = "true" ]; then
+            echo "::error::the chain is bootstrapped (a pinned key is committed) but release $tag has no attestation asset"
+            exit 1
+          fi
+          ls -l /tmp/rel
+
+      # The release asset and the in-repo mirror are the same signed bytes. If
+      # they ever diverge, one of the two channels has been rewritten.
+      - name: Cross-check the release asset against the in-repo mirror
+        if: steps.rel.outputs.tag != '' && steps.rel.outputs.enforce == 'true'
+        run: |
+          tag="${{ steps.rel.outputs.tag }}"
+          mirror="attestations/$tag/attestation.json"
+          if [ ! -f "$mirror" ]; then
+            echo "::warning::no in-repo mirror at $mirror — skipping the cross-check"
+            exit 0
+          fi
+          if cmp -s "$mirror" "/tmp/rel/attestation.json"; then
+            echo "release asset and in-repo mirror are byte-identical"
+          else
+            echo "::error::the release attestation differs from the committed mirror at $mirror"
+            cmp "$mirror" /tmp/rel/attestation.json || true
+            exit 1
+          fi
+
+      # Runs only once the chain is bootstrapped; verify_wasm.sh deliberately refuses
+      # to verify anything without a committed trust anchor rather than falling back
+      # to a key that arrived with the artifact.
+      - name: Verify the signature and the digest
+        if: steps.rel.outputs.tag != '' && steps.rel.outputs.enforce == 'true'
+        run: |
+          scripts/verify_wasm.sh /tmp/rel/streampay_contract.wasm \
+            --tag "${{ steps.rel.outputs.tag }}" \
+            --attestation /tmp/rel/attestation.json \
+            --require-repro
+
+      # Also confirm the SHA256SUMS asset still describes the published Wasm, so
+      # the pre-attestation digest channel and the attestation cannot drift apart.
+      - name: Verify the published SHA256SUMS
+        if: steps.rel.outputs.tag != ''
+        run: |
+          # SHA256SUMS records the build-tree path, not the flat asset name, so
+          # compare digests through the existing gate rather than `sha256sum -c`.
+          scripts/verify_release_digest.sh --expected-file /tmp/rel/SHA256SUMS \
+            /tmp/rel/streampay_contract.wasm
+
+      - name: Re-run the reproducible double build
+        if: steps.rel.outputs.tag != '' && inputs.rebuild
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
+          scripts/reproducible_build.sh --ref "${{ steps.rel.outputs.tag }}" --out evidence/repro
+
+      - name: Upload the reproducibility evidence
+        if: steps.rel.outputs.tag != '' && inputs.rebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: repro-${{ steps.rel.outputs.tag }}
+          path: evidence/repro/
+          if-no-files-found: error
+
+      # An unbootstrapped chain must never read as silently healthy: state it on
+      # every run summary until the key ceremony lands.
+      - name: Record the attestation state
+        if: always()
+        run: |
+          state="${{ steps.rel.outputs.state }}"
+          tag="${{ steps.rel.outputs.tag }}"
+          {
+            echo "### Release attestation state"
+            echo ""
+            case "$state" in
+              bootstrapped)
+                echo "Chain bootstrapped — release $tag was signature-verified against the pinned key."
+                ;;
+              unbootstrapped)
+                echo "**Chain NOT bootstrapped.** No attestations/signing-key.pub on this ref, so release $tag has nothing to verify against."
+                echo ""
+                echo "Bootstrap once: scripts/attestation_keygen.sh, then gh secret set ATTESTATION_SIGNING_KEY from the private half, then commit the public half. From that push on this job fails on any release that cannot be verified."
+                ;;
+              no-release)
+                echo "No published release yet — nothing to verify."
+                ;;
+              *)
+                echo "Release resolution did not run; attestation state unknown for this event."
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "attestation state: ${state:-unknown} (release: ${tag:-none})"

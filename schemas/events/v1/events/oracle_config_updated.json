@@ -1,0 +1,36 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/oracle_config_updated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the oracle configuration is updated by governance.",
+  "properties": {
+    "max_stale_seconds": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "threshold": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "threshold",
+    "max_stale_seconds"
+  ],
+  "title": "OracleConfigUpdated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "oracle_config_updated",
+    "fingerprint": "sha256:91f894797f41c1566560dd5c04581611fb8d29bd0ac48bfc022d0ab4de0e6099",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [],
+      "type": "array"
+    },
+    "topics": []
+  }
+}

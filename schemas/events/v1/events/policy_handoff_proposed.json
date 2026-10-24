@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/policy_handoff_proposed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the admin proposes a new admin in step 1 of the two-step handoff.",
+  "properties": {
+    "proposed_admin": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "proposed_admin"
+  ],
+  "title": "PolicyHandoffProposed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "policy_handoff_proposed",
+    "fingerprint": "sha256:79bdf5f57bbb23c39096223624e7f61a65da6e8073bbc5ebb4b4294ecee9e75c",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "current_admin",
+        "type": "Address"
+      }
+    ]
+  }
+}

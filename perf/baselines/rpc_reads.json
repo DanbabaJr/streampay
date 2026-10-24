@@ -1,0 +1,35 @@
+{
+  "commit": "8f219b2",
+  "updated_at": "2026-05-01T00:00:00Z",
+  "source_doc": "docs/FRONTEND_DATA_ARCHITECTURE.md",
+  "flows": {
+    "cold_dashboard_navigation": {
+      "budget": 0,
+      "baseline": 0,
+      "unit": "simulateTransaction calls",
+      "tolerance_percent": 0,
+      "description": "Cold dashboard navigation before wallet connection (strictly 0 reads)"
+    },
+    "cold_stream_detail": {
+      "budget": 2,
+      "baseline": 2,
+      "unit": "simulateTransaction calls",
+      "tolerance_percent": 0,
+      "description": "Cold /stream/[id] detail load (server get_stream + client available)"
+    },
+    "detail_refresh_15s": {
+      "budget": 2,
+      "baseline": 2,
+      "unit": "simulateTransaction calls",
+      "tolerance_percent": 0,
+      "description": "Detail route periodic refresh every 15 seconds"
+    },
+    "discover_address_streams_50": {
+      "budget": 52,
+      "baseline": 48,
+      "unit": "simulateTransaction calls",
+      "tolerance_percent": 10,
+      "description": "Discover 50 streams across recipient and sender roles with batch deduplication"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+name: Whitepaper claims
+
+# docs/WHITEPAPER.md maps every claim to file:line plus an anchor snippet.
+# This fails when the contract moves under the paper, so a stale claim cannot
+# merge silently. It runs on contract changes too, not just doc changes:
+# a moved line is exactly how a claim goes stale.
+
+on:
+  pull_request:
+    paths:
+      - "docs/WHITEPAPER.md"
+      - "contracts/**"
+      - "scripts/check_whitepaper_claims.py"
+      - ".github/workflows/whitepaper-claims.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/WHITEPAPER.md"
+      - "contracts/**"
+      - "scripts/check_whitepaper_claims.py"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: claim-to-code traceability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check_whitepaper_claims.py

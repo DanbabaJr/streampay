@@ -1,0 +1,6 @@
+read persistent Intent(1)
+write persistent Intent(1)
+write persistent Stream(1)
+event StreamCreated
+transfer keeper fee
+event ScheduledStreamExecuted

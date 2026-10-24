@@ -33,6 +33,8 @@ Everything is on-chain and trust-minimized: no admin key, no upgrade path, funds
 
 A stream is a half-open window `[start_time, end_time)`. At any ledger timestamp the contract computes `deposit × elapsed / duration` with checked math (products widened to `u128`, results floored to whole token units and capped at the deposit). **Every edge case you can think of — withdrawing before start, after end, cancelling a never-started stream, topping up after end — is covered by a unit test** (see `contracts/streaming-payments/src/test.rs`).
 
+How it works in depth, including the design invariants and the Soroban-specific traps contributors keep rediscovering (`extend_ttl` on missing keys, `#[contractimpl]` signature rules, the sdk-28 build path): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+
 ## Architecture overview
 
 ```text
@@ -57,6 +59,8 @@ A stream is a half-open window `[start_time, end_time)`. At any ledger timestamp
 
 Deep dive (storage model, checked math, reentrancy, TTL strategy, design decisions): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
+Historical architecture decision records (ADRs) and trade-off rationales: [`docs/adr/`](./docs/adr/README.md).
+
 Incident response drills and procedures: [`docs/INCIDENT_RUNBOOK.md`](./docs/INCIDENT_RUNBOOK.md).
 
 Metrics, alerting stack, and operational diagnosis: [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) and [`infra/observability`](./infra/observability/README.md).
@@ -71,8 +75,22 @@ Metrics, alerting stack, and operational diagnosis: [`docs/RUNBOOK.md`](./docs/R
 | `withdraw_max(stream_id) → i128` | recipient | pays out all accrued, atomically | `Withdrawn` |
 | `cancel_stream(caller, stream_id)` | sender; recipient iff `cancelable` | pro-rata split, atomic | `StreamCancelled` |
 | `top_up(stream_id, amount)` | sender | pulls added funds | `StreamToppedUp` |
+| `raise_dispute(stream_id)` | recipient | pulls escalating anti-griefing bond in | `DisputeRaised` |
+| `resolve_dispute(caller, stream_id, accept)` | sender | accept: bond back + pro-rata unwind; reject: bond slashed to sender | `DisputeResolved` (+ `StreamCancelled` on accept) |
+| `expire_dispute(stream_id)` | anyone after 7 d | bond split 50/50 (sender rounds up), stream resumes | `DisputeExpired` |
+| `propose_ownership_transfer(caller, stream_id, new_owner)` | sender or recipient | — (records a pending target) | `OwnershipProposed` |
+| `accept_ownership_transfer(caller, stream_id)` | named `new_owner` only | — (moves the role) | `OwnershipAccepted` |
+| `cancel_ownership_transfer(caller, stream_id)` | proposer only | — (clears the pending target) | — |
+| `propose_rate_change(caller, stream_id, amount_per_second)` | sender or recipient | — (records a pending offer) | `RateChangeProposed` |
+| `accept_rate_change(caller, stream_id)` | named counterparty only (an increase also consumes sender auth) | pulls the shortfall or refunds the freed escrow, atomically | `RateChangeAccepted` |
+| `cancel_rate_change(caller, stream_id)` | proposer only | — (clears the pending offer) | — |
 | `get_stream(stream_id) → Stream` | — (read-only) | — | — |
+| `get_dispute(stream_id) → Dispute` | — (read-only) | — | — |
+| `required_dispute_bond(stream_id) → i128` | — (read-only) | — | — |
 | `available(stream_id) → i128` | — (read-only) | — | — |
+| `pending_ownership_transfer(stream_id) → Option<PendingOwnership>` | — (read-only) | — | — |
+| `pending_rate_change(stream_id) → Option<PendingRateChange>` | — (read-only) | — | — |
+| `rate_segments(stream_id) → Vec<RateSegment>` | — (read-only) | — | — |
 | `recipient_streams(address, offset, limit) → Vec<u64>` | — (read-only) | — | — |
 | `sender_streams(address, offset, limit) → Vec<u64>` | — (read-only) | — | — |
 | `attach_metadata(attester, stream_id, content_hash, tag) → u32` | sender or recipient | — | `MetadataAttached` |
@@ -102,6 +120,15 @@ of the document they hold and compares. See
 | `stream_fee(stream_id) → i128` | — (read-only) | — | — |
 | `verify_treasury(token, start_id, count) → FeeScan` | — (read-only) | — | — |
 | `total_streams() → u64` | — (read-only) | — | — |
+| `register_sponsor(sponsor, token, per_period_limit, per_beneficiary_limit, window_seconds, operator_key)` | sponsor | — | `SponsorRegistered` |
+| `set_sponsor_active(sponsor, active)` | sponsor | — | `SponsorActiveSet` |
+| `rotate_operator_key(sponsor, new_operator_key)` | sponsor | — | `OperatorKeyRotated` |
+| `enroll_beneficiary(beneficiary, public_key)` | beneficiary | — | `BeneficiaryEnrolled` |
+| `sponsored_withdraw(sponsor, beneficiary, stream_id, amount, nonce, deadline, operator_sig, beneficiary_sig)` | anyone (gas paid by submitter; consent via two ed25519 sigs) | pays out ≤ accrued | `SponsorClaim` |
+| `get_sponsor(sponsor) → Option<SponsorConfig>` | — (read-only) | — | — |
+| `get_beneficiary_public_key(beneficiary) → Option<BytesN<32>>` | — (read-only) | — | — |
+| `sponsor_period_spend(sponsor) → PeriodSpend` | — (read-only) | — | — |
+| `beneficiary_spend(sponsor, beneficiary) → PeriodSpend` | — (read-only) | — | — |
 
 `create_stream` emits `FeeCharged` when a protocol fee applies. `create_streams`
 validates and creates the full batch atomically: if one input fails, none of
@@ -116,7 +143,54 @@ limits bound the practical maximum batch size.
 `recipient_streams` / `sender_streams` are on-chain discovery indexes:
 append-only, creation-ordered stream-id lists per address, paginated
 (`limit` clamped to `MAX_PAGE_SIZE = 50`). Terminal streams keep their ids —
-read each stream's `status` for lifecycle state.
+read each stream's `status` for lifecycle state. Ownership transfers follow
+the same append-only rule: the new holder's index gains the id on acceptance
+and the previous holder keeps its historical entry, so readers must check the
+current `sender` / `recipient` fields on `get_stream` before acting on an
+indexed id.
+
+### Two-step ownership transfer
+
+Either party can hand their role to a new address without moving funds:
+
+1. The current sender (payer) or recipient (claimant) calls
+   `propose_ownership_transfer`, which records the target and a 7-day
+   acceptance window. The stream is unchanged.
+2. The named target calls `accept_ownership_transfer`; only then does the role
+   move. The proposer can cancel a pending proposal at any time.
+
+Deposit, withdrawn amount, and the time window are untouched, so accrual and
+the `0 ≤ withdrawn ≤ streamed ≤ deposit` invariant are identical before and
+after a transfer — only the destination of future claims (recipient) or future
+top-ups/cancellation refunds (sender) changes. See
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §17 for the full invariant
+proof sketch.
+
+### Two-step rate renegotiation
+
+The two parties can agree on a new `amount_per_second` for the rest of a live
+stream. Neither can impose it:
+
+1. The current sender or recipient calls `propose_rate_change`, which records
+   the new rate and a 7-day acceptance window. The stream is unchanged.
+2. Only the counterparty named in that offer can call `accept_rate_change`, and
+   only before it expires. The proposer can cancel a pending offer at any time;
+   an expired offer is unacceptible but replaceable.
+
+At acceptance the contract prices the change: what the recipient has already
+earned at the old rate stays exactly as it accrued, the remaining window is
+reserved at the new rate, and the difference against the escrow still held is
+settled in the same transaction — pulled from the sender on an increase,
+refunded to them on a decrease. An increase the sender cannot fund reverts
+before anything changes, so a failed negotiation leaves the stream, its
+schedule and the open offer untouched. The accepted schedule is readable with
+`rate_segments`, and every accrual path (`available`, `withdraw`,
+`withdraw_max`, cancellation) prices it, so the client-side numbers and the
+on-chain money cannot disagree. See
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §3.1 and §18 for the piecewise
+math and the exactness argument, and
+[`docs/adr/0012-piecewise-rate-schedule-storage.md`](./docs/adr/0012-piecewise-rate-schedule-storage.md)
+for why the schedule lives under its own storage key.
 
 Any SEP-41-compatible asset can fund a stream: an issued asset via its
 Stellar Asset Contract id (e.g. USDC on testnet) or **native XLM** via its
@@ -168,6 +242,48 @@ npm run verify-fees -- --contract <C…> --token <C…> --start-ledger <deploy l
 Design details, the cancel-refund decision table, and rejected
 alternatives: [`docs/ARCHITECTURE.md` §11](./docs/ARCHITECTURE.md).
 
+**Disputes.** A recipient who was paid to the wrong address — or coerced into
+being a stream's recipient — can `raise_dispute` for a bond (5 % of the
+deposit, scaling linearly with every dispute round on that stream) and freeze
+the stream's cancel/top-up controls for one week while the sender decides:
+accept (bond back, stream unwound pro-rata) or reject as bad faith (bond
+slashed to the sender, stream resumes). If the sender never acts, the
+timelock expires and the bond is split 50/50. Accrued funds stay withdrawable
+throughout — a dispute never confiscates earnings. The bond makes serial
+griefing escalate: blocking the stream costs the recipient ~2.5 % of the
+deposit per week, growing every round (`docs/ARCHITECTURE.md` has the full
+threshold math). Raising a dispute needs a prior `token.approve(recipient,
+<contract id>, bond, exp)`.
+## Gas sponsorship (claim for free)
+
+Recipients can withdraw accrued funds without holding XLM for the
+transaction fee: a **sponsor** (a sender, the dApp operator, or any funded
+account) registers a budget — token, per-period cap, per-beneficiary cap,
+window, and an ed25519 operator (relayer) key — and beneficiaries enroll
+their own ed25519 consent key once. A claim is then a fully-specified
+intent (contract, sponsor, beneficiary, token, stream, amount, one-time
+nonce, short deadline) signed by **both** keys; any account may submit
+`sponsored_withdraw` and pays the network fee, while the contract verifies
+both signatures over the SHA-256 digest of the canonical message before
+spending anything. Soroban has no mempool relayer, so this dual-signature
+inner-authorization pattern replaces one — the exact mechanism, message
+layout and check order are documented in
+[`docs/ARCHITECTURE.md` §13](./docs/ARCHITECTURE.md), and the JS ↔ Rust
+wire parity is pinned by frozen test vectors on both sides.
+
+Budgets are hard caps: the period spend and per-beneficiary spend roll
+forward with the window, nonces are one-shot, and an invalid-signature
+attempt traps before any nonce or budget state is consumed — a failed relay
+leaves no trace to wear down.
+Sponsor key rotation is instant — `rotate_operator_key` makes old operator
+signatures stop validating with the next ledger. The frontend exposes the
+whole path as **"Claim for free"** with explicit disclosure of who pays and
+what remains in the budget.
+
+Threat model for this surface (budget-drain griefing, signature
+interception, replay, clock manipulation):
+[`docs/THREAT_MODEL.md` §12](./docs/THREAT_MODEL.md).
+
 ## Getting started (clean machine)
 
 Prerequisites:
@@ -193,9 +309,9 @@ Fuzz the accrual math (nightly, optional):
 cd fuzz && cargo +nightly fuzz run streamed_at -- -max_total_time=60
 ```
 
-**Live testnet demo in one command:** [`./scripts/deploy_testnet.sh`](./scripts/deploy_testnet.sh)
-deploys the contract, mints a demo token, and opens a 1-hour stream — full
-walkthrough in [`docs/DEMO.md`](./docs/DEMO.md).
+**Testnet Demo & Walkthrough:**
+- **One-command deploy & demo stream:** [`./scripts/deploy_testnet.sh`](./scripts/deploy_testnet.sh) deploys the contract, mints demo SAC tokens, and opens an active 1-hour stream.
+- **Full lifecycle walkthrough:** See [`docs/DEMO.md`](./docs/DEMO.md) for step-by-step CLI commands (`create_stream` → `withdraw` / `withdraw_max` → `cancel_stream`), expected outputs, and troubleshooting.
 
 Run the frontend:
 
@@ -264,10 +380,13 @@ infra/indexer/                  event indexer service with Prometheus metrics & 
 infra/reconciler/               continuous state reconciler and truth verification daemon
 docs/RUNBOOK.md                 operational diagnosis runbook for all alert rules
 docs/ARCHITECTURE.md            design deep-dive
+docs/FEE_AWARE_CLAIMS.md        opt-in fee-aware claim scheduling (constraints + decisions)
 docs/SCHEDULED_INTENTS.md       scheduled intents: keeper guide + threat model
 docs/DEPLOY_PIPELINE.md         sandbox → testnet → mainnet-canary promotion design
 docs/CANARY_RUNBOOK.md          mainnet canary + rollback procedure
 docs/DEMO.md                    verified testnet walkthrough
+docs/EVENTS.md                  generated catalogue of every contract event
+schemas/events/README.md        event schema registry: generator, compatibility gate, consumer workflow
 indexer/README.md               event indexer setup, configuration, and API
 docs/GOOD_FIRST_ISSUES.md       ready-to-file contributor tickets
 .github/workflows/ci.yml        test + fmt + clippy + coverage + wasm + lint/build/audit + supply chain

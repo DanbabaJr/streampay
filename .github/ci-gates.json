@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "description": "Minimum set of CI gate steps every workflow must keep running, enforced by scripts/check_ci_integrity.py in .github/workflows/workflow-integrity.yml. Deleting one of these steps cannot fail CI by itself - a removed step reports nothing - so the gate checks this list instead. Retiring a gate deliberately is allowed: move its name out of must_have and into retired, with a reason, in the same pull request, so the deletion is in the diff.",
+  "must_have": {
+    "ci.yml": {
+      "contract": [
+        "Error codes and registry wiring are consistent",
+        "Install Rust toolchain",
+        "Format check",
+        "Clippy (deny warnings)",
+        "Unit + property tests",
+        "CEI operation-order goldens",
+        "Reference model + differential tests",
+        "Error-surface table is up to date",
+        "Coverage",
+        "Wasm build (stellar contract build)",
+        "Wasm size budget check",
+        "Upload contract Wasm artifact"
+      ],
+      "frontend": [
+        "Install dependencies",
+        "Lint",
+        "Typecheck",
+        "Unit tests",
+        "Differential vectors are up to date",
+        "Differential tests (against shared vector corpus)",
+        "Network indicator tests",
+        "Client parity smoke tests",
+        "Accessibility audit (axe WCAG 2.1 AA gate)",
+        "Scheduler + fee-series simulation (vitest)",
+        "Build",
+        "Dependency audit",
+        "Explain a dependency-audit failure"
+      ],
+      "ttl-sentinel": [
+        "Typecheck",
+        "Unit + fast-forward ledger tests",
+        "Dependency audit"
+      ],
+      "indexer": [
+        "Typecheck",
+        "Tests",
+        "Dependency audit"
+      ],
+      "cli-parity": [
+        "Install CLI dependencies",
+        "CLI tests including parity fixtures"
+      ],
+      "supply-chain": [
+        "cargo-deny (advisories, licenses, bans, sources)",
+        "Explain a cargo-deny failure"
+      ],
+      "docs": [
+        "Check internal markdown links",
+        "No duplicate JSON keys",
+        "Tracked files are stored with LF"
+      ],
+      "devcontainer-verify": [
+        "Install Rust toolchain (mirrors devcontainer feature)",
+        "Wasm build (devcontainer path)",
+        "Assert wasm artifact is present and non-empty"
+      ],
+      "perf-budgets": [
+        "Check performance budgets (3-run median & bounds)",
+        "Seeded regression defense test",
+        "Lint runbook command freshness",
+        "Error catalog is up to date"
+      ]
+    },
+    "attestation.yml": {
+      "tamper-audit": [
+        "Run the tamper audit",
+        "Report the pinned signing key fingerprint"
+      ],
+      "verify-release": [
+        "Resolve the release to verify",
+        "Download the published Wasm and attestation",
+        "Cross-check the release asset against the in-repo mirror",
+        "Verify the signature and the digest",
+        "Verify the published SHA256SUMS",
+        "Re-run the reproducible double build",
+        "Upload the reproducibility evidence",
+        "Record the attestation state"
+      ]
+    },
+    "client-parity-nightly.yml": {
+      "full-fixture-matrix": [
+        "Contract testutils parity run",
+        "Frontend parity run",
+        "CLI parity run",
+        "Archive shared parity fixtures"
+      ]
+    },
+    "fuzz.yml": {
+      "streamed_at": [
+        "Run fuzz session"
+      ],
+      "conservation": [
+        "Run conservation fuzz session"
+      ]
+    },
+    "fuzz-campaign.yml": {
+      "fuzz": [
+        "Build the release wasm (campaign_wasm only)",
+        "Restore corpus from the fuzz-corpus branch",
+        "Replay triaged regressions",
+        "Run campaign",
+        "Triage crashers",
+        "Source coverage"
+      ],
+      "report": [
+        "Combine per-target runs into one report",
+        "Persist corpus and report to fuzz-corpus"
+      ]
+    },
+    "infra.yml": {
+      "terraform": [
+        "Format check",
+        "Validate every stack (no credentials)",
+        "Rendered compose parses (docker compose config)",
+        "Structural + hardening checks on the rendered artifacts",
+        "Rendered shell scripts parse",
+        "Caddyfile validates in the image the stack actually runs",
+        "No plaintext secrets anywhere in the rendered output",
+        "Terraform state is never committed"
+      ]
+    },
+    "key-rotation-drill.yml": {
+      "drill": [
+        "Run the key-rotation drill",
+        "Upload pass/fail matrix"
+      ]
+    },
+    "mutation.yml": {
+      "mutation": [
+        "Install cargo-mutants",
+        "Run mutation testing",
+        "Extract mutation summary",
+        "Upload mutation results",
+        "Check kill rate threshold",
+        "Comment on issue with results"
+      ]
+    },
+    "nightly-fuzz.yml": {
+      "differential_fuzz": [
+        "Run differential fuzz session",
+        "Persist failing seeds / crash artifacts"
+      ],
+      "conservation_fuzz": [
+        "Run conservation fuzz session",
+        "Persist failing seeds / crash artifacts"
+      ]
+    },
+    "oncall-ping.yml": {
+      "ping": [
+        "Checkout repository",
+        "Setup Node.js",
+        "Calculate and Deliver On-Call Announcement"
+      ]
+    },
+    "promote.yml": {
+      "sandbox": [
+        "Install stellar-cli",
+        "Run gates (tests / fuzz / digest / schema)",
+        "Record digests for downstream jobs",
+        "Upload evidence bundle"
+      ],
+      "testnet": [
+        "Download published Wasm",
+        "Verify digest continuity",
+        "Deploy to testnet",
+        "Canary checks",
+        "Record promotion",
+        "Upload promotion record"
+      ],
+      "mainnet-canary": [
+        "Download published Wasm",
+        "Verify digest continuity",
+        "Deploy to mainnet",
+        "Canary checks (rollback trigger)",
+        "Record promotion",
+        "Upload promotion record"
+      ],
+      "rollback": [
+        "Roll back to the previously promoted digest",
+        "Upload rollback record"
+      ]
+    },
+    "rehearsal.yml": {
+      "rehearsal": [
+        "Run the rehearsal",
+        "Upload rehearsal evidence"
+      ]
+    },
+    "release.yml": {
+      "wasm": [
+        "Test before releasing",
+        "Build release Wasm",
+        "Verify the build is reproducible (double build, wasm + spec-json)",
+        "Compute digest and emit toolchain release metadata",
+        "Generate signed attestation",
+        "Attest Wasm build provenance",
+        "Create/edit release draft",
+        "Mirror the signed attestation into attestations/",
+        "Upload attestation + reproducibility evidence"
+      ]
+    },
+    "security-triage.yml": {
+      "triage": [
+        "Triage security intake"
+      ],
+      "sla-sweep": [
+        "Ping maintainers on overdue reports"
+      ]
+    },
+    "workflow-integrity.yml": {
+      "integrity": [
+        "Self-test: the checker can still fail",
+        "Workflows parse and every step is well-formed",
+        "Every required CI gate is still wired",
+        "No text file is committed as UTF-16 or with a BOM",
+        "Explain a workflow-integrity failure"
+      ]
+    }
+  },
+  "retired": {}
+}

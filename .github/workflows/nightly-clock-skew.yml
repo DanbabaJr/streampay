@@ -1,0 +1,60 @@
+name: Nightly Clock-Skew Probe
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # Every night at 03:30 UTC (staggered off the 02:00 fuzz run)
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Probe duration in minutes"
+        required: false
+        default: "60"
+      interval:
+        description: "Sample interval in seconds"
+        required: false
+        default: "15"
+
+permissions:
+  contents: read
+
+jobs:
+  clock_skew_probe:
+    name: Testnet clock divergence probe (60-min sample)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install probe dependencies
+        working-directory: scripts
+        run: npm ci --no-audit --no-fund
+
+      # CONTRACT_ID / STREAM_ID come from repository variables so the probe
+      # samples a real stream when one exists; without them it still charts
+      # the local-vs-ledger clock divergence for the full window.
+      - name: Run live probe
+        working-directory: scripts
+        env:
+          CONTRACT_ID: ${{ vars.STREAMPAY_TESTNET_CONTRACT_ID }}
+          STREAM_ID: ${{ vars.STREAMPAY_TESTNET_STREAM_ID }}
+        run: |
+          node clock-skew-probe.mjs \
+            --minutes=${{ github.event.inputs.minutes || '60' }} \
+            --interval=${{ github.event.inputs.interval || '15' }} \
+            --out=$GITHUB_WORKSPACE/artifacts/clock-skew
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clock-skew-probe-${{ github.run_number }}
+          path: |
+            artifacts/clock-skew/summary.json
+            artifacts/clock-skew/samples.jsonl
+            artifacts/clock-skew/chart.html
+          retention-days: 30

@@ -1,8 +1,9 @@
 name: Release
 
 # Tag-driven release: builds the reproducible contract Wasm, records its
-# SHA-256 digest, and attaches both to a GitHub Release draft. Deployments
-# can then be verified byte-for-byte against the published digest.
+# SHA-256 digest and pinned toolchain metadata, and attaches both to a
+# GitHub Release draft. Deployments can then be verified byte-for-byte
+# against the published digest.
 
 on:
   push:
@@ -12,6 +13,7 @@ on:
 permissions:
   contents: write
   attestations: write
+  id-token: write
 
 jobs:
   wasm:
@@ -38,12 +40,129 @@ jobs:
         working-directory: contracts/streaming-payments
         run: stellar contract build
 
-      - name: Digest
+      # Two independent builds of the same commit inside the pinned hermetic
+      # toolchain. This is what turns "we published a digest" into "these bytes
+      # are reproducible from this source": if the Wasm or the extracted spec
+      # JSON drifts, the step fails and names the component that drifted, and no
+      # attestation is ever signed over a build we could not repeat.
+      - name: Verify the build is reproducible (double build, wasm + spec-json)
+        run: scripts/reproducible_build.sh --out evidence/repro
+
+      - name: Fetch previous release tag
+        id: prev_tag
+        run: |
+          git fetch --tags --unshallow || git fetch --tags || true
+          prev=$(git tag -l "v*" --sort=-v:refname | sed -n '2p')
+          echo "prev_tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "Previous release tag: $prev"
+
+      - name: Build and digest previous release Wasm
+        if: steps.prev_tag.outputs.prev_tag != ''
+        id: prev_digest
+        run: |
+          prev="${{ steps.prev_tag.outputs.prev_tag }}"
+          mkdir -p /tmp/prev-release
+          git archive "$prev" | tar -x -C /tmp/prev-release
+          (
+            cd /tmp/prev-release/contracts/streaming-payments
+            stellar contract build
+          )
+          prev_wasm=/tmp/prev-release/target/wasm32v1-none/release/streampay_contract.wasm
+          prev_hash=$(sha256sum "$prev_wasm" | awk '{print $1}')
+          echo "prev_hash=$prev_hash" >> "$GITHUB_OUTPUT"
+          echo "$prev_hash  streampay_contract_${prev}.wasm" > PREV_SHA256SUMS
+
+      - name: Compute digest and emit toolchain release metadata
         id: digest
         run: |
           wasm=target/wasm32v1-none/release/streampay_contract.wasm
           sha256sum "$wasm" | tee SHA256SUMS
-          echo "hash=$(awk '{print $1}' SHA256SUMS)" >> "$GITHUB_OUTPUT"
+          hash=$(awk '{print $1}' SHA256SUMS)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+          stellar_ver=$(stellar --version | head -n1 | awk '{print $2}')
+          rustc_ver=$(rustc --version | head -n1 | awk '{print $2}')
+          rust_toolchain=$(grep -E '^\s*channel\s*=' rust-toolchain.toml | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "stable")
+          build_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          cat <<EOF > release-metadata.json
+          {
+            "stellar_cli_version": "${stellar_ver}",
+            "rustc_version": "${rustc_ver}",
+            "rust_toolchain": "${rust_toolchain}",
+            "build_date": "${build_date}",
+            "wasm_sha256": "${hash}"
+          }
+          EOF
+          cat release-metadata.json
+
+          cat <<EOF > UPGRADE_DIGESTS.txt
+          ============================================================
+          StreamPay Contract Binary & Upgrade Digest Verification Matrix
+          ============================================================
+          Release Tag: ${{ github.ref_name }}
+          New Wasm SHA-256 (Bytecode Hash): $hash
+          EOF
+
+          if [ -n "${{ steps.prev_digest.outputs.prev_hash }}" ]; then
+            cat <<EOF >> UPGRADE_DIGESTS.txt
+          Previous Release Tag: ${{ steps.prev_tag.outputs.prev_tag }}
+          Old Wasm SHA-256 (Bytecode Hash): ${{ steps.prev_digest.outputs.prev_hash }}
+
+          Verification for Contract Upgrades:
+          1. Verify running instance against old release digest:
+             sha256sum of deployed bytecode matches ${{ steps.prev_digest.outputs.prev_hash }}
+          2. Verify new binary matches before calling execute_upgrade:
+             sha256sum target/wasm32v1-none/release/streampay_contract.wasm matches $hash
+          EOF
+          fi
+          cat UPGRADE_DIGESTS.txt
+
+      # Signed attestation: an Ed25519 statement binding these exact bytes to
+      # this commit, toolchain and build command, verifiable offline by anyone
+      # with `openssl` and a checkout. See docs/adr/0003 for why a repo key
+      # rather than cosign keyless, and docs/ATTESTATION.md for the threat model.
+      #
+      # Fails closed without the ATTESTATION_SIGNING_KEY secret: an unsigned
+      # release is not a weaker release, it is one no deployer can prove.
+      - name: Generate signed attestation
+        env:
+          ATTESTATION_SIGNING_KEY: ${{ secrets.ATTESTATION_SIGNING_KEY }}
+          ATTEST_COMMIT: ${{ github.sha }}
+          ATTEST_WORKFLOW: release.yml
+          ATTEST_RUN_ID: ${{ github.run_id }}
+          ATTEST_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          scripts/attest.sh \
+            --tag "${{ github.ref_name }}" \
+            --wasm target/wasm32v1-none/release/streampay_contract.wasm \
+            --artifact SHA256SUMS \
+            --artifact release-metadata.json \
+            --artifact UPGRADE_DIGESTS.txt \
+            --repro-report evidence/repro/repro-result.env
+
+      - name: Signing key fingerprint (publish this out of band)
+        run: |
+          fp=$(openssl pkey -pubin -in attestations/signing-key.pub -outform DER | sha256sum | awk '{print $1}')
+          echo "key_fingerprint=$fp" >> "$GITHUB_ENV"
+          echo "signing key fingerprint: sha256:$fp"
+
+      # SLSA provenance attestation:
+      # Note on what SLSA build provenance proves and what it does NOT prove:
+      # SLSA provenance attestation cryptographically proves that this specific
+      # artifact originated from this exact GitHub Actions workflow run, repository,
+      # and commit tag (authenticity and source provenance).
+      # It does NOT prove that the build is reproducible or that an external
+      # environment will produce a bit-for-bit identical binary.
+      # Bit-for-bit reproducibility must be verified independently by rebuilding
+      # from the tag using the verify-reproducible-build action.
+      - name: Attest Wasm build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            target/wasm32v1-none/release/streampay_contract.wasm
+            release-metadata.json
+            UPGRADE_DIGESTS.txt
 
       - name: Create/edit release draft
         uses: softprops/action-gh-release@v3
@@ -52,14 +171,111 @@ jobs:
           files: |
             target/wasm32v1-none/release/streampay_contract.wasm
             SHA256SUMS
+            release-metadata.json
+            UPGRADE_DIGESTS.txt
+            attestations/${{ github.ref_name }}/attestation.json
+            attestations/${{ github.ref_name }}/attestation.json.sig
           body: |
             ## StreamPay contract `${{ github.ref_name }}`
 
-            Wasm SHA-256: `${{ steps.digest.outputs.hash }}`
+            ### Wasm Digests (Upgrade Verification Matrix)
+            * **New Wasm SHA-256**: `${{ steps.digest.outputs.hash }}`
+            ${{ steps.prev_digest.outputs.prev_hash && format('* **Previous Wasm SHA-256 ({0})**: `{1}`', steps.prev_tag.outputs.prev_tag, steps.prev_digest.outputs.prev_hash) || '' }}
 
-            Reproduce with:
+            ### Verify before you deploy
+
+            `attestation.json` + `attestation.json.sig` are an Ed25519-signed
+            statement that these bytes came from commit `${{ github.sha }}` built
+            with the pinned toolchain, twice, identically. To check them you need
+            only `bash`, `openssl` and a checkout — no stellar-cli, no Docker:
+
             ```sh
-            stellar contract build   # in contracts/streaming-payments
-            sha256sum target/wasm32v1-none/release/streampay_contract.wasm
+            git clone https://github.com/${{ github.repository }} && cd streampay
+            scripts/verify_wasm.sh path/to/streampay_contract.wasm \
+              --tag ${{ github.ref_name }} --require-repro
             ```
+
+            The signature is checked against `attestations/signing-key.pub` in
+            **your** checkout, never against anything downloaded with the
+            artifact. To close the remaining gap (a swapped public key), pin the
+            fingerprint published below:
+
+            * **Signing key fingerprint**: `sha256:${{ env.key_fingerprint }}`
+
+            ```sh
+            scripts/verify_wasm.sh path/to/streampay_contract.wasm \
+              --tag ${{ github.ref_name }} --require-repro \
+              --fingerprint sha256:${{ env.key_fingerprint }}
+            ```
+
+            ### Rebuild it yourself
+
+            ```sh
+            # Reproducible double build in the pinned hermetic toolchain
+            scripts/reproducible_build.sh --ref ${{ github.ref_name }}
+
+            # Or a single build against the published digest
+            scripts/verify_reproducible_build.sh ${{ github.ref_name }} ${{ steps.digest.outputs.hash }}
+            ```
+
+            Or verify with the reproducible build action:
+            ```yaml
+            - uses: Neziahtech/streampay/.github/actions/verify-reproducible-build@${{ github.ref_name }}
+              with:
+                tag: ${{ github.ref_name }}
+                expected_digest: ${{ steps.digest.outputs.hash }}
+            ```
+
+            Before calling `execute_upgrade`, operators must verify that:
+            1. The active on-chain contract bytecode hash matches the old release.
+            2. The proposed new Wasm hash in `pending_upgrade` matches the new release digest `${{ steps.digest.outputs.hash }}`.
+
             Verify the digest above matches before deploying.
+
+      # The release assets are the primary channel; the in-repo mirror is what
+      # makes `verify_wasm.sh --offline` work from a plain checkout. A push to a
+      # protected default branch is expected to be refused sometimes, so this
+      # step degrades to a warning plus an artifact instead of failing a release
+      # that has already been built, signed and published.
+      - name: Check out the default branch for the attestation mirror
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: mirror
+
+      - name: Mirror the signed attestation into attestations/
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          branch="${{ github.event.repository.default_branch }}"
+          mkdir -p "mirror/attestations/$tag"
+          cp "attestations/$tag/attestation.json" \
+             "attestations/$tag/attestation.json.sig" \
+             "mirror/attestations/$tag/"
+          cd mirror
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "attestations/$tag"
+          if git diff --cached --quiet; then
+            echo "attestations/$tag is already mirrored"
+            exit 0
+          fi
+          git commit -m "attest: signed build attestation for $tag"
+          if git push origin "HEAD:$branch"; then
+            echo "mirrored attestations/$tag to $branch"
+          else
+            echo "::warning::could not push attestations/$tag to $branch (branch protection?). The release assets are authoritative; commit the uploaded 'attestation-$tag' artifact into attestations/$tag/ manually."
+          fi
+
+      - name: Upload attestation + reproducibility evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: attestation-${{ github.ref_name }}
+          path: |
+            attestations/${{ github.ref_name }}/
+            evidence/repro/
+          # `warn`, not `error`: if the job died before the attestation existed,
+          # the real failure is already reported and this should not add a second
+          # one that hides it.
+          if-no-files-found: warn

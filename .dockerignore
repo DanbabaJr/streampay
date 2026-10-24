@@ -1,0 +1,37 @@
+# Build context is the repo root for all three service images; keep it small and secret-free.
+.git
+.gitignore
+.gitattributes
+.github
+.devcontainer
+.freebuff
+.vscode
+
+# host build artifacts and dependencies (each image reinstalls/compiles from source)
+**/node_modules
+**/dist
+**/coverage
+
+# never bake env/secrets into any image context
+**/.env
+**/.env.*
+**/*.log
+**/logs
+
+# directories that are not part of any Node service build context
+frontend
+contracts
+docs
+deployments
+model
+perf
+fuzz
+tooling
+tools
+attestations
+scripts
+tests
+Cargo.lock
+Cargo.toml
+rust-toolchain.toml
+deny.toml

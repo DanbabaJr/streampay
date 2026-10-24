@@ -78,7 +78,7 @@ jobs:
           targets: wasm32v1-none
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -112,7 +112,7 @@ jobs:
           echo "interface=$(cat evidence/interface.sha256)" >> "$GITHUB_OUTPUT"
 
       - name: Upload evidence bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: evidence-sandbox-${{ inputs.release_tag }}
           path: evidence/
@@ -176,7 +176,7 @@ jobs:
           echo "promotions-log-delta:"; tail -n 1 deployments/promotions.log
 
       - name: Upload promotion record
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: promotion-testnet-${{ inputs.release_tag }}
           path: |
@@ -252,7 +252,7 @@ jobs:
             "${{ steps.deploy.outputs.contract_id }}" promoted
 
       - name: Upload promotion record
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: promotion-mainnet-${{ inputs.release_tag }}
           path: |
@@ -282,7 +282,7 @@ jobs:
           STELLAR_SOURCE_KEY=mainnet-deployer scripts/rollback_mainnet.sh
       - name: Upload rollback record
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rollback-mainnet-${{ github.run_id }}
           path: deployments/runs/

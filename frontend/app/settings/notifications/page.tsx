@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { isConnected, requestAccess, signMessage } from "@stellar/freighter-api";
+import { checkWalletNetwork } from "@/lib/network";
 import type {
   Subscription,
   NotificationChannelType,
@@ -75,6 +76,7 @@ export default function NotificationsSettingsPage() {
         return;
       }
       setAddress(addr);
+      await checkWalletNetwork();
       setStatusMsg(`Connected as ${addr.slice(0, 6)}…${addr.slice(-6)}`);
       await loadSubscriptions(addr);
     } catch (e) {

@@ -1,0 +1,48 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sponsor_active_set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a sponsor pauses or resumes its budget.",
+  "properties": {
+    "active": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    }
+  },
+  "required": [
+    "active"
+  ],
+  "title": "SponsorActiveSet",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sponsor_active_set",
+    "fingerprint": "sha256:7bbd39680d30fd7bd9d76fcd1adbf06561b0a338af9de46d09960a87476ba8a5",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        },
+        {
+          "description": "Soroban symbol (a short upper-/lower-case tag, not free text).",
+          "type": "string",
+          "x-soroban-type": "Symbol"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "sponsor",
+        "type": "Address"
+      },
+      {
+        "name": "kind",
+        "type": "Symbol"
+      }
+    ]
+  }
+}

@@ -16,8 +16,45 @@ jobs:
   contract:
     name: Contract — test / fmt / clippy / wasm
     runs-on: ubuntu-latest
+    env:
+      # Single source of truth for the Wasm size budget (KB). The rule is:
+      # the smallest whole KB that the current public interface fits, so the
+      # ratchet stays as tight as the interface allows. 90 KB = this build's
+      # 91,534 B + 2,606 B of headroom. History: issue #58's techniques took the
+      # contract from 91,004 B to 60,386 B, upstream's ownership-transfer +
+      # vault surface added 3,757 B (gate: 63 KB), and the governance timelock
+      # that has now merged adds 14,123 B more — 10,005 B of `code`, 3,072 B of
+      # structural spec entries, 748 B of `data` topics and 235 B of exports, on
+      # top of the ungated `///` docs its new interface items carried (6,416 B,
+      # recovered by re-applying Technique 1; docs/WASM_SIZE.md). The recipient
+      # dispute flow (#55) then adds 7,004 B on top of that 77 KB gate: 5
+      # entrypoints, 3 events, 2 types, 3 error codes and one persistent storage
+      # key, no new dependencies, measured with the pinned stellar-cli 28.1.0.
+      # Its interface items merged without Technique 1, so the same gating that
+      # governance needed here recovers 5,048 B (90,318 B before, 85,270 B
+      # after). Issue #54's mid-stream rate renegotiation adds 6,347 B on top of
+      # that — 4,162 B of `code` (the propose/accept/cancel legs and the piecewise
+      # accrual helpers), 1,512 B of structural `contractspecv0` entries (5
+      # entrypoints, 2 events, 2 stored structs, 4 error codes), 537 B of `data`
+      # event symbols, 107 B of exports and 29 B of meta. Merged together the two
+      # feature branches produce 91,534 B (89.4 KB → 90 KB gate). The next
+      # entrypoint addition should trigger the split discussion, not a bump.
+      WASM_SIZE_BUDGET_KB: 90
     steps:
       - uses: actions/checkout@v7
+
+      # Fast, dependency-free guard that runs before the toolchain is even
+      # installed: StreamError codes are the on-chain wire contract, and the
+      # collision CI hits most often is two contributor PRs that each appended
+      # "the next free code" against the same main. On a PR event this job checks
+      # out the merge ref, so both sides of that collision are already in the
+      # same file — reported here as file/line within seconds, instead of as an
+      # `E0081: discriminant value assigned to multiple variants` minutes later in
+      # two jobs at once. The same script also verifies the `surface.rs` registry
+      # (every code mapped by a declared Branch or retired), which is the shape of
+      # most "the contract does not compile" reds in the devcontainer job.
+      - name: Error codes and registry wiring are consistent
+        run: bash scripts/check_error_codes.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -36,22 +73,53 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Format check
-        run: cargo fmt --all -- --check
+        id: fmt
+        # rustfmt emits LF: a file committed with CRLF fails here as a diff of
+        # every line, which reads like a formatting complaint about the whole
+        # file when the real problem is carriage returns in the commit. Point at
+        # the one-command fix instead of leaving contributors to guess.
+        #
+        # This is the single most common failure on the repo, and many
+        # contributors have no local Rust toolchain, so the run also produces the
+        # patch rustfmt would have applied and uploads it: `git apply` on the
+        # checked-out branch is a complete fix, no toolchain required.
+        run: |
+          if ! cargo fmt --all -- --check; then
+            echo "::error::Unformatted Rust. Fix locally with 'npm run lint:fix' (cargo fmt --all) and commit. If the diff is every line of a file, that file was committed with CRLF: run 'bash scripts/check_line_endings.sh' (one command, exact fix). No local toolchain? Download the 'fmt-fix-*' artifact from this run and 'git apply fmt-fix.patch'."
+            cargo fmt --all
+            git --no-pager diff > fmt-fix.patch
+            echo "Wrote fmt-fix.patch ($(wc -l < fmt-fix.patch) lines) for the artifact step below."
+            exit 1
+          fi
+
+      - name: Upload formatting patch
+        if: failure() && steps.fmt.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fmt-fix-${{ github.event.pull_request.number || github.run_id }}
+          path: fmt-fix.patch
+          if-no-files-found: ignore
 
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Unit + property tests
-        run: cargo test -p streampay-contract --locked
+        run: cargo test --workspace --locked
+
+      - name: CEI operation-order goldens
+        run: cargo test -p streampay-contract --lib operation_order_matches_golden --locked
+
+      - name: Reference model + differential tests
+        run: cargo test -p streampay-model --locked
 
       # The error-surface table is generated from the contract's branch
       # instrumentation. Regenerate it and fail if the committed artifact has
       # drifted — this also fails on any error code with zero coverage or any
       # branch with no code (enforced by the error-surface tests above).
+      # Same script contributors run locally (`npm run generated:check`), so a
+      # green local run means a green gate here.
       - name: Error-surface table is up to date
-        run: |
-          cargo run -p streampay-contract --example error_surface_doc
-          git diff --exit-code docs/ERRORS.md
+        run: bash scripts/check_generated.sh surface
 
       - name: Coverage
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -59,7 +127,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: llvm-cov (summary)
-        run: cargo llvm-cov -p streampay-contract --summary-only
+        run: cargo llvm-cov --workspace --summary-only
 
       # soroban-sdk 28 rejects a plain `cargo build --target wasm32v1-none`
       # (its build script requires the stellar-cli >= 25.2 spec-shaking v2
@@ -74,8 +142,97 @@ jobs:
         working-directory: contracts/streaming-payments
         run: stellar contract build
 
+      # Issue #58's Technique 1 invariant, as a gate rather than a one-off edit:
+      # no `#[contracttype]`/`#[contracterror]`/`#[contractevent]` item and no
+      # `pub fn` in `#[contractimpl]` may carry a plain `///` doc comment,
+      # because `soroban-sdk-macros` embeds those strings into `contractspecv0`
+      # (~6.4 KB of the binary when the governance interface merged with plain
+      # docs and silently broke this rule). Host documentation is unaffected —
+      # the same text lives in a `cfg_attr(not(target_family = "wasm"), doc)`
+      # attribute. Scoped to streampay deliberately: the other crates are not
+      # covered by the size budget below.
+      - name: Interface doc strings stay out of the Wasm spec
+        run: python3 scripts/gate_interface_docs.py --check contracts/streaming-payments/src/*.rs
+
+      - name: Wasm size budget check
+        run: |
+          wasm=target/wasm32v1-none/release/streampay_contract.wasm
+          size=$(stat -c '%s' "$wasm")
+          budget=$(( WASM_SIZE_BUDGET_KB * 1024 ))
+          {
+            echo "### Contract Wasm size"
+            echo ""
+            echo "| Size | Budget | Headroom |"
+            echo "| --- | --- | --- |"
+            echo "| ${size} bytes ($(( size / 1024 )) KB) | ${WASM_SIZE_BUDGET_KB} KB (${budget} bytes) | $(( (budget - size) / 1024 )) KB |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$size" -gt "$budget" ]; then
+            echo "::error::${wasm} is ${size} bytes, over the ${WASM_SIZE_BUDGET_KB} KB budget (${budget} bytes). Check for dependency bloat or bump the budget deliberately."
+            exit 1
+          fi
+          echo "Wasm size ${size} bytes is within the ${WASM_SIZE_BUDGET_KB} KB budget."
+
+      # Published per PR so reviewers can diff builds; releases keep the
+      # SHA-256 digest flow in release.yml.
+      - name: Upload contract Wasm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: streampay-contract-wasm-${{ github.run_id }}
+          path: target/wasm32v1-none/release/streampay_contract.wasm
+          if-no-files-found: error
+
+  event-registry:
+    name: Event registry — schema / compatibility / codegen gates
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth 0: the compatibility checker diffs the registry against the
+      # PR base commit, which must be present in the checkout.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The registry (`schemas/events/`), the per-event JSON Schemas, the event
+      # catalogue and the TypeScript types the indexer and frontend import are
+      # all generated from the `#[contractevent]` structs. This is the same
+      # script contributors run locally (`npm run generated:events` /
+      # `generated:check`): regenerate in place, then fail on any drift —
+      # including artifacts a new event just created but nobody committed.
+      - name: Event registry artifacts are up to date
+        run: bash scripts/check_generated.sh events
+
+      # Additive-only gate (issue #213): removals or type changes against the
+      # PR base fail the build; additions must be recorded in
+      # schemas/events/CHANGELOG.md. The in-crate pin test and the publish-site
+      # gate (both part of `cargo test`) prove the registry describes the code;
+      # this gate owns the wire-compatibility verdict for consumers.
+      - name: Event compatibility check against the base
+        if: github.event_name == 'pull_request'
+        run: node scripts/event_compat_check.mjs --base "${{ github.event.pull_request.base.sha }}"
+
+      # Unit tests for the gate itself, including the seeded break demo
+      # (renaming an event field turns the checker red with a clear diff).
+      - name: Compatibility checker tests
+        run: node --test scripts/event_compat_check.test.mjs
+
   frontend:
-    name: Frontend — lint / typecheck / build / audit
+    name: Frontend — lint / typecheck / tests / build / audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -92,20 +249,102 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install CLI dependencies for cross-client parity
+        run: npm install --prefix ../tools/streampay-cli --no-package-lock --ignore-scripts --no-audit --no-fund
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit tests
+        # Both runners: `node --test` collects the *.test.ts suites (including the
+        # sponsorship wire-parity vectors — frozen relay message XDR + digest,
+        # shared with the Rust suite — on Node's type-stripping runner, the
+        # pattern ttl-sentinel compiles first to avoid), and `vitest run` collects
+        # the *.spec.ts suites. They can never substitute for each other:
+        # vitest.config.mts includes only lib/**/*.spec.ts, and node --test only
+        # discovers *.test.ts.
+        run: npm test
+
+      # The differential vector corpus is generated from the Rust reference
+      # model's published spec file. Regenerating without diffing (the previous
+      # shape of this step) let a stale committed corpus through while the
+      # tests silently passed against the freshly generated one — the two
+      # clients were no longer proven against the same vectors. The shared
+      # script regenerates *and* fails on any drift, and is the same command
+      # contributors run locally.
+      - name: Differential vectors are up to date
+        run: bash ../scripts/check_generated.sh vectors
+
+      - name: Differential tests (against shared vector corpus)
+        run: node --experimental-strip-types --test lib/oracle.test.ts
+
+      # Network/contract indicator logic (issue #33): the wallet-vs-app network
+      # comparison is exercised with a stubbed Freighter, so both wrong-network
+      # directions (mainnet wallet on a testnet dapp and vice versa) are
+      # covered without a browser extension.
+      - name: Network indicator tests
+        run: node --experimental-strip-types --test lib/network.test.ts
+      - name: Client parity smoke tests
+        run: npm run test:parity
+
+      # -----------------------------------------------------------------------
+      # Clock-skew suite (issue #211): the time-matrix harness runs the accrual
+      # paths under controlled skew between the three clocks (local Date.now(),
+      # simulate-at-ledger reads, ledger().timestamp() enforcement), and pins
+      # the never-over-up UX contract formalised in docs/TIME_HANDLING.md.
+      # Uses Node's built-in test runner + mock timers; no browser needed.
+      # -----------------------------------------------------------------------
+      - name: Clock-skew property + live-accrual tests
+        run: >-
+          node --experimental-strip-types --test
+          lib/clock-skew.test.ts lib/live-accrual.test.ts
+
+      # -----------------------------------------------------------------------
+      # WCAG 2.1 AA accessibility gate (issue #98)
+      #
+      # Runs axe-core against HTML snapshots of every page and component.
+      # Any new violation fails the build. Baseline exceptions are documented
+      # with justification comments in frontend/test/a11y.test.ts.
+      #
+      # The test file uses Node's built-in test runner + jsdom so no browser
+      # is required; it runs in the same Node 22 environment as the other
+      # frontend tests and completes in < 30 s.
+      # -----------------------------------------------------------------------
+      - name: Accessibility audit (axe WCAG 2.1 AA gate)
+        run: node --experimental-strip-types --test test/a11y.test.ts
+
+      # Dedicated vitest step, deliberately not folded into the `npm test` above.
+      # `scripts.test` is an ordinary JSON string that any merge can rewrite — and
+      # when a duplicate key did exactly that, the scheduler and fee-series specs
+      # stopped running in CI while a step *named* "scheduler / fee-series
+      # simulation" stayed green. This step runs a named script entrypoint, so the
+      # suite has an owner: if it ever stops being collected, the job says which
+      # runner went missing.
+      - name: Scheduler + fee-series simulation (vitest)
+        run: npm run test:scheduler
+
       - name: Build
         run: npm run build
 
       - name: Dependency audit
+        id: audit
         # Production deps only: dev-tooling advisories (e.g. braces in the
         # eslint chain) never ship to users and currently have no fix.
         # High-severity prod advisories fail the build.
         run: npm audit --omit=dev --audit-level=high
+
+      - name: Explain a dependency-audit failure
+        if: failure() && steps.audit.outcome == 'failure'
+        # npm audit failures are frequently *not* the contributor's fault: a
+        # fresh advisory in a transitive production dependency turns every open
+        # PR red at once (this repo paid for that in d282de1). Say how to tell
+        # the two cases apart so nobody "fixes" it by force-downgrading a
+        # package they did not come to change.
+        run: |
+          echo "::error::npm audit rejected a production dependency. Check whether the flagged package came from YOUR diff (git diff main -- frontend/package.json frontend/package-lock.json). If it did, upgrade it. If it did not, main already carries the advisory: merge main, run 'npm audit fix' (never '--force'), and if the advisory has no upstream fix say so in the PR body and ask a maintainer to add an overrides pin or an audit allow-list entry in a separate PR."
 
   ttl-sentinel:
     name: TTL sentinel — typecheck / tests
@@ -165,6 +404,30 @@ jobs:
       - name: Dependency audit
         run: npm audit --omit=dev --audit-level=high
 
+  cli-parity:
+    name: CLI — client parity smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/streampay-cli
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install CLI dependencies
+        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
+
+      - name: CLI tests including parity fixtures
+        run: npm test
+
+      # `npm run typecheck` is intentionally not gated here yet: it surfaces
+      # pre-existing cli.ts debt (diagnostic-event/footprint decoding against
+      # the SDK 17 xdr renames, noUncheckedIndexedAccess in the arg parser)
+      # that needs an RPC-backed follow-up before it can be fixed safely.
+
   supply-chain:
     name: Security — advisories / licenses
     runs-on: ubuntu-latest
@@ -174,7 +437,54 @@ jobs:
       # cargo-deny's advisories check covers the same RustSec database as
       # cargo-audit, so one gate owns the ignore policy (see deny.toml).
       - name: cargo-deny (advisories, licenses, bans, sources)
+        id: deny
         uses: EmbarkStudios/cargo-deny-action@v2
+
+      # Scoped to this step's own outcome: failure() is true for any later step
+      # in a job that already failed, which would print the wrong diagnosis.
+      - name: Explain a cargo-deny failure
+        if: failure() && steps.deny.outcome == 'failure'
+        run: |
+          echo "::error::cargo-deny rejected the dependency graph — it prints the exact rule above (advisory / license / ban / source). If a crate you added pulls in an advisory, bump it. If the advisory is transitive and has no upstream fix, it belongs in deny.toml's ignore list with a comment naming the RUSTSEC id and why (see RUSTSEC-2024-0436 there) — and that is a change a maintainer reviews on its own, not something to bury in a feature PR. Reproduce locally: cargo install cargo-deny && cargo deny check."
+
+  docs:
+    name: Docs — internal link lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Fails on any relative Markdown link or GitHub heading anchor that does
+      # not resolve (scripts/check_docs_links.mjs). Keeps the doc web that
+      # SECURITY.md, the runbooks, and the audit docs form intact.
+      - name: Check internal markdown links
+        run: node scripts/check_docs_links.mjs
+
+      # A JSON file with the same key twice is valid JSON: `JSON.parse` and npm
+      # keep the LAST occurrence and drop the earlier one without a word. Every
+      # merge that appended a key at the same spot as another branch produced
+      # this silently — including `frontend/package.json`, whose duplicate
+      # `"test"` removed the vitest half of the suite from every CI job while
+      # the step that claimed to run it stayed green. The scanner reports the
+      # object path and both line numbers, and tolerates the comments and
+      # trailing commas that `tsconfig.json` and npm legitimately accept.
+      # `--self-test` runs first: a scanner that silently stopped walking would
+      # otherwise report "clean" forever.
+      - name: No duplicate JSON keys
+        run: node scripts/check_duplicate_json_keys.mjs --self-test
+
+      # Line endings are checked as committed *content*, not as a checkout
+      # detail: CRLF in a blob makes rustfmt flag every line of the file, and it
+      # shifts the bytes behind any content-derived hash (the error catalog's
+      # schema fingerprint has already been broken by exactly this on a Windows
+      # checkout — see `a3af379`). Catching it here names the files and the
+      # one-command fix, instead of leaving a whole-file diff to decode.
+      # Binary fixtures are reported by git as `-text` and are not flagged.
+      - name: Tracked files are stored with LF
+        run: bash scripts/check_line_endings.sh
 
   devcontainer-verify:
     name: Devcontainer — wasm build smoke test
@@ -211,10 +521,56 @@ jobs:
 
       - name: Wasm build (devcontainer path)
         working-directory: contracts/streaming-payments
-        run: stellar contract build
+        # Deliberately *not* chained on the contract job: this one skips fmt,
+        # clippy and tests, so it is the check that says "the contract does not
+        # even compile" when the contract job stopped earlier at a formatting
+        # complaint. Explain that distinction, because the two reds otherwise
+        # look like one unexplained failure and a second unrelated one.
+        run: |
+          if ! stellar contract build; then
+            echo "::error::The contract does not compile. This job runs no fmt/clippy/test steps, so unlike the Contract job it isolates a genuine build error — usually a duplicate StreamError discriminant (E0081), a surface.rs Branch arm that was not extended, or an entrypoint signature change. Reproduce with 'cargo check -p streampay-contract --all-targets' and 'bash scripts/check_error_codes.sh'."
+            exit 1
+          fi
 
       - name: Assert wasm artifact is present and non-empty
         run: |
           wasm=target/wasm32v1-none/release/streampay_contract.wasm
           [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
           echo "OK: $(ls -sh "$wasm")"
+
+  perf-budgets:
+    name: Perf budgets — bounds on indexer, RPC reads & frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install indexer dependencies
+        working-directory: indexer
+        run: npm ci
+
+      - name: Build indexer
+        working-directory: indexer
+        run: npm run build
+
+      - name: Check performance budgets (3-run median & bounds)
+        run: node perf/harness/check_budgets.mjs
+
+      - name: Seeded regression defense test
+        run: node --test perf/test/seeded_regression.test.mjs
+
+      - name: Lint runbook command freshness
+        run: ./scripts/lint_runbook_commands.sh
+
+      # The human-facing error catalog (docs/errors.md, one page per code, and
+      # frontend/lib/errors.ts) is generated from the contract's error surface.
+      # Delegated to the shared script so this gate, the contract-job gate and
+      # `npm run generated:check` cannot drift apart, and so a *newly added*
+      # code whose page was never committed also fails (plain `git diff`
+      # cannot see untracked files).
+      - name: Error catalog is up to date
+        run: bash scripts/check_generated.sh catalog
+

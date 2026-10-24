@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/oracle_stale_fallback.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when oracle time resolution falls back to native ledger time due to stale feed, insufficient reports, or unconfigured registry.",
+  "properties": {
+    "ledger_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "ledger_time"
+  ],
+  "title": "OracleStaleFallback",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "oracle_stale_fallback",
+    "fingerprint": "sha256:d1baed22ab39c524cd1297b2a5f14d39eeec300ef27ce95583562f1e2e26dbec",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

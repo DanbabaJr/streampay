@@ -1,0 +1,71 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/rate_change_accepted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a pending rate change is accepted and its rebalancing settles.  The four amounts are the whole funds-bug audit trail for one change, and they are exact by construction: `reserved_at_new_rate` is an integer product (`new_amount_per_second * window length`) and `deposit` is `owed_at_change + reserved_at_new_rate`. `adjustment` is the signed difference against the deposit before the change — positive means the sender topped up that amount, negative means the sender was refunded its absolute value, zero means the old reserve still covered the new rate exactly.",
+  "properties": {
+    "accepted_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "adjustment": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "deposit": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "effective_from": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "new_amount_per_second": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "owed_at_change": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "reserved_at_new_rate": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "accepted_by",
+    "new_amount_per_second",
+    "effective_from",
+    "owed_at_change",
+    "reserved_at_new_rate",
+    "adjustment",
+    "deposit"
+  ],
+  "title": "RateChangeAccepted",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "rate_change_accepted",
+    "fingerprint": "sha256:66b7fcbf7e912df0adfb728f6dd025e43a3678b76885950fb68c9e7b1ea41da3",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

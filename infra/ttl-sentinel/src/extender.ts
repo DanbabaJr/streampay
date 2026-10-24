@@ -208,20 +208,35 @@ export interface ExtensionRunResult {
   stoppedBy: 'budget' | 'submission-failed' | null;
   budgetStroops: bigint;
   spentStroops: bigint;
+  failedBatches?: { batch: ExtensionBatch; error: string }[];
+  quarantinedAccounts?: string[];
 }
 
 /**
- * Execute an extension plan. Off unless `enabled`; `dryRun` reports the plan
+ * Execute an extension plan with failure isolation. Off unless `enabled`; `dryRun` reports the plan
  * without submitting; the monthly budget is enforced using actual fees when
  * the submitter reports them and estimates otherwise.
  */
 export class Extender {
+  private failureLadder = new Map<string, number>();
+  private quarantined = new Set<string>();
+
   constructor(
     private readonly cfg: ExtenderSection,
     private readonly submitter: ExtendSubmitter,
     private readonly spender: SpenderState,
-    private readonly opts: { dryRun?: boolean; now?: () => Date; feePer1Kb?: bigint } = {},
+    private readonly opts: {
+      dryRun?: boolean;
+      now?: () => Date;
+      feePer1Kb?: bigint;
+      isolateFailures?: boolean;
+      quarantineThreshold?: number;
+    } = {},
   ) {}
+
+  getQuarantinedAccounts(): string[] {
+    return Array.from(this.quarantined);
+  }
 
   async run(plan: ExtensionPlan): Promise<ExtensionRunResult> {
     if (!this.cfg.enabled) throw new ExtenderDisabledError();
@@ -238,30 +253,71 @@ export class Extender {
     const budgetStroops = xlmToStroops(this.cfg.monthlyBudgetXlm);
     const submitted: ExtensionRunResult['submitted'] = [];
     const planned: ExtensionBatch[] = [];
+    const failedBatches: { batch: ExtensionBatch; error: string }[] = [];
     let stoppedBy: ExtensionRunResult['stoppedBy'] = null;
+    const isolateFailures = this.opts.isolateFailures ?? (this.cfg as any).isolateFailures ?? false;
+    const quarantineThreshold = this.opts.quarantineThreshold ?? 3;
 
     const ok = new Set(['pending', 'duplicate', 'success', 'tryagainlater']);
     for (let i = 0; i < plan.batches.length; i++) {
       const batch = plan.batches[i] as ExtensionBatch;
+      const account = (batch as any).account ?? batch.targets[0]?.id ?? `batch-${i}`;
+
+      if (this.quarantined.has(account)) {
+        failedBatches.push({ batch, error: `Account ${account} is in poison quarantine` });
+        continue;
+      }
+
       if (this.spender.spentStroops + batch.estimatedRentStroops > budgetStroops) {
         stoppedBy = 'budget';
         planned.push(...plan.batches.slice(i));
         break;
       }
+
       if (dryRun) {
         planned.push(batch);
         continue;
       }
-      const result = await this.submitter.submit(
-        batch.targets.map((t) => t.keyB64),
-        plan.extendTo,
-      );
-      this.spender.spentStroops += result.feeStroops ?? batch.estimatedRentStroops;
-      submitted.push({ batch, result });
-      if (!ok.has(result.status.toLowerCase())) {
-        // Stop rather than hammer the network with a failing key or fee.
-        stoppedBy = 'submission-failed';
-        break;
+
+      try {
+        const result = await this.submitter.submit(
+          batch.targets.map((t) => t.keyB64),
+          plan.extendTo,
+        );
+
+        if (!ok.has(result.status.toLowerCase())) {
+          const failures = (this.failureLadder.get(account) ?? 0) + 1;
+          this.failureLadder.set(account, failures);
+          if (failures >= quarantineThreshold) {
+            this.quarantined.add(account);
+          }
+          failedBatches.push({ batch, error: `Submission returned status: ${result.status}` });
+
+          if (!isolateFailures) {
+            // Non-isolated mode: halt queue
+            stoppedBy = 'submission-failed';
+            break;
+          }
+          // Failure isolation: log and continue to remaining batches
+          continue;
+        }
+
+        // Success: reset retry ladder for account
+        this.failureLadder.delete(account);
+        this.spender.spentStroops += result.feeStroops ?? batch.estimatedRentStroops;
+        submitted.push({ batch, result });
+      } catch (err: any) {
+        const failures = (this.failureLadder.get(account) ?? 0) + 1;
+        this.failureLadder.set(account, failures);
+        if (failures >= quarantineThreshold) {
+          this.quarantined.add(account);
+        }
+        failedBatches.push({ batch, error: String(err?.message ?? err) });
+
+        if (!isolateFailures) {
+          stoppedBy = 'submission-failed';
+          break;
+        }
       }
     }
 
@@ -272,6 +328,8 @@ export class Extender {
       stoppedBy,
       budgetStroops,
       spentStroops: this.spender.spentStroops,
+      failedBatches,
+      quarantinedAccounts: Array.from(this.quarantined),
     };
   }
 }

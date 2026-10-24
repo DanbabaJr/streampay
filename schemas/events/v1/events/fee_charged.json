@@ -1,0 +1,58 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/fee_charged.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted exactly once per funded stream that owes a protocol fee, in the same transaction as (and immediately after) `StreamCreated`. Keyed by `stream_id` so fee history is auditable per stream; the stream's stored fee (`stream_fee` read) and the token's `treasury_status` totals must always reconcile with the sum of these events — that reconciliation is the treasury invariant, checkable by anyone via `verify_treasury` and `scripts/verify-fees.ts`.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "fee_bps": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "payer": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "token": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "token",
+    "payer",
+    "amount",
+    "fee_bps"
+  ],
+  "title": "FeeCharged",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "fee_charged",
+    "fingerprint": "sha256:420b24e1ebc51ffeb444b36b41ea403e281b23304357650d811e145b4fb505da",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

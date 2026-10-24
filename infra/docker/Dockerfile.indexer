@@ -1,0 +1,27 @@
+# docker build -f infra/docker/Dockerfile.indexer -t streampay/indexer:local .   (build context = repo root)
+FROM node:22-alpine AS build
+WORKDIR /app
+# better-sqlite3 is a native module; compile it here so the toolchain never reaches the release image
+RUN apk add --no-cache python3 make g++
+COPY indexer/package.json indexer/package-lock.json indexer/tsconfig.json ./
+RUN npm ci
+COPY indexer/src ./src
+RUN npm run build
+# drop dev deps, keeping production modules with the compiled native binary
+RUN npm prune --omit=dev
+
+FROM node:22-alpine AS release
+ENV NODE_ENV=production
+WORKDIR /app
+# carry the prebuilt native deps from the builder instead of recompiling on alpine (no compiler here)
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY indexer/package.json ./package.json
+USER node
+EXPOSE 8787
+# busybox wget (no curl on alpine); indexer default PORT is 8787
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:8787/health || exit 1
+# orchestrator may override with a full argv
+ENTRYPOINT ["node"]
+CMD ["dist/index.js"]

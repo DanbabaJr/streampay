@@ -21,6 +21,10 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `PORT` | `8787` | HTTP listen port |
 | `DATABASE_PATH` | `./data/streampay.sqlite` | SQLite database file |
 | `START_LEDGER` | Latest RPC ledger | Initial ledger sequence if starting fresh without a saved cursor |
+| `OUTBOX_TICK_MS` | `1000` | Transactional-outbox dispatcher poll interval |
+| `OUTBOX_BATCH_SIZE` | `200` | Max intent claims per consumer per tick (cap 1000) |
+| `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
+| `OUTBOX_MAX_DEPTH` | off | Global backpressure threshold for pending+in-flight intents |
 
 ---
 
@@ -158,6 +162,42 @@ Returns streams where the address is sender or recipient:
   "streams": [...]
 }
 ```
+
+---
+
+### Transactional Outbox
+
+Every ingested event is journalled with a monotonic `seq` and per-consumer
+delivery intents inside the same database transaction, giving consumers a
+replayable, dedupe-able, at-least-once event feed. Full contract and
+guarantees: [docs/OUTBOX.md](../docs/OUTBOX.md).
+
+- `GET /streams/:id/events?after=<seq>&limit=<n>` — cursor-based replay (`next_cursor` included)
+- `GET/POST /api/outbox/consumers` — push/pull channel registry
+- `GET /api/outbox/intents?state=dead` — outbox dead-letter queue
+- `POST /api/outbox/intents/:id/replay` — resurrect a dead intent
+- `POST /api/outbox/retract` — reorg retraction hook (reconciler)
+- `GET /api/outbox/stats` — depth by state and replay high-water
+- `GET /metrics` — Prometheus exposition (`streampay_outbox_*`)
+
+---
+
+### Event Shapes Come From the Schema Registry
+
+The names and fields this indexer decodes are not hand-maintained here: they
+are generated from the contract's `#[contractevent]` structs into
+`src/generated/events.ts` by `npm run generated:events` (source of truth:
+[`schemas/events/`](../schemas/events/README.md), issue
+[#213](https://github.com/Neziahtech/streampay/issues/213)).
+
+- `decodeEvent` validates every registry-known event: the positional topic
+  count must match the registry and each declared data field must be present,
+  so a contract/registry drift surfaces as a decode error naming the schema
+  file instead of silently indexing a half-shaped stream row.
+- Extra data keys are tolerated — the registry evolves additively, and old
+  indexers keep working against a newly upgraded contract.
+- `src/registry.test.ts` asserts the generated table matches the committed
+  `schemas/events/registry.json` field-for-field.
 
 ---
 

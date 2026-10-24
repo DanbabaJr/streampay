@@ -27,23 +27,44 @@ pub const MAX_TAG_LEN: u32 = 32;
 /// a cap is the only way to bound growth.
 pub const MAX_ATTESTATIONS_PER_STREAM: u32 = 32;
 
-/// One hash-linked attestation on a stream.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " One hash-linked attestation on a stream."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attestation {
-    /// Position in the stream's append-only list, starting at 0.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Position in the stream's append-only list, starting at 0."
+    )]
     pub index: u32,
-    /// The party (sender or recipient) that attached this attestation.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The party (sender or recipient) that attached this attestation."
+    )]
     pub attester: Address,
-    /// 32-byte content hash, e.g. SHA-256 of the referenced document.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " 32-byte content hash, e.g. SHA-256 of the referenced document."
+    )]
     pub content_hash: BytesN<32>,
-    /// Short caller-chosen tag (at most [`MAX_TAG_LEN`] bytes).
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Short caller-chosen tag (at most [`MAX_TAG_LEN`] bytes)."
+    )]
     pub tag: String,
-    /// Ledger timestamp at which the attestation was recorded.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Ledger timestamp at which the attestation was recorded."
+    )]
     pub timestamp: u64,
 }
 
-/// A pointer to one attestation, used by the per-party index.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " A pointer to one attestation, used by the per-party index."
+)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttestationRef {

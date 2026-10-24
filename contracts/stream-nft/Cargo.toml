@@ -1,0 +1,17 @@
+[package]
+name = "stream-nft"
+version = "0.1.0"
+edition = "2021"
+description = "StreamNft: companion NFT contract for StreamPay streams representing recipient rights"
+license = "Apache-2.0"
+keywords = ["stellar", "soroban", "nft", "token", "streaming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk.workspace = true
+streampay-contract = { path = "../streaming-payments" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

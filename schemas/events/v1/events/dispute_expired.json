@@ -1,0 +1,55 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/dispute_expired.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a dispute's timelock expires without a verdict: the stream resumes and the bond is split, `sender_share` rounding up.",
+  "properties": {
+    "bond": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "recipient_share": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender_share": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "recipient",
+    "bond",
+    "sender_share",
+    "recipient_share"
+  ],
+  "title": "DisputeExpired",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "dispute_expired",
+    "fingerprint": "sha256:36b0c23354cbcac4fb502ca41a70ddfe1f9eb2c559c9db99d3de4f790abf7ca1",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

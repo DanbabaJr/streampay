@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/governance_signers_set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the signer set is established or rotated, and when the veto window changes. The set is emitted in full because \"which keys govern this contract\" is only auditable from the transcript, not from a delta.",
+  "properties": {
+    "signers": {
+      "items": {
+        "description": "Stellar account or contract address (StrKey).",
+        "type": "string",
+        "x-soroban-type": "Address"
+      },
+      "type": "array",
+      "x-soroban-type": "Vec<Address>"
+    },
+    "veto_window": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "signers",
+    "veto_window"
+  ],
+  "title": "GovernanceSignersSet",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "governance_signers_set",
+    "fingerprint": "sha256:c80b3f90f2621ff7578044e47b82978b1f997300723831e782bc137d0ac33a16",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "set_by",
+        "type": "Address"
+      }
+    ]
+  }
+}

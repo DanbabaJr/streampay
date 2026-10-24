@@ -5,6 +5,7 @@
   "description": "Workspace-level scripts exposing every workflow step for contributors.",
   "scripts": {
     "test":        "cargo test -p streampay-contract --locked",
+    "client-parity:bless": "node scripts/client-parity/bless.mjs",
     "test:fuzz":   "echo 'Run fuzz targets manually: cd fuzz && cargo +nightly fuzz run <target>'",
 
     "lint":        "cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings",
@@ -24,12 +25,24 @@
     "typecheck":   "cd frontend && npm run typecheck",
     "audit":       "cd frontend && npm audit --omit=dev --audit-level=high",
 
-    "errors:check": "cargo run -p streampay-contract --example error_surface_doc && git diff --exit-code docs/ERRORS.md",
+    "generated:check": "bash scripts/check_generated.sh all",
+    "generated:surface": "bash scripts/check_generated.sh surface",
+    "generated:catalog": "bash scripts/check_generated.sh catalog",
+    "generated:vectors": "bash scripts/check_generated.sh vectors",
+    "generated:events": "bash scripts/check_generated.sh events",
+    "events:compat": "node scripts/event_compat_check.mjs --base",
+    "events:compat:test": "node --test scripts/event_compat_check.test.mjs",
+    "eol:check": "bash scripts/check_line_endings.sh",
+    "codes:check": "bash scripts/check_error_codes.sh",
+    "links:check": "node scripts/check_docs_links.mjs",
+    "json:check": "node scripts/check_duplicate_json_keys.mjs --self-test",
+
+    "errors:check": "bash scripts/check_generated.sh surface",
     "errors:regen": "cargo run -p streampay-contract --example error_surface_doc",
 
-    "matrix": "npm run lint && npm run test && npm run build:contract && npm run build:frontend && npm run typecheck && npm run audit && npm run errors:check",
+    "matrix": "npm run codes:check && npm run lint && npm run test && npm run build:contract && npm run build:frontend && npm run typecheck && npm run audit && npm run generated:check && npm run eol:check && npm run links:check && npm run json:check",
 
-    "ci:contract": "npm run lint && npm run test && npm run build:contract && npm run errors:check",
+    "ci:contract": "npm run codes:check && npm run lint && npm run test && npm run build:contract && npm run generated:surface",
     "ci:frontend": "npm run build:frontend && npm run typecheck && npm run audit"
   }
 }

@@ -1,0 +1,46 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/oracle_time_reported.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an authorized oracle publisher reports a reference timestamp.",
+  "properties": {
+    "ledger_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "reported_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "reported_time",
+    "ledger_time"
+  ],
+  "title": "OracleTimeReported",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "oracle_time_reported",
+    "fingerprint": "sha256:1c2b6141c1f149b20cd0fcc5f0e7febec31bf876f56154c938c1aeaa819562e5",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "publisher",
+        "type": "Address"
+      }
+    ]
+  }
+}

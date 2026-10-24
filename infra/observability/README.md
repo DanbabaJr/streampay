@@ -87,6 +87,8 @@ docker compose up -d
 
 Services exposed:
 - **Grafana**: `http://localhost:3001` (admin / admin)
+- **Jaeger Tracing UI**: `http://localhost:16686`
+- **OpenTelemetry Collector**: `localhost:4317` (OTLP gRPC) / `localhost:4318` (OTLP HTTP)
 - **Prometheus**: `http://localhost:9092`
 - **Alertmanager**: `http://localhost:9093`
 - **Indexer API & Metrics**: `http://localhost:9090/metrics`
@@ -98,6 +100,23 @@ Deployable to any Kubernetes cluster without cloud-specific dependencies:
 
 ```bash
 kubectl apply -k infra/observability/kustomize
+```
+
+---
+
+## Distributed Tracing & Async Event Seam Verification
+
+StreamPay is instrumented with OpenTelemetry to trace user operations across the full distributed stack:
+- **Trace Propagation**: W3C `traceparent` headers propagate context from browser client to server route (`POST /api/claim`).
+- **Async Event Seam**: Cross-process continuation for ledger-delayed block consensus uses **Span Links** (not parent-child) to link off-chain indexer event ingestion and push notifications back to the originating claim trace without timeline distortion.
+- **Sampling Guarantee**: Tail-based sampling in the OpenTelemetry Collector guarantees **100% of error traces are retained**.
+- **Privacy Line**: Stellar account addresses are truncated to 8-character prefixes (`addr.slice(0, 8) + "..."`), secrets/tokens are redacted, and notification URLs are sanitized. See [`docs/PRIVACY.md`](../../docs/PRIVACY.md).
+- **Architecture Documentation**: Comprehensive specification in [`docs/TRACING.md`](../../docs/TRACING.md).
+
+To run the end-to-end claim trace simulation and verify all seams:
+
+```bash
+node infra/observability/scripts/e2e_claim_trace_demo.mjs
 ```
 
 ---

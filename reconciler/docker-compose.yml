@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  reconciler:
+    build: .
+    container_name: streampay-reconciler
+    restart: unless-stopped
+    environment:
+      - HORIZON_URL=${HORIZON_URL:-https://horizon-testnet.stellar.org}
+      - HORIZON_API_TOKEN=${HORIZON_API_TOKEN:-}
+      - SOROBAN_RPC_URL=${SOROBAN_RPC_URL:-https://soroban-testnet.stellar.org/rpc}
+      - SOROBAN_RPC_TOKEN=${SOROBAN_RPC_TOKEN:-}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://indexer:8080/webhooks/reconciler}
+      - CONSISTENCY_WINDOW_MS=30000
+      - POLL_INTERVAL_MS=5000
+      - LOG_LEVEL=INFO
+      - ENVIRONMENT=testnet
+      - RECONCILER_ID=primary-001
+      - CONTRACT_ID=${CONTRACT_ID:-}
+      - STREAM_IDS=${STREAM_IDS:-}
+    volumes:
+      - reconciler-logs:/app/logs
+    depends_on:
+      - indexer
+    ports:
+      - "9092:9092"
+    networks:
+      - streampay
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9092/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "streampay.service=reconciler"
+      - "streampay.component=dual-read-reconciliation"
+
+  indexer:
+    image: streampay/indexer:latest
+    container_name: streampay-indexer
+    restart: unless-stopped
+    environment:
+      - RPC_URL=https://soroban-testnet.stellar.org/rpc
+      - CONTRACT_ID=${CONTRACT_ID:-}
+      - PORT=8080
+      - DATABASE_PATH=/data/streampay.sqlite
+    volumes:
+      - indexer-data:/data
+    ports:
+      - "8080:8080"
+    networks:
+      - streampay
+    labels:
+      - "streampay.service=indexer"
+      - "streampay.component=webhook-target"
+
+volumes:
+  reconciler-logs:
+  indexer-data:
+
+networks:
+  streampay:
+    driver: bridge

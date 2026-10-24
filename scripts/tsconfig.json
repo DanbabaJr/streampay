@@ -10,5 +10,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["verify-fees.ts"]
+  "include": ["verify-fees.ts", "key_rotation_drill.ts"]
 }

@@ -65,7 +65,7 @@ describe("Indexer Integration Tests", () => {
       assert.equal(store.getState("cursor"), undefined);
 
       // Ingest fixture events
-      const decodedEvents = fixtureEvents.map(decodeEvent);
+      const decodedEvents = fixtureEvents.map((event) => decodeEvent(event));
       store.ingestPage(decodedEvents, "120", 120);
 
       // Cursor check

@@ -1,0 +1,18 @@
+[package]
+name = "streampay-vault"
+version = "0.1.0"
+edition = "2021"
+description = "StreamPay Vault: a funded pool that streams to N recipients with per-recipient weights."
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk.workspace = true
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

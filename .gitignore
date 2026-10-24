@@ -22,8 +22,13 @@ frontend/.env.local
 .idea/
 .vscode/
 *.log
-# ...except the append-only promotion log, which is a tracked record.
+# ...except the append-only promotion log and runbook testnet logs, which are tracked records.
 !deployments/promotions.log
+!docs/runbook/*.log
+
+# Perf trend build artifact
+/perf/trend.json
+
 
 # Local tooling leftovers
 .freebuff/
@@ -38,8 +43,36 @@ infra/ttl-sentinel/.ttl-sentinel.state.json.*.json
 # the dress rehearsal; uploaded as CI artifacts, never committed)
 /evidence/
 
+# Drill outputs (scripts/*.sh and key_rotation_drill.ts write logs/; uploaded
+# as CI artifacts, never committed)
+/logs/
+
 # Fuzzing (own workspace; corpus/artifacts stay local)
 fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/Cargo.lock
+# Campaign output and triage bundles: per-run, versioned on the fuzz-corpus
+# branch instead (see docs/FUZZ_CAMPAIGN.md). fuzz/known/ and
+# fuzz/regressions/ are tracked.
+fuzz/campaign/
+fuzz/triage/
+fuzz/coverage/
+
+# Python bytecode
+__pycache__/
+
+# Terraform (infra/terraform)
+# State is never committed: it holds rendered config for a live host, and the
+# plan output of one run must not become another operator's starting point.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+# Rendered bundles and manifest streams: reproducible from the modules, and the
+# bundle manifest hashes files that only exist after install.sh runs.
+infra/terraform/stacks/*/build/

@@ -1,0 +1,45 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/policy_asset_queued.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an asset allowlist mutation is proposed and queued under timelock.",
+  "properties": {
+    "allowed": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "executable_after": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "allowed",
+    "executable_after"
+  ],
+  "title": "PolicyAssetQueued",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "policy_asset_queued",
+    "fingerprint": "sha256:8186bbec1af513249975cd560065cd57671b31f47207a4f488c18059db4cfadf",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "asset",
+        "type": "Address"
+      }
+    ]
+  }
+}

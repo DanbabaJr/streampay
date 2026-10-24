@@ -15,10 +15,10 @@ This document is the authoritative **threat model and audit-intake specification
 ### Intended Audience and Scope Orientation
 An external auditor reviewing StreamPay should use this document to:
 1. **Clarify Scope Boundaries**: Eliminate guesswork regarding what is formally guaranteed by the smart contract versus what is an accepted operational or external risk.
-2. **Review Invariant Adherence**: Test every contract entrypoint, branch, and edge case against the mathematical and architectural invariants defined in [§4](#4-assets-and-security-invariants).
-3. **Verify the Adversary × Component Matrix**: Evaluate how each of the 7 identified adversary classes is countered across the 4 architectural components in [§7](#7-the-adversary--component-matrix).
-4. **Inspect Unmitigated & Partially Mitigated Gaps**: Review pre-identified residual risks in [§9](#9-accepted-open-risks-register) and ready-to-file security enhancements in [§11](#11-gap-issues).
-5. **Analyze Full State Exposure**: Review the candid evaluation of on-chain information leakage in [§10](#10-the-honest-weakness-full-contract-state-exposure).
+2. **Review Invariant Adherence**: Test every contract entrypoint, branch, and edge case against the mathematical and architectural invariants defined in [§3](#3-assets-and-security-invariants).
+3. **Verify the Adversary × Component Matrix**: Evaluate how each of the 7 identified adversary classes is countered across the 4 architectural components in [§6](#6-the-adversary--component-matrix).
+4. **Inspect Unmitigated & Partially Mitigated Gaps**: Review pre-identified residual risks in [§8](#8-accepted-open-risks-register) and ready-to-file security enhancements in [§10](#10-gap-issues-drafts-ready-for-filing).
+5. **Analyze Full State Exposure**: Review the candid evaluation of on-chain information leakage in [§9](#9-the-honest-weakness-full-contract-state-exposure-analysis).
 
 ---
 
@@ -147,7 +147,7 @@ Lifecycle states `StreamStatus::Cancelled` and `StreamStatus::Depleted` are stri
 Every new stream is assigned $ID_{k+1} = ID_k + 1$, where IDs begin at 1. No stream ID can ever be reused or re-assigned.
 
 #### Invariant 7: Panic Freedom and Error Code Stability
-The contract must never trigger an unhandled Soroban host panic on valid or invalid user inputs. Every rejection must return a typed `Result<_, StreamError>` matching the numeric codes documented in `docs/ERRORS.md`.
+The contract must never trigger an unhandled Soroban host panic on valid or invalid user inputs. Every rejection must return a typed `Result<_, StreamError>` matching the numeric codes documented in `docs/ERROR_SURFACE.md`.
 
 ---
 
@@ -784,6 +784,63 @@ The following draft issues document every `OPEN` or `PARTIALLY MITIGATED` threat
 
 ---
 
-## 12. Changelog
+## 12. Gas Sponsorship (issue #57): Adversary Matrix and Mitigations
 
+Sponsorship adds one actor with a funded budget (the sponsor), one hot key
+(the operator/relayer), and one key per beneficiary (the consent key), plus an
+off-chain message that the contract re-derives. This section maps the new
+attack surface against the components in §2.
+
+### 12.1 Adversaries and outcomes
+
+| Adversary | Attack | Result | Mitigation |
+|---|---|---|---|
+| Anyone (network-level) | Replay a relayed `sponsored_withdraw` call | Second attempt rejected | `ClaimNonce (sponsor, beneficiary, nonce)` is persistent and never freed; test `replayed_nonce_is_rejected_and_cannot_double_spend` |
+| Anyone | Replay a signature captured on testnet against mainnet, or against another deployment | Trap at signature verification | Contract id is inside the digest (strkey includes network version byte); domain tag pins the message version |
+| Anyone | Replay a signature across streams / amounts / beneficiaries | Trap | `stream_id`, `amount`, `beneficiary`, `token`, `sponsor` all inside the digest |
+| Anyone | Replay an old, authorized intent after the beneficiary changes their mind | Trap once `deadline` passes; before that it is a real claim | Short client-side TTL (`DEFAULT_INTENT_TTL_SECONDS` = 300 s) and per-intent deadline; enrollment key rotation revokes future consent |
+| Griefing third party (§6.1 row 7) | Drain a sponsor's budget by relaying many small legitimate claims | Budget exhausted for the window; sponsor's own funds only | `per_period_limit` bounds total exposure per window; `per_beneficiary_limit` bounds any single recipient; `active = false` stops all relays instantly; attacker must still hold a *valid* dual signature, so griefing requires the beneficiary to consent |
+| Griefing third party | Force a sponsor to write storage for junk claims | Persistent nonce entries | Every rejected path (unknown sponsor, inactive, unenrolled, expired, over-cap) returns a code **before** any storage write; only accepted claims burn a nonce, so an attacker cannot create entries without spending the sponsor's budget |
+| Compromised / over-eager operator | Sign arbitrary claims up to and beyond the cap | Cannot exceed `per_period_limit` per window | Budget check precedes verification; the operator's key can only *authorize*, never *raise* a cap. Response: `rotate_operator_key` (test `rotating_the_operator_key_voids_old_relay_signatures`) and `set_sponsor_active(false)` |
+| Signature interception | Forge or mutate a captured signature | Host trap, zero state change | `ed25519_verify` runs over the SHA-256 digest; any field change alters the digest. Trap rolls back the nonce marker, so a forged relay does not burn the beneficiary's nonce (test `invalid_signature_traps_without_burning_the_nonce`) |
+| Malicious relayer | Claim more than the beneficiary asked for | Paid out only the signed `amount` | The beneficiary's own consent signature covers the exact amount and stream; the relayer cannot edit either without invalidating it |
+| Malicious sponsor | Register as a sponsor of someone else's streams and siphon funds | Payout goes only to `stream.recipient` | `sponsored_withdraw` verifies `beneficiary == stream.recipient` and transfers from the contract to that address; enrolling a key for a stranger does not make them a recipient (test `sponsoring_someone_who_is_not_the_recipient_is_rejected`) |
+| Stolen beneficiary consent key | Relay the victim's accrued funds | Funds move to the *same* recipient address, so no theft of principal | Payout is address-bound; damage is limited to early/partial claims. Recovery: rotate the enrolled key via `enroll_beneficiary` (recipient auth) and re-claim |
+
+### 12.2 Invariants added by sponsorship
+
+- **Invariant 8 — Sponsored payout never exceeds consent.** `sponsored_withdraw`
+  pays exactly the `amount` inside the digest both parties signed, to
+  `stream.recipient`, against `stream.token`.
+- **Invariant 9 — Sponsor exposure is bounded per window.** Sum of accepted
+  claims in any rolling `window_seconds` ≤ `per_period_limit`; per beneficiary
+  ≤ `per_beneficiary_limit`.
+- **Invariant 10 — One nonce, one spend.** For a `(sponsor, beneficiary)` pair,
+  each nonce authorizes at most one accepted claim, for the lifetime of the
+  instance.
+- **Invariant 11 — Signature failure has no state effect.** The only path that
+  traps (rather than returning a code) runs after every check that can write,
+  and the host rolls back the whole invocation.
+
+### 12.3 Residual risks (accepted, documented)
+
+1. **Consent-key custody.** The demo frontend keeps the beneficiary's consent
+   key in `localStorage` — practical for testnet, not for mainnet. A production
+   deployment needs a wallet or hardware signer that signs raw bytes; the
+   contract cannot distinguish a careless beneficiary from a coerced one.
+2. **Relay availability is not guaranteed by the protocol.** No sponsor is
+   obligated to register or stay active, so "claim for free" is an optional path
+   and the UI always keeps the self-paid withdrawal. Budget exhaustion surfaces
+   as `SponsorBudgetExceeded`, never as lost funds.
+3. **Deadline granularity is ledger time.** An intent stays relayable until
+   `deadline`; the client chooses how short that window is. Long deadlines widen
+   the window in which a compromised operator can act on an old intent.
+4. **Sponsor address is public.** Anyone can read a sponsor's remaining budget
+   (`get_sponsor`, `sponsor_period_spend`) and time claims against a nearly
+   exhausted window. That is a privacy property of the sponsor, not a fund-risk.
+---
+
+## 13. Changelog
+
+- **2026-10-16**: Added §12 (gas sponsorship adversary matrix, invariants 8-11 and residual risks) for issue #57.
 - **2026-10-15 (v1.0.0-draft)**: Initial threat model and adversary × component security matrix compiled for issue #13 / audit intake against commit `0846c879db1312d4a08bbf7099349822fc66ced4`.

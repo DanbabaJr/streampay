@@ -7,5 +7,51 @@ Dockerfile  text eol=lf
 *.yml       text eol=lf
 *.yaml      text eol=lf
 
+# Golden test files use LF
+contracts/streaming-payments/test_orderings/*.txt text eol=lf
+
 # Default: auto-normalize everything else.
 *           text=auto
+
+# -----------------------------------------------------------------------------
+# Sources and generated artifacts: LF on every platform.
+#
+# Three CI gates regenerate a committed file and diff it against the source
+# (scripts/check_generated.sh), and two of them hash their inputs into a
+# content-derived stamp. On a Windows checkout with core.autocrlf=true those
+# files arrive with CRLF while the generators write LF, so a gate can report
+# drift that no amount of re-running clears — this repo has already paid for it
+# once (see `a3af379`, "normalize CRLF before hashing the schema fingerprint").
+# Pinning both sides of each gate to LF makes the working tree byte-identical
+# to the index locally and in CI.
+#
+# *.rs is here because rustfmt emits LF: `cargo fmt --all -- --check` fails a
+# CRLF checkout on the contributor's machine in a way `cargo fmt --all` then
+# re-cleans, which churns whole files for no reason.
+#
+# Must come before the `-text` attestation rules below, since the last
+# matching pattern wins.
+# -----------------------------------------------------------------------------
+*.rs        text eol=lf
+*.md        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.mjs       text eol=lf
+*.json      text eol=lf
+
+# *.toml joins the list because two gates read it with line-oriented shell:
+# scripts/attest.sh and scripts/reproducible_build.sh grep rust-toolchain.toml
+# for the pinned channel and feed the result into a content-derived stamp. On an
+# autocrlf checkout that value arrives with a trailing carriage return, which is
+# exactly the class of drift the note above exists to prevent, and the files
+# otherwise fall under `* text=auto` (LF in the index, CRLF on a Windows
+# working tree). *.py is here for the same reason as *.rs: it is a source file
+# the CI jobs execute, and it should not depend on the contributor's platform.
+*.toml      text eol=lf
+*.py        text eol=lf
+
+# Attestation payloads are signed byte-for-byte, so any line-ending
+# normalization would invalidate every signature on a Windows checkout.
+# Must come after `* text=auto` above to take effect.
+attestations/**/*.json  -text
+attestations/**/*.sig   -text
