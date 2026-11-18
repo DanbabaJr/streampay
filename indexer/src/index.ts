@@ -13,6 +13,7 @@ import { OutboxDispatcher } from "./outbox/dispatcher.js";
 import { OutboxMetrics } from "./outbox/metrics.js";
 import { httpPushTransport } from "./outbox/http-transport.js";
 import { traceCorrelationRegistry } from "./telemetry.js";
+import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
 import type { DecodedEvent, Stream } from "./types.js";
 
 function parseCursor(raw: unknown): number {
@@ -568,31 +569,49 @@ export async function run(): Promise<void> {
     }
   }
 
-  app.listen(port, () => console.log(`StreamPay indexer listening on http://localhost:${port}`));
-  let polling = false;
+  const server = app.listen(port, () => console.log(`StreamPay indexer listening on http://localhost:${port}`));
+  let inFlightPoll: Promise<void> | null = null;
+  let shuttingDown = false;
 
   async function pollSafely(): Promise<void> {
-    if (polling) return;
-    polling = true;
+    if (inFlightPoll || shuttingDown) return;
+    inFlightPoll = (async () => {
+      try {
+        await poll();
+      } catch (error) {
+        console.error("Indexer poll failed:", error);
+      }
+    })();
     try {
-      await poll();
-    } catch (error) {
-      console.error("Indexer poll failed:", error);
+      await inFlightPoll;
     } finally {
-      polling = false;
+      inFlightPoll = null;
     }
   }
 
   void pollSafely();
-  setInterval(() => void pollSafely(), pollInterval);
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      dispatcher.stop();
-      outboxDispatcher.stop();
-      store.close();
-      process.exit(0);
-    });
-  }
+  const pollTimer = setInterval(() => void pollSafely(), pollInterval);
+
+  // SIGTERM/SIGINT: drain in-flight ingest and outbox dispatch, bounded by
+  // SHUTDOWN_DRAIN_MS, before closing the store (see ./shutdown.ts).
+  const shutdown = createGracefulShutdown({
+    drainMs: envInt("SHUTDOWN_DRAIN_MS", 10_000),
+    stopAccepting: () => {
+      shuttingDown = true;
+      clearInterval(pollTimer);
+      server.close();
+      // SSE streams never end on their own; without this `close()` would wait forever.
+      server.closeAllConnections();
+    },
+    pipeline,
+    inFlightIngest: () => inFlightPoll,
+    outbox: outboxDispatcher,
+    webhooks: dispatcher,
+    store,
+    exit: (code) => process.exit(code),
+    log: (message) => console.warn(message),
+  });
+  installShutdownHandlers(process, ["SIGINT", "SIGTERM"], shutdown);
 }
 
 // Auto-run if executed directly as entrypoint
