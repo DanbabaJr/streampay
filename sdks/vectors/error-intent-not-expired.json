@@ -1,0 +1,29 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "error-intent-not-expired",
+  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "provenance": "schedule_test::reclaim_before_expiry_reverts: reclaim_expired while expires_at is still in the future.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAPcmVjbGFpbV9leHBpcmVkAAAAAAEAAAAFAAAAAAAAAAEAAAAAAAAAAAAAAAEURtIsAAAAQJ2lMl5KfBk6jvyl8zmK9BZo7S8u2OI+rWryfd2auNWeEsPahrFIDbz1vaSVGzUdFKsUkI9BQModwzVxmgzNPg4=",
+  "resultXdr": "AAAAAgAAAAAAAAAZ",
+  "eventsXdr": [],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+      "function": "reclaim_expired",
+      "args": {
+        "intent_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "error": {
+        "name": "IntentNotExpired",
+        "code": 25
+      }
+    },
+    "events": []
+  }
+}
