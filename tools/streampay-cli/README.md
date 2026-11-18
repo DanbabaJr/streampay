@@ -44,6 +44,41 @@ contract to spend the deposit (and any configured protocol fee) on the token.
 streams with a positive on-chain `available` result, and simulates/submits
 batches of up to 50 `withdraw_max` operations.
 
+## Shell completions
+
+`streampay completion <bash|zsh|fish>` prints a static completion script for
+every command, subcommand, and flag, including the `--network` and `--signer`
+values. The script is generated from the same command registry the CLI parses,
+and it never runs node while completing.
+
+Bash (needs the `bash-completion` package for the user directory):
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+streampay completion bash > ~/.local/share/bash-completion/completions/streampay
+# or, for the current shell only:
+source <(streampay completion bash)
+```
+
+Zsh:
+
+```zsh
+mkdir -p ~/.zfunc
+streampay completion zsh > ~/.zfunc/_streampay
+# in ~/.zshrc, before compinit:
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+Fish:
+
+```fish
+streampay completion fish > ~/.config/fish/completions/streampay.fish
+```
+
+Open a new shell afterwards. Regenerate the script after upgrading the CLI.
+`completion` prints a shell script, so it refuses `--json` with a `USAGE` error.
+
 ## Signers
 
 - `--signer env` reads `STREAMPAY_SECRET_KEY` (override with `--secret-env`).
