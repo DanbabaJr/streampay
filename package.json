@@ -34,6 +34,7 @@
     "generated:vectors": "bash scripts/check_generated.sh vectors",
     "generated:events": "bash scripts/check_generated.sh events",
     "schema:bless": "bash scripts/schema_bless.sh",
+    "seed:golden:bless": "bash scripts/seed_golden_bless.sh",
     "events:compat": "node scripts/event_compat_check.mjs --base",
     "events:compat:test": "node --test scripts/event_compat_check.test.mjs",
     "eol:check": "bash scripts/check_line_endings.sh",
