@@ -292,16 +292,26 @@ export class OutboxStore {
     return res.changes;
   }
 
-  /** Manual dead-letter replay: reset to pending for immediate re-dispatch. */
-  replayIntent(intentId: number): boolean {
+  /**
+   * Manual dead-letter replay: reset to pending for immediate re-dispatch.
+   * Guarded on `state = 'dead'`, so replaying an intent that is already
+   * pending, in flight or delivered is a no-op (returns false).
+   *
+   * By default `attempts` is preserved (the HTTP replay endpoint's historical
+   * behaviour). Pass `resetAttempts` to give the intent a fresh retry budget,
+   * which the operator replay tool uses so one transient failure right after
+   * recovery does not immediately dead-letter the intent again.
+   */
+  replayIntent(intentId: number, opts: { resetAttempts?: boolean } = {}): boolean {
     const res = this.db
       .prepare(
         `UPDATE outbox_intents
          SET state = 'pending', next_retry_at = 0, dead_reason = NULL, last_error = NULL,
-             claimed_at = NULL, claim_token = NULL
+             claimed_at = NULL, claim_token = NULL,
+             attempts = CASE WHEN ? = 1 THEN 0 ELSE attempts END
          WHERE id = ? AND state = 'dead'`
       )
-      .run(intentId);
+      .run(opts.resetAttempts ? 1 : 0, intentId);
     return res.changes === 1;
   }
 
