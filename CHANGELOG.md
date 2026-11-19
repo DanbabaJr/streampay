@@ -9,6 +9,12 @@ interface: they are only ever appended to, never renumbered or reused.
 
 ## [Unreleased]
 
+### Added
+- `tools/streampay-cli` read-only `status` / `get` commands and a `--watch`
+  JSON-lines mode: polls `get_stream`, emits one line per decoded state
+  change, and flushes a summary line on SIGINT. `--interval` has a 1000 ms
+  floor; changes in RPC ledger metadata never count as state changes.
+
 ## [0.3.0] - 2026-10-04
 
 ### Changed

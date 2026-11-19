@@ -130,6 +130,7 @@ stellar contract deploy \
 ```text
 contracts/streaming-payments/   the contract (lib.rs, stream.rs, errors.rs, events.rs, test.rs)
 frontend/                       minimal Next.js UI (Freighter wallet)
+tools/streampay-cli/            read-only status/get + --watch JSON-lines CLI
 fuzz/                           cargo-fuzz harness for the accrual math (own workspace)
 scripts/deploy_testnet.sh       one-command testnet demo
 docs/ARCHITECTURE.md            design deep-dive
