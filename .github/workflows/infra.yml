@@ -19,6 +19,8 @@ permissions:
   contents: read
 
 env:
+  # Pinned in digests/terraform-1.9.8.sha256 (release archive digest). Both jobs
+  # below assert the installed CLI matches this version; bump the two together.
   TF_VERSION: "1.9.8"
   # A syntactically valid testnet contract id used ONLY to render configs in CI.
   # Nothing here talks to a chain, and the value is not a secret.
@@ -165,3 +167,32 @@ jobs:
             exit 1
           fi
           echo "no tracked terraform state"
+
+  terraform-plan-gate:
+    name: Terraform — fmt / validate / plan (no credentials)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same pin as the terraform job above, and the same archive digest as
+      # digests/terraform-1.9.8.sha256. plan_gate.sh refuses to run under a
+      # different version, so a setup-action drift cannot silently change what
+      # \"plan\" means for these stacks.
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # fmt -check, then init -backend=false + validate for every stack, then a
+      # plan for the two credential-free stacks from fixtures/ci-plan.tfvars.json.
+      # No apply, no state backend, no cloud API.
+      - name: fmt / validate / plan (read-only)
+        run: sh scripts/plan_gate.sh
+
+      # A gate that cannot fail is green forever. This plans the deliberately
+      # invalid fixture and requires variable validation to reject it.
+      - name: Self-test — invalid fixture must fail the gate
+        run: sh scripts/plan_gate.sh --self-test
