@@ -17,7 +17,7 @@
 //! `test::empty_plan_matches_single_window_formula` proves by exhaustive
 //! comparison.
 
-use soroban_sdk::{contracttype, Address, BytesN, Env, MuxedAddress, TryFromVal, Val, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, MuxedAddress, Symbol, TryFromVal, Val, Vec};
 
 use crate::errors::StreamError;
 use crate::surface::{self, Branch};
@@ -1065,6 +1065,56 @@ pub enum DataKey {
         doc = " paused, so accrual for a running stream never depends on this key."
     )]
     StreamPause(u64),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Global receivables configuration (instance storage)."
+    )]
+    ReceivablesConfig,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Active advance against future accrual for stream id (persistent storage)."
+    )]
+    Advance(u64),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Next condition id to hand out (instance storage)."
+    )]
+    NextConditionId,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Release condition for stream id (persistent storage)."
+    )]
+    StreamCondition(u64),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Publisher attestation for condition (persistent storage)."
+    )]
+    ConditionAttestation(u64, Address),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Versioned stream template (persistent storage)."
+    )]
+    Template(u32, u32),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Highest approved version for template id (instance storage)."
+    )]
+    LatestTemplateVersion(u32),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Lineage linking stream id to template id and version (persistent storage)."
+    )]
+    StreamTemplateLineage(u64),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Integrator callback hook registered for stream and event class (persistent storage)."
+    )]
+    StreamHook(u64, Symbol),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Reentrancy lock flag for stream id during hook callback (temporary/persistent storage)."
+    )]
+    StreamReentrancyLock(u64),
 }
 
 /// Freeze point of stream `id` while it is paused; `None` while it streams.
