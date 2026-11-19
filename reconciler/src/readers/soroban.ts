@@ -1,7 +1,7 @@
 //! Soroban RPC reader that polls contract state for stream information.
 
-import { createHttpAgent } from "./http.js";
-import type { StreamState, SorobanStreamStorage } from "./types.js";
+import { createHttpAgent } from "../http.js";
+import type { StreamState, SorobanStreamStorage, StreamStatus } from "../types.js";
 
 export interface SorobanRpcReaderConfig {
   url: string;
@@ -27,7 +27,7 @@ export class SorobanRpcReader {
       const response = await this.http.get(`${this.config.url}`);
       this.healthy = response.status === 200;
       return { healthy: this.healthy };
-    } catch (err) {
+    } catch (err: unknown) {
       this.healthy = false;
       return {
         healthy: false,
@@ -53,7 +53,7 @@ export class SorobanRpcReader {
       );
       
       return states.filter((state): state is StreamState => state !== null);
-    } catch (err) {
+    } catch (err: unknown) {
       this.healthy = false;
       console.warn(`Soroban RPC reader error: ${err}`);
       return []; // Return empty on error
@@ -103,16 +103,16 @@ export class SorobanRpcReader {
 
       const deposit = parseValue(depositRes) ?? "0";
       const withdrawn = parseValue(withdrawnRes) ?? "0";
-      const startTime = parseValue(startTimeRes) ?? null;
-      const endTime = parseValue(endTimeRes) ?? null;
+      const _startTime = parseValue(startTimeRes) ?? null;
+      const _endTime = parseValue(endTimeRes) ?? null;
       const cancelableStr = parseValue(cancelableRes);
-      const cancelable = cancelableStr === "true" || cancelableStr === "1";
+      const _cancelable = cancelableStr === "true" || cancelableStr === "1";
       const statusStr = parseValue(statusRes) ?? "Active";
 
       // Validate status
       const status: StreamStatus = 
-        ["Active", "Cancelled", "Depleted"].includes(statusStr as StreamStatus) 
-          ? (statusStr as StreamStatus) 
+        (statusStr === "Active" || statusStr === "Cancelled" || statusStr === "Depleted")
+          ? statusStr
           : "Active";
 
       return {
@@ -125,7 +125,7 @@ export class SorobanRpcReader {
           status,
         },
       };
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn(`Failed to get stream state for ${streamId}: ${err}`);
       return null;
     }
@@ -150,8 +150,11 @@ export class SorobanRpcReader {
       throw new Error(`Soroban RPC error: ${response.status}`);
     }
 
-    // Response format: { xdr: "AAAA..." } or similar
-    return response.data as { xdr?: string };
+    if (typeof response.data === "object" && response.data !== null && "xdr" in response.data) {
+      const xdrVal = (response.data as { xdr: unknown }).xdr;
+      return { xdr: typeof xdrVal === "string" ? xdrVal : undefined };
+    }
+    return {};
   }
 
   /**
@@ -171,8 +174,9 @@ export class SorobanRpcReader {
     try {
       const response = await this.http.get(`${this.config.url}`);
       if (response.status === 200 && typeof response.data === "object" && response.data !== null) {
-        // Extract ledger from response - this depends on RPC implementation
-        return (response.data as any).ledger ?? null;
+        if ("ledger" in response.data && typeof (response.data as { ledger: unknown }).ledger === "number") {
+          return (response.data as { ledger: number }).ledger;
+        }
       }
       return null;
     } catch {
@@ -182,5 +186,4 @@ export class SorobanRpcReader {
 }
 
 // Re-export types for consumers
-export type { SorobanRpcReaderConfig };
-export type { StreamState, SorobanStreamStorage } from "./types.js";
+export type { StreamState, SorobanStreamStorage } from "../types.js";
