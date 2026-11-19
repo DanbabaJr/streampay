@@ -240,6 +240,18 @@ export class IngestPipeline {
     return this.sequencer.metrics();
   }
 
+  private stopRequested = false;
+
+  /**
+   * Graceful shutdown: let the window being committed finish, then issue and
+   * commit nothing further. Each window commits in one transaction together with
+   * its outbox intents and its resume position, so stopping between windows is
+   * always a consistent place to stop; the next process resumes at `ingest_ledger`.
+   */
+  requestStop(): void {
+    this.stopRequested = true;
+  }
+
   /** Reads the durable windowed position, or `undefined` on a fresh database. */
   resumeLedger(): number | undefined {
     const raw = this.cfg.sink.getState(this.positionKey);
@@ -309,7 +321,7 @@ export class IngestPipeline {
           // both move while windows are in flight, so a tick starts serial and
           // ramps within its first response instead of waiting for the next tick.
           acc.depth = deriveInFlight(this.cfg.source.getRateBudget(), { maxInFlight: this.cfg.maxInFlight });
-          if (pending.length >= acc.depth || issued >= windows.length) return;
+          if (this.stopRequested || pending.length >= acc.depth || issued >= windows.length) return;
           const read = this.readWindow(windows[issued++]);
           // A result that gets discarded because an earlier window failed or
           // stopped the tick must not surface as an unhandled rejection.
@@ -325,6 +337,11 @@ export class IngestPipeline {
         this.commit(read, acc);
         if (!read.complete) {
           // Lagging tip: stop rather than commit later windows out of order.
+          acc.caughtUp = false;
+          break;
+        }
+        if (this.stopRequested) {
+          // Shutdown: reads still in flight are discarded uncommitted.
           acc.caughtUp = false;
           break;
         }
@@ -421,7 +438,18 @@ export class IngestPipeline {
   }
 
   private decodeAll(events: RpcEvent[]): DecodedEvent[] {
-    return events.map((event) => this.cfg.decode(event));
+    const decoded: DecodedEvent[] = [];
+    for (const event of events) {
+      try {
+        decoded.push(this.cfg.decode(event));
+      } catch (err) {
+        console.warn(
+          `[ingest] undecodable event ${event.id} skipped:`,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+    return decoded;
   }
 
   private commit(read: WindowRead, acc: TickAccumulator): void {
@@ -461,6 +489,7 @@ export class IngestPipeline {
           startLedger = (await this.withBudget(() => this.cfg.source.getLatestLedger())).sequence;
           acc.requests += 1;
         }
+        if (this.stopRequested) break;
         if (acc.requests >= this.cfg.maxWindowsPerTick) {
           // Same bound as a windowed tick, read here as "requests per tick": an
           // endpoint that ignores cursors and keeps handing back full pages would
