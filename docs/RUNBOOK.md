@@ -8,21 +8,22 @@ This runbook carries an end-to-end worked example of onboarding a **50-employee 
 
 ## Quick Reference: Alerts & Severities
 
-| Alert Name | Severity | Service | Soak Baseline (Issue #27) | Runbook Link |
-|---|---|---|---|---|
-| `IndexerEventLagHigh` | Warning (P2) | Indexer | P95 lag ≤ 8.2s (normal ~5s ledger) | §4 decision tree |
-| `IndexerEventLagCritical` | Critical (P1) | Indexer | P99 lag ≤ 12.4s (max transient 25s) | §4 decision tree |
-| `IndexerLedgerLagCritical` | Critical (P1) | Indexer | Steady-state lag ≤ 1 ledger | §4 decision tree |
-| `IndexerDBDepthGrowing` | Warning (P2) | Indexer | Queue drains < 50 items/batch | §4 decision tree |
-| `IndexerDBDepthCritical` | Critical (P1) | Indexer | Max burst depth observed = 120 | §4 decision tree |
-| `SorobanRPCErrorRateHigh` | Warning (P2) | RPC Client | Normal baseline error rate = 0.04% | §4 decision tree |
-| `SorobanRPCErrorRateCritical` | Critical (P1) | RPC Client | Rate limit / node outage threshold > 20% | §4 decision tree |
-| `ReconciliationDivergenceDetected` | **Critical (P0)** | Reconciler | **0 divergences** across 10,000 txs | §4 decision tree |
-| `ReconcilerJobStalled` | Critical (P1) | Reconciler | Scheduled run interval = 60s | §4 decision tree |
-| `IndexerOutboxDepthDiverging` | Critical (P1) | Indexer Outbox | 10k-intent backlog drains in ~3.5s | [#indexeroutboxdepthdiverging](#indexeroutboxdepthdiverging) |
-| `IndexerOutboxDeliveryLagHigh` | Warning (P2) | Indexer Outbox | Oldest pending intent < 5s at steady state | [#indexeroutboxdeliverylaghigh](#indexeroutboxdeliverylaghigh) |
-| `IndexerOutboxDeadLetterRateHigh` | Warning (P2) | Indexer Outbox | 0 dead letters for healthy endpoints | [#indexeroutboxdeadletterratehigh](#indexeroutboxdeadletterratehigh) |
-| `IndexerOutboxBackpressured` | Warning (P2) | Indexer Outbox | Never engages at soak ingestion rates | [#indexeroutboxbackpressured](#indexeroutboxbackpressured) |
+| Alert Name                         | Severity          | Service        | Soak Baseline (Issue #27)                  | Runbook Link                                                         |
+| ---------------------------------- | ----------------- | -------------- | ------------------------------------------ | -------------------------------------------------------------------- |
+| `IndexerEventLagHigh`              | Warning (P2)      | Indexer        | P95 lag ≤ 8.2s (normal ~5s ledger)         | §4 decision tree                                                     |
+| `IndexerEventLagCritical`          | Critical (P1)     | Indexer        | P99 lag ≤ 12.4s (max transient 25s)        | §4 decision tree                                                     |
+| `IndexerLedgerLagCritical`         | Critical (P1)     | Indexer        | Steady-state lag ≤ 1 ledger                | §4 decision tree                                                     |
+| `IndexerDBDepthGrowing`            | Warning (P2)      | Indexer        | Queue drains < 50 items/batch              | §4 decision tree                                                     |
+| `IndexerDBDepthCritical`           | Critical (P1)     | Indexer        | Max burst depth observed = 120             | §4 decision tree                                                     |
+| `SorobanRPCErrorRateHigh`          | Warning (P2)      | RPC Client     | Normal baseline error rate = 0.04%         | §4 decision tree                                                     |
+| `SorobanRPCErrorRateCritical`      | Critical (P1)     | RPC Client     | Rate limit / node outage threshold > 20%   | §4 decision tree                                                     |
+| `ReconciliationDivergenceDetected` | **Critical (P0)** | Reconciler     | **0 divergences** across 10,000 txs        | §4 decision tree                                                     |
+| `ReconcilerJobStalled`             | Critical (P1)     | Reconciler     | Scheduled run interval = 60s               | §4 decision tree                                                     |
+| `IndexerOutboxDepthDiverging`      | Critical (P1)     | Indexer Outbox | 10k-intent backlog drains in ~3.5s         | [#indexeroutboxdepthdiverging](#indexeroutboxdepthdiverging)         |
+| `IndexerOutboxDeliveryLagHigh`     | Warning (P2)      | Indexer Outbox | Oldest pending intent < 5s at steady state | [#indexeroutboxdeliverylaghigh](#indexeroutboxdeliverylaghigh)       |
+| `IndexerOutboxDeadLetterRateHigh`  | Warning (P2)      | Indexer Outbox | 0 dead letters for healthy endpoints       | [#indexeroutboxdeadletterratehigh](#indexeroutboxdeadletterratehigh) |
+| `IndexerOutboxBackpressured`       | Warning (P2)      | Indexer Outbox | Never engages at soak ingestion rates      | [#indexeroutboxbackpressured](#indexeroutboxbackpressured)           |
+
 ## Table of Contents
 
 1. [Executive Overview & Operational Model](#1-executive-overview--operational-model)
@@ -78,6 +79,7 @@ StreamPay replaces traditional bi-weekly or monthly payroll lump-sum transfers w
 ### Core Invariants Guaranteed by Contract
 
 Every payroll operation is subject to formal verification invariants:
+
 1. **Per-Stream Invariant**: `0 <= withdrawn <= streamed <= deposit` at every ledger sequence.
 2. **Conservation of Funds Invariant**: Contract token balance $\ge \sum (\text{deposit} - \text{withdrawn})$ across all active streams.
 3. **Deterministic CEI Ordering**: All payouts follow strict Checks-Effects-Interactions (CEI) to preclude reentrancy windows.
@@ -101,6 +103,7 @@ Before submitting any transactions, the operations team runs preflight linting o
 ```
 
 #### Verification Checklist
+
 - [x] All 50 employee public keys conform to StrKey format (`G` followed by 55 characters in Base32 alphabet `[A-Z2-7]`).
 - [x] No duplicate Stellar public keys exist within the batch.
 - [x] Deposit amounts are positive integers expressed in 7-decimal smallest units ($1.00\text{ USDC} = 10{,}000{,}000\text{ units}$).
@@ -187,6 +190,7 @@ streampay --contract "$CONTRACT_ID" --signer env withdraw \
 ```
 
 **Diagnostic Audit:**
+
 - The contract verifies: `amount <= available(stream_id)`.
 - Updates internal state: `withdrawn = withdrawn + amount`.
 - Transfers tokens from contract to recipient.
@@ -202,6 +206,7 @@ streampay --contract "$CONTRACT_ID" --signer env cancel \
 ```
 
 **Mathematical Split (Day 14 / Day 30):**
+
 - Total Deposit: $8{,}500.00\text{ USDC}$
 - Elapsed Time: $1{,}209{,}600\text{ s}$ out of $2{,}592{,}000\text{ s}$ ($46.67\%$)
 - Accrued to Employee: $3{,}966.67\text{ USDC}$ (transferred to recipient immediately)
@@ -220,6 +225,7 @@ streampay --contract "$CONTRACT_ID" --signer env top-up \
 ```
 
 **Contract Behavior:**
+
 - Employer must have approved SAC allowance for top-up amount.
 - `deposit = deposit + amount`.
 - Remaining duration recalculated; stream rate per second increases proportionally to ensure new total is fully released by `end_time`.
@@ -255,65 +261,65 @@ When an operational failure occurs, engineers and operators must follow this dec
 
 ### Node A: Validation Rejections
 
-| Symptom / Error Code | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **Code 4: `DepositZero`** | Inspect CSV `deposit_units` column | Deposit amount passed was 0 or negative | Set deposit to positive integer $> 0$. | Public issue / Ops fix |
-| **Code 5: `InvalidDuration`** | Inspect start/end parameters | Duration $< 60\text{ s}$ or $> 5\text{ years}$ | Adjust `days` parameter to valid range. | Public issue / Ops fix |
-| **Code 6: `StartTimePast`** | `date +%s` vs `start_time` | Start timestamp is $> 300\text{ s}$ before ledger time | Use CLI default (now $+ 60\text{ s}$). | Public issue / Ops fix |
-| **Code 16: `InsufficientAllowance`** | `stellar contract invoke --id $TOKEN_ID -- allowance --from $SENDER --spender $CONTRACT_ID` | SAC token allowance lower than deposit | Execute `Token.approve` with sufficient amount and expiry ledger. | Ops fix |
-| **Code 22: `StreamNotActive`** | `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID` | Attempted withdrawal/top-up on cancelled or completed stream | Confirm stream ID. Stream is immutable once finalized. | Ops fix |
+| Symptom / Error Code                 | Diagnostic Command                                                                          | Root Cause                                                   | Immediate Fix                                                     | Escalation             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | ---------------------- |
+| **Code 4: `DepositZero`**            | Inspect CSV `deposit_units` column                                                          | Deposit amount passed was 0 or negative                      | Set deposit to positive integer $> 0$.                            | Public issue / Ops fix |
+| **Code 5: `InvalidDuration`**        | Inspect start/end parameters                                                                | Duration $< 60\text{ s}$ or $> 5\text{ years}$               | Adjust `days` parameter to valid range.                           | Public issue / Ops fix |
+| **Code 6: `StartTimePast`**          | `date +%s` vs `start_time`                                                                  | Start timestamp is $> 300\text{ s}$ before ledger time       | Use CLI default (now $+ 60\text{ s}$).                            | Public issue / Ops fix |
+| **Code 16: `InsufficientAllowance`** | `stellar contract invoke --id $TOKEN_ID -- allowance --from $SENDER --spender $CONTRACT_ID` | SAC token allowance lower than deposit                       | Execute `Token.approve` with sufficient amount and expiry ledger. | Ops fix                |
+| **Code 22: `StreamNotActive`**       | `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID`                   | Attempted withdrawal/top-up on cancelled or completed stream | Confirm stream ID. Stream is immutable once finalized.            | Ops fix                |
 
 ---
 
 ### Node B: Wallet & Signature Failures
 
-| Symptom | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **`txBAD_SEQ` (Sequence Number Mismatch)** | `curl -s -X POST "$RPC_URL" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"getLatestLedger"}'` | Concurrent transactions submitted from same account | Re-fetch source account sequence from Horizon/RPC before building transaction. | Ops retry |
-| **Simulation Rejection (HostError)** | `streampay --contract $CONTRACT_ID --signer env --dry-run --json create ...` | Soroban host rejected call during `simulateTransaction` | Inspect `eventXdr` and simulation report error code. | Check Node A |
-| **Hardware Wallet Payload Mismatch** | Compare `unsignedXdr` hash vs device prompt | Signer mode `ledger` generated XDR modified before submission | Never modify unsigned XDR envelope. Submit raw signed XDR via `--signed-xdr`. | Hardware wallet guide |
-| **Missing Signer Permission** | `stellar keys address env` vs contract governor | Caller is neither sender, recipient, nor contract governor | Switch signer to the authorized account address for that specific stream. | Security boundary |
+| Symptom                                    | Diagnostic Command                                                                                                        | Root Cause                                                    | Immediate Fix                                                                  | Escalation            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- |
+| **`txBAD_SEQ` (Sequence Number Mismatch)** | `curl -s -X POST "$RPC_URL" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"getLatestLedger"}'` | Concurrent transactions submitted from same account           | Re-fetch source account sequence from Horizon/RPC before building transaction. | Ops retry             |
+| **Simulation Rejection (HostError)**       | `streampay --contract $CONTRACT_ID --signer env --dry-run --json create ...`                                              | Soroban host rejected call during `simulateTransaction`       | Inspect `eventXdr` and simulation report error code.                           | Check Node A          |
+| **Hardware Wallet Payload Mismatch**       | Compare `unsignedXdr` hash vs device prompt                                                                               | Signer mode `ledger` generated XDR modified before submission | Never modify unsigned XDR envelope. Submit raw signed XDR via `--signed-xdr`.  | Hardware wallet guide |
+| **Missing Signer Permission**              | `stellar keys address env` vs contract governor                                                                           | Caller is neither sender, recipient, nor contract governor    | Switch signer to the authorized account address for that specific stream.      | Security boundary     |
 
 ---
 
 ### Node C: TTL & Storage Expiry Surprises
 
-Soroban state entries require rent maintenance. If an entry reaches its TTL cliff without renewal, reads fail.
+Soroban state entries require rent maintenance. If an entry reaches its TTL cliff without renewal, reads fail. Preview the exact write-free extension plan with `node infra/ttl-sentinel/dist/src/cli.js extend --dry-run --json`; see the [sentinel README](../infra/ttl-sentinel/README.md#dry-run-report-mode).
 
-| Symptom | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **`MissingValue` on active stream ID** | `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID` | Data entry TTL expired due to sentinel gap | Run `extend_footprint` on contract instance and entry key via TTL sentinel. | On-call P1 |
-| **Sentinel Budget Alert (`BurnExceedsBudget`)** | `curl -s http://localhost:9095/metrics \| grep streampay_sentinel_burn_vs_budget_ratio` | Network rent surge or sudden influx of live streams | Increase sentinel treasury allocation or enable `expire-demo-first` degradation policy. | Infrastructure Lead |
-| **Poison Account in Renewal Queue** | Check sentinel log: `Account quarantined` | Deleted or malformed key blocking renewal batch | Sentinel quarantines poison key automatically without stalling queue. Verify in health surface. | Issue #219 planner |
+| Symptom                                         | Diagnostic Command                                                                      | Root Cause                                          | Immediate Fix                                                                                   | Escalation          |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------- |
+| **`MissingValue` on active stream ID**          | `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID`               | Data entry TTL expired due to sentinel gap          | Run `extend_footprint` on contract instance and entry key via TTL sentinel.                     | On-call P1          |
+| **Sentinel Budget Alert (`BurnExceedsBudget`)** | `curl -s http://localhost:9095/metrics \| grep streampay_sentinel_burn_vs_budget_ratio` | Network rent surge or sudden influx of live streams | Increase sentinel treasury allocation or enable `expire-demo-first` degradation policy.         | Infrastructure Lead |
+| **Poison Account in Renewal Queue**             | Check sentinel log: `Account quarantined`                                               | Deleted or malformed key blocking renewal batch     | Sentinel quarantines poison key automatically without stalling queue. Verify in health surface. | Issue #219 planner  |
 
 ---
 
 ### Node D: Index Discovery Gaps
 
-| Symptom | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **Stream exists on-chain but absent in UI** | 1. `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID`<br>2. `curl -s http://localhost:9090/streams/$ID` | Indexer event poller has lagged behind chain tip | Query `IndexerEventLag` metric; check if indexer cursor is advancing. | Indexer Ops |
-| **Indexer cursor stalled > 5 ledgers** | `curl -s http://localhost:9090/health` | Unhandled RPC exception or network disconnect | Restart indexer daemon: `docker compose restart indexer`. | Ops runbook § 1 |
-| **SQLite DB locked (`SQLITE_BUSY`)** | `lsof \| grep indexer.db` | High-volume write contention without WAL mode | Enable WAL mode: `sqlite3 /data/indexer.db "PRAGMA journal_mode=WAL;"`. | Ops runbook § 1 |
+| Symptom                                     | Diagnostic Command                                                                                                             | Root Cause                                       | Immediate Fix                                                           | Escalation      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- | --------------- |
+| **Stream exists on-chain but absent in UI** | 1. `stellar contract invoke --id $CONTRACT_ID -- get_stream --stream_id $ID`<br>2. `curl -s http://localhost:9090/streams/$ID` | Indexer event poller has lagged behind chain tip | Query `IndexerEventLag` metric; check if indexer cursor is advancing.   | Indexer Ops     |
+| **Indexer cursor stalled > 5 ledgers**      | `curl -s http://localhost:9090/health`                                                                                         | Unhandled RPC exception or network disconnect    | Restart indexer daemon: `docker compose restart indexer`.               | Ops runbook § 1 |
+| **SQLite DB locked (`SQLITE_BUSY`)**        | `lsof \| grep indexer.db`                                                                                                      | High-volume write contention without WAL mode    | Enable WAL mode: `sqlite3 /data/indexer.db "PRAGMA journal_mode=WAL;"`. | Ops runbook § 1 |
 
 ---
 
 ### Node E: Refund & Partial-State Confusion
 
-| Symptom | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **"Employee claimed they did not get full salary on cancel"** | Inspect contract events for `StreamCancelled` topic | Unaccrued remainder correctly refunded to employer | Check accrual elapsed ratio: recipient receives `streamed - withdrawn`; unstreamed portion returns to employer. | Expected behavior |
-| **Contract balance mismatch (`ReconciliationDivergence`)** | Run reconciler verification scan: `stellar contract invoke --id $CONTRACT_ID -- verify_treasury --token $TOKEN_ID --start_id 1 --limit 50` | Divergence between off-chain database and Soroban state | Soroban state is immutable source of truth. Re-index affected ledger range. | **P0 Alert** (§ 5) |
+| Symptom                                                       | Diagnostic Command                                                                                                                         | Root Cause                                              | Immediate Fix                                                                                                   | Escalation         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------ |
+| **"Employee claimed they did not get full salary on cancel"** | Inspect contract events for `StreamCancelled` topic                                                                                        | Unaccrued remainder correctly refunded to employer      | Check accrual elapsed ratio: recipient receives `streamed - withdrawn`; unstreamed portion returns to employer. | Expected behavior  |
+| **Contract balance mismatch (`ReconciliationDivergence`)**    | Run reconciler verification scan: `stellar contract invoke --id $CONTRACT_ID -- verify_treasury --token $TOKEN_ID --start_id 1 --limit 50` | Divergence between off-chain database and Soroban state | Soroban state is immutable source of truth. Re-index affected ledger range.                                     | **P0 Alert** (§ 5) |
 
 ---
 
 ### Node F: RPC Degradation & Throttling
 
-| Symptom | Diagnostic Command | Root Cause | Immediate Fix | Escalation |
-|---|---|---|---|---|
-| **HTTP 429 Too Many Requests** | Check response headers: `Retry-After` | Public Soroban RPC rate limit exceeded | Configure private RPC endpoint or increase backoff interval (`POLL_INTERVAL_MS=3000`). | Infra / RPC provider |
-| **HTTP 503 / 502 Bad Gateway** | `curl -I https://soroban-testnet.stellar.org` | RPC node experiencing infrastructure downtime | Failover to secondary RPC node provider. | Infra failover |
-| **Transaction inclusion timeout** | `streampay --contract $CONTRACT_ID ...` returns exit code 5 | Ledger surge; transaction did not include in 10 ledgers | Query transaction status by hash before resubmitting to avoid duplicate creation. | Soroban timeout |
+| Symptom                           | Diagnostic Command                                          | Root Cause                                              | Immediate Fix                                                                          | Escalation           |
+| --------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------- |
+| **HTTP 429 Too Many Requests**    | Check response headers: `Retry-After`                       | Public Soroban RPC rate limit exceeded                  | Configure private RPC endpoint or increase backoff interval (`POLL_INTERVAL_MS=3000`). | Infra / RPC provider |
+| **HTTP 503 / 502 Bad Gateway**    | `curl -I https://soroban-testnet.stellar.org`               | RPC node experiencing infrastructure downtime           | Failover to secondary RPC node provider.                                               | Infra failover       |
+| **Transaction inclusion timeout** | `streampay --contract $CONTRACT_ID ...` returns exit code 5 | Ledger surge; transaction did not include in 10 ledgers | Query transaction status by hash before resubmitting to avoid duplicate creation.      | Soroban timeout      |
 
 ---
 
@@ -341,6 +347,7 @@ Escalation boundaries are strictly wired to [`SECURITY.md`](../SECURITY.md):
 ```
 
 The script will:
+
 1. Boot mock indexer and reconciler endpoints exposing Prometheus `/metrics`.
 2. Inject each simulated fault:
    - High event lag (`P95 > 30s`)
@@ -366,6 +373,7 @@ events late, duplicating, or dead-lettering, not that data is gone.
 - **User Impact**: Replay feeds (`GET /streams/:id/events?after=`) and push consumers fall progressively further behind chain truth. Nothing is lost (intents are durable), but staleness is unbounded until it is addressed.
 
 #### Diagnosis
+
 1. See which state is accumulating:
    ```bash
    curl -s http://localhost:8787/api/outbox/stats
@@ -378,6 +386,7 @@ events late, duplicating, or dead-lettering, not that data is gone.
 3. Confirm the dispatcher is alive (`streampay_outbox_dispatch_total` must advance).
 
 #### Remediation
+
 1. Disable the failing consumer channel so healthy ones drain:
    `POST /api/outbox/consumers/:id/status {"status":"disabled"}`.
 2. Raise dispatcher throughput (`OUTBOX_BATCH_SIZE`, `OUTBOX_TICK_MS`) or scale the consumer.
@@ -401,7 +410,9 @@ events late, duplicating, or dead-lettering, not that data is gone.
 - **Severity**: Warning (P2)
 - **Condition**: Any `rejected_backpressure` dispatch outcome within 5 minutes.
 - **Diagnosis / Remediation**: `OUTBOX_MAX_DEPTH` engaged intentionally to protect a degraded downstream. Confirm which consumer is degraded, clear it, and depth will drain at ~2,900 intents/sec. If the threshold is chronically low for your ingestion rate, raise `OUTBOX_MAX_DEPTH`.
+
 ### Absolute Rules
+
 1. **Never open a public issue** for any bug that could misplace funds or break contract accounting invariants.
 2. **Use GitHub Private Vulnerability Reporting** to reach core maintainers under confidential disclosure.
 3. **Pre-v1.0 Unsupported Boundary**: Mainnet deployments prior to the v1.0 audited release are unsupported. All live operations must remain on Stellar Testnet.
@@ -412,14 +423,14 @@ events late, duplicating, or dead-lettering, not that data is gone.
 
 Every Prometheus alert configured in `infra/observability/prometheus/rules/alerts.yml` links to a specific diagnosis and remediation procedure below:
 
-| Alert Name | Severity | Service | Baseline Soak Target | Immediate Action |
-|---|---|---|---|---|
-| `IndexerEventLagHigh` | Warning (P2) | Indexer | P95 lag $\le 8.2\text{ s}$ | Check RPC responsiveness; inspect SQLite write queue |
-| `IndexerEventLagCritical` | Critical (P1) | Indexer | P99 lag $\le 12.4\text{ s}$ | Inspect indexer logs; restart container if poller stalled |
-| `IndexerLedgerLagCritical` | Critical (P1) | Indexer | Cursor delta $\le 1$ ledger | Re-fetch Soroban RPC cursor; restart indexer |
-| `IndexerDBDepthGrowing` | Warning (P2) | Indexer | Queue drains $< 50$ items/batch | Ensure WAL mode active; allocate faster storage volume |
-| `IndexerDBDepthCritical` | Critical (P1) | Indexer | Max burst depth observed $= 120$ | Force queue sync; follow `docs/INCIDENT_RUNBOOK.md` |
-| `SorobanRPCErrorRateHigh` | Warning (P2) | RPC Client | Error rate $\le 0.04\%$ | If 429, adjust backoff; rotate RPC keys |
-| `SorobanRPCErrorRateCritical` | Critical (P1) | RPC Client | Error rate $> 20\%$ | Total network disruption; failover to secondary RPC |
+| Alert Name                         | Severity          | Service    | Baseline Soak Target                | Immediate Action                                            |
+| ---------------------------------- | ----------------- | ---------- | ----------------------------------- | ----------------------------------------------------------- |
+| `IndexerEventLagHigh`              | Warning (P2)      | Indexer    | P95 lag $\le 8.2\text{ s}$          | Check RPC responsiveness; inspect SQLite write queue        |
+| `IndexerEventLagCritical`          | Critical (P1)     | Indexer    | P99 lag $\le 12.4\text{ s}$         | Inspect indexer logs; restart container if poller stalled   |
+| `IndexerLedgerLagCritical`         | Critical (P1)     | Indexer    | Cursor delta $\le 1$ ledger         | Re-fetch Soroban RPC cursor; restart indexer                |
+| `IndexerDBDepthGrowing`            | Warning (P2)      | Indexer    | Queue drains $< 50$ items/batch     | Ensure WAL mode active; allocate faster storage volume      |
+| `IndexerDBDepthCritical`           | Critical (P1)     | Indexer    | Max burst depth observed $= 120$    | Force queue sync; follow `docs/INCIDENT_RUNBOOK.md`         |
+| `SorobanRPCErrorRateHigh`          | Warning (P2)      | RPC Client | Error rate $\le 0.04\%$             | If 429, adjust backoff; rotate RPC keys                     |
+| `SorobanRPCErrorRateCritical`      | Critical (P1)     | RPC Client | Error rate $> 20\%$                 | Total network disruption; failover to secondary RPC         |
 | `ReconciliationDivergenceDetected` | **Critical (P0)** | Reconciler | **0 divergences** across 10,000 txs | **Immediate containment**: Soroban state is truth; re-index |
-| `ReconcilerJobStalled` | Critical (P1) | Reconciler | Run interval $= 60\text{ s}$ | Restart reconciler daemon container |
+| `ReconcilerJobStalled`             | Critical (P1)     | Reconciler | Run interval $= 60\text{ s}$        | Restart reconciler daemon container                         |
