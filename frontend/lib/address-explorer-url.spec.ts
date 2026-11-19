@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAddressExplorerUrlState,
   serializeAddressExplorerUrlState,
-} from "./address-explorer-url";
+} from "./address-explorer-url.ts";
 
 describe("address explorer URL state", () => {
   it("round-trips filters and opaque cursor pagination", () => {
