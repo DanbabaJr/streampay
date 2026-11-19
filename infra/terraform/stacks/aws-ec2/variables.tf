@@ -164,18 +164,33 @@ variable "allowed_ssh_cidrs" {
   description = "CIDRs allowed to reach port 22. Empty (the default) opens no SSH rule: reach the box with SSM Session Manager, or set this to your own /32 (`curl -s https://ifconfig.me`/32) if you must have ssh."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for c in var.allowed_ssh_cidrs : can(cidrhost(c, 0))])
+    error_message = "Every allowed_ssh_cidrs entry must be a valid CIDR such as 203.0.113.7/32."
+  }
 }
 
 variable "allowed_https_cidrs" {
   description = "CIDRs allowed to reach the public listener. A dashboard with a live funded-key stack behind it should not be 0.0.0.0/0 unless it is authenticating; pin it to your office or a Cloudflare/WAF range."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = alltrue([for c in var.allowed_https_cidrs : can(cidrhost(c, 0))])
+    error_message = "Every allowed_https_cidrs entry must be a valid CIDR such as 203.0.113.0/24."
+  }
 }
 
 variable "root_volume_size_gb" {
   description = "Root volume size. Holds images, logs and the OS; the ledger lives on the data volume."
   type        = number
   default     = 20
+
+  validation {
+    condition     = var.root_volume_size_gb >= 8 && var.root_volume_size_gb <= 16384
+    error_message = "root_volume_size_gb must be between 8 and 16384 GiB (gp3's supported range)."
+  }
 }
 
 variable "data_volume_size_gb" {
@@ -254,6 +269,11 @@ variable "strict_secret_names" {
   description = "Names the source must provide or fetch-secrets.sh fails. The funded extender key is added automatically once the extender spends."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for n in var.strict_secret_names : can(regex("^[A-Z][A-Z0-9_]*$", n))])
+    error_message = "Every strict_secret_names entry must be an uppercase environment-style name such as STREAMPAY_EXTENDER_SECRET."
+  }
 }
 
 variable "enable_session_manager" {
@@ -374,12 +394,22 @@ variable "tls_cert_file" {
   description = "tls_mode=file: path on the instance holding the certificate chain, delivered by the secret mechanism."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_cert_file == "" || can(regex("^/[A-Za-z0-9._/-]+$", var.tls_cert_file))
+    error_message = "tls_cert_file must be empty or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "tls_key_file" {
   description = "tls_mode=file: path on the instance holding the private key, mode 0600."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_key_file == "" || can(regex("^/[A-Za-z0-9._/-]+$", var.tls_key_file))
+    error_message = "tls_key_file must be empty or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "install_dir" {
@@ -430,12 +460,22 @@ variable "prometheus_host_port" {
   description = "Prometheus host port. 0 keeps it off the host: Prometheus has no authentication, so on a machine with a public IP the default is 0 and you look at it through Grafana or an SSH tunnel."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.prometheus_host_port >= 0 && var.prometheus_host_port <= 65535
+    error_message = "prometheus_host_port must be a TCP port between 0 and 65535 (0 keeps it off the host)."
+  }
 }
 
 variable "indexer_host_port" {
   description = "Indexer host port (0 keeps it container-only; Caddy still proxies it when expose_indexer_api is on)."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.indexer_host_port >= 0 && var.indexer_host_port <= 65535
+    error_message = "indexer_host_port must be a TCP port between 0 and 65535 (0 keeps it container-only)."
+  }
 }
 
 variable "expose_indexer_api" {
@@ -472,54 +512,99 @@ variable "extender_threshold_ledgers" {
   description = "Extend streams whose remaining TTL is below this many ledgers."
   type        = number
   default     = 200000
+
+  validation {
+    condition     = var.extender_threshold_ledgers >= 1 && var.extender_threshold_ledgers < 6312000
+    error_message = "extender_threshold_ledgers must be at least 1 and below Soroban's max_entry_ttl of 6312000."
+  }
 }
 
 variable "extender_to_ledgers" {
   description = "Ledgers to extend to. Must exceed the threshold and stay under Soroban's max_entry_ttl (6312000)."
   type        = number
   default     = 500000
+
+  validation {
+    condition     = var.extender_to_ledgers > var.extender_threshold_ledgers && var.extender_to_ledgers <= 6312000
+    error_message = "extender_to_ledgers must exceed extender_threshold_ledgers and stay at or below Soroban's max_entry_ttl (6312000); otherwise extension never lifts the cliff."
+  }
 }
 
 variable "extender_monthly_budget_xlm" {
   description = "Stop funding once this much XLM has been spent in the calendar month."
   type        = string
   default     = "1"
+
+  validation {
+    condition     = can(regex("^[0-9]+([.][0-9]+)?$", var.extender_monthly_budget_xlm))
+    error_message = "extender_monthly_budget_xlm must be a non-negative decimal XLM amount such as \"1\" or \"12.5\"."
+  }
 }
 
 variable "extender_schedule" {
   description = "systemd calendar expression for the extender timer."
   type        = string
   default     = "hourly"
+
+  validation {
+    condition     = length(trimspace(var.extender_schedule)) > 0
+    error_message = "extender_schedule must be a non-empty systemd calendar expression such as hourly or *-*-* 00/6:00:00."
+  }
 }
 
 variable "indexer_start_ledger" {
   description = "Ledger to begin indexing from. null starts at the current latest."
   type        = number
   default     = null
+
+  validation {
+    condition     = var.indexer_start_ledger == null ? true : var.indexer_start_ledger >= 1
+    error_message = "indexer_start_ledger must be null (start at the latest ledger) or a ledger sequence of at least 1."
+  }
 }
 
 variable "indexer_poll_interval_ms" {
   description = "Ledger poll interval; the indexer refuses anything below 250 ms."
   type        = number
   default     = 5000
+
+  validation {
+    condition     = var.indexer_poll_interval_ms >= 250 && var.indexer_poll_interval_ms <= 600000
+    error_message = "indexer_poll_interval_ms must be between 250 and 600000; the indexer refuses anything below 250 ms."
+  }
 }
 
 variable "rpc_fallback_urls" {
   description = "Extra Soroban RPC endpoints the indexer rotates through under rate limiting."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for u in var.rpc_fallback_urls : can(regex("^https?://[A-Za-z0-9._:/-]+$", u))])
+    error_message = "Every rpc_fallback_urls entry must be an http(s) URL with no query string."
+  }
 }
 
 variable "prometheus_retention" {
   description = "TSDB retention. The data volume size is the real limit."
   type        = string
   default     = "15d"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.prometheus_retention))
+    error_message = "prometheus_retention must be a Prometheus duration with a unit, such as 15d or 720h."
+  }
 }
 
 variable "alert_repeat_interval" {
   description = "How often Alertmanager re-sends an unresolved warning."
   type        = string
   default     = "4h"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.alert_repeat_interval))
+    error_message = "alert_repeat_interval must be a duration with a unit, such as 4h or 30m."
+  }
 }
 
 variable "alert_receivers" {
@@ -560,6 +645,11 @@ variable "log_max_size" {
   description = "Per-container JSON log rotation size."
   type        = string
   default     = "10m"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[kKmMgG]?$", var.log_max_size))
+    error_message = "log_max_size must be a size such as 10m or 1g (docker's <number><unit> form)."
+  }
 }
 
 variable "additional_notes" {

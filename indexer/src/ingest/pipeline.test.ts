@@ -12,6 +12,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { StreamStore } from "../store.js";
+import { decodeEvent, DecodeError } from "../decoder.js";
+import { getValidWithdrawnFixture } from "../corrupt-fixtures.js";
 import type { RateBudgetSnapshot } from "../rpc-manager.js";
 import { IngestPipeline, type EventSource, type EventsPage, type TickReport } from "./pipeline.js";
 import { deriveInFlight, planWindowLedgers, planWindows, type WindowSizeOptions } from "./planner.js";
@@ -873,5 +875,110 @@ describe("serial cursor path", () => {
     assert.ok(h.store.getState("cursor") !== undefined, "the resume cursor must survive the tick");
     assert.ok(count(h.store, "events") > 0);
     h.store.close();
+  });
+});
+
+// ── Poison event resilience (issue #486) ────────────────────────────────────
+
+describe("pipeline poison event resilience", () => {
+  it("continues ingestion past a poison event without stalling or crashing", async () => {
+    const store = new StreamStore(":memory:");
+
+    const goodCreate: RpcEvent = {
+      id: "100-1",
+      pagingToken: "100",
+      ledger: 100,
+      ledgerClosedAt: new Date(1_700_000_100_000).toISOString(),
+      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+      topic: [
+        "AAAADwAAAA5zdHJlYW1fY3JlYXRlZAAA", // symbol stream_created
+        "AAAABQAAAAAAAAAH",                 // u64 7
+      ],
+      value:
+        "AAAAEQAAAAEAAAAHAAAADwAAAAZzZW5kZXIAAAAAABIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwAAAAlyZWNpcGllbnQAAAAAAAASAAAAAAAAAAABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQAAAA8AAAAFdG9rZW4AAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAAADwAAAAdkZXBvc2l0AAAAAAoAAAAAAAAAAAAAAAAAD0JAAAAADwAAAApzdGFydF90aW1lAAAAAAAFAAAAAAAAA+gAAAAPAAAACGVuZF90aW1lAAAABQAAAAAAAAfQAAAADwAAAApjYW5jZWxhYmxlAAAAAAAAAAAAAQ==",
+    };
+
+    const poisonEvent: RpcEvent = {
+      id: "101-1",
+      pagingToken: "101",
+      ledger: 101,
+      ledgerClosedAt: new Date(1_700_000_105_000).toISOString(),
+      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+      topic: ["AAAADwAAAA5zdHJlYW1fY3JlYXRlZAAA".slice(0, 8), "AAAABQAAAAAAAAAH"], // truncated XDR
+      value: "corrupted_xdr_payload",
+    };
+
+    const goodWithdraw: RpcEvent = {
+      id: "102-1",
+      pagingToken: "102",
+      ledger: 102,
+      ledgerClosedAt: new Date(1_700_000_110_000).toISOString(),
+      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+      topic: [
+        "AAAADwAAAAl3aXRoZHJhd24AAAA=", // symbol withdrawn
+        "AAAABQAAAAAAAAAH",             // u64 7
+      ],
+      value: getValidWithdrawnFixture().value,
+    };
+
+    const allEvents = [goodCreate, poisonEvent, goodWithdraw];
+    const tip = 105;
+
+    const source: EventSource = {
+      async getLatestLedger() {
+        return { sequence: tip };
+      },
+      async getEvents({ startLedger, cursor }: { startLedger?: number; cursor?: string }) {
+        const fromLedger = startLedger ?? (cursor ? Number(cursor) + 1 : 1);
+        const matched = allEvents.filter((e) => e.ledger >= fromLedger);
+        return {
+          events: matched,
+          latestLedger: tip,
+          cursor: String(tip),
+        };
+      },
+      getRateBudget() {
+        return {
+          maxRps: 40,
+          burstCapacity: 80,
+          availableTokens: 100,
+          observedLatencyMs: 10,
+          healthyEndpoints: 1,
+          hedgedReads: false,
+        };
+      },
+    };
+
+    const pipeline = new IngestPipeline({
+      source,
+      sink: store,
+      decode: (e) => decodeEvent(e, { contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM" }),
+      filters: [],
+      initialLedger: 99,
+      pageLimit: 100,
+      windowLedgers: 20,
+      maxWindowsPerTick: 10,
+      maxInFlight: 1,
+    });
+
+    const report = await pipeline.runTick();
+    assert.equal(report.ok, true, `Ingest tick failed: ${report.error}`);
+    assert.equal(report.caughtUp, true, "Pipeline should be caught up to tip");
+
+    // The valid stream_created should be applied
+    const stream = store.getStream("7");
+    assert.ok(stream, "Stream 7 should exist in store");
+    assert.equal(stream.deposit, "1000000");
+
+    // The valid withdrawn event should also be applied
+    assert.equal(stream.withdrawn, "2000000");
+
+    // The poison event was skipped and never applied to store
+    const events = store.getStreamHistory("7");
+    assert.equal(events.length, 2, "Only the 2 valid events should be in the store");
+    assert.equal(events[0].id, "100-1");
+    assert.equal(events[1].id, "102-1");
+
+    store.close();
   });
 });
