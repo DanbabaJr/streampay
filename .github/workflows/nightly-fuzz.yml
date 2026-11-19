@@ -83,7 +83,9 @@ jobs:
       - name: Run rate_schedule fuzz session
         working-directory: fuzz
         run: |
-          cargo +nightly fuzz run rate_schedule --             -max_total_time=${{ github.event.inputs.max_total_time || '300' }}             -rss_limit_mb=4096
+          cargo +nightly fuzz run rate_schedule -- \
+            -max_total_time=${{ github.event.inputs.max_total_time || '300' }} \
+            -rss_limit_mb=4096
 
       - name: Persist failing seeds / crash artifacts
         if: always()
