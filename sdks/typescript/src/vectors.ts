@@ -139,6 +139,48 @@ function canonicalEvent(event: StreamPayEvent): Canonical {
           new_deposit: event.newDeposit.toString(),
         },
       };
+    case "StreamScheduled":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          sender: event.sender,
+          recipient: event.recipient,
+          token: event.token,
+          deposit: event.deposit.toString(),
+          start_time: event.startTime.toString(),
+          end_time: event.endTime.toString(),
+          cancelable: event.cancelable,
+          interval: event.interval.toString(),
+          occurrences: String(event.occurrences),
+          fee_budget: event.feeBudget.toString(),
+          execute_after: event.executeAfter.toString(),
+          expires_at: event.expiresAt.toString(),
+        },
+      };
+    case "ScheduledStreamExecuted":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          keeper: event.keeper,
+          stream_id: event.streamId.toString(),
+          occurrence_index: String(event.occurrenceIndex),
+          occurrences_remaining: String(event.occurrencesRemaining),
+          fee_paid: event.feePaid.toString(),
+        },
+      };
+    case "ScheduledIntentCancelled":
+    case "ScheduledIntentExpired":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: { sender: event.sender, refund: event.refund.toString() },
+      };
+    default:
+      // Only the interfaces with recorded vectors are canonicalised; a vector
+      // for any other event must extend this switch rather than be dropped.
+      throw new Error(`no canonical form for event ${event.type}`);
   }
 }
 

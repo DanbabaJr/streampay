@@ -192,3 +192,22 @@ To simulate an end-to-end claim trace and print the visual graph:
 ```bash
 node infra/observability/scripts/e2e_claim_trace_demo.mjs
 ```
+
+---
+
+## 8. Browser Telemetry Preference
+
+The browser telemetry control lives at `/settings/telemetry`. It defaults to
+enabled to preserve the tracing behavior that predates the setting. The choice
+is stored in browser `localStorage` at `streampay:telemetryConsent` as the
+string `true` or `false`; with no stored value, telemetry remains enabled.
+
+The frontend tracer checks this preference when each span ends, immediately
+before dispatching it to its exporters. Transaction correlation registration
+also checks the preference before storing or sending the transaction hash,
+trace context, and optional stream ID to the indexer. Turning telemetry off
+therefore stops browser span exports and correlation requests immediately.
+This browser-local setting does not control server-side tracing, which remains
+managed by deployment configuration. The browser OTLP collector can be set via
+`NEXT_PUBLIC_OTEL_EXPORTER_OTLP_ENDPOINT`, and the browser indexer via
+`NEXT_PUBLIC_INDEXER_URL`.

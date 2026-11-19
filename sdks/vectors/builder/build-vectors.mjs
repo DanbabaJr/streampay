@@ -85,12 +85,12 @@ const toScVal = (type, value) => {
   return nativeToScVal(BigInt(value), { type });
 };
 
-const envelopeFor = (functionName, args) => {
+const envelopeFor = (contractId, functionName, args) => {
   const tx = new TransactionBuilder(new Account(signer.publicKey(), "0"), {
     fee: "100000",
     networkPassphrase: Networks.TESTNET,
   })
-    .addOperation(new Contract(CONTRACT_ID).call(functionName, ...args))
+    .addOperation(new Contract(contractId).call(functionName, ...args))
     .setTimebounds(0, 0)
     .build();
   tx.sign(signer);
@@ -159,18 +159,22 @@ const canonicalOf = (node, type) => {
   return decodeJson(node, type);
 };
 
-const loadSnapshot = (snapshotFile) =>
-  JSON.parse(readFileSync(join(SNAPSHOT_DIR, snapshotFile), "utf8"));
+const loadSnapshot = (snapshotFile, dir = SNAPSHOT_DIR) =>
+  JSON.parse(readFileSync(join(dir, snapshotFile), "utf8"));
 
 /** The `Stream` struct stored for `streamId` in a snapshot's ledger. */
-const loadStoredStream = (snapshotFile, streamId) => {
-  const snapshot = loadSnapshot(snapshotFile);
+const loadStoredStream = (
+  snapshotFile,
+  streamId,
+  { dir = SNAPSHOT_DIR, contract = CONTRACT_ID } = {}
+) => {
+  const snapshot = loadSnapshot(snapshotFile, dir);
   const matches = snapshot.ledger.ledger_entries
     .map((item) => item.entry?.data?.contract_data)
     .filter(
       (data) =>
         data &&
-        data.contract === CONTRACT_ID &&
+        data.contract === contract &&
         data.key?.vec?.[0]?.symbol === "Stream" &&
         data.key.vec[1]?.u64 === streamId
     );
@@ -188,12 +192,16 @@ const loadStoredStream = (snapshotFile, streamId) => {
   return val;
 };
 
-const loadEvent = (snapshotFile, eventName) => {
-  const snapshot = loadSnapshot(snapshotFile);
+const loadEvent = (
+  snapshotFile,
+  eventName,
+  { dir = SNAPSHOT_DIR, contract = CONTRACT_ID } = {}
+) => {
+  const snapshot = loadSnapshot(snapshotFile, dir);
   const matches = snapshot.events.filter(
     (entry) =>
       (entry.event?.type === "contract" || entry.event?.type_ === "contract") &&
-      entry.event.contract_id === CONTRACT_ID &&
+      entry.event.contract_id === contract &&
       entry.event.body.v0.topics[0]?.symbol === eventName
   );
   if (matches.length !== 1) {
@@ -236,13 +244,19 @@ const eventField = (event, name) => {
 };
 
 const build = (scenario) => {
-  const event = scenario.event ? loadEvent(scenario.snapshot, scenario.event) : null;
+  const contract = scenario.contract ?? CONTRACT_ID;
+  const event = scenario.event
+    ? loadEvent(scenario.snapshot, scenario.event, { dir: scenario.snapshotDir, contract })
+    : null;
   const args = scenario.args(event);
   const functionSpec = spec.functions.find((f) => f.name === scenario.function);
   const orderedArgs = functionSpec.args.map((arg) => toScVal(arg.type, args[arg.name]));
-  const envelopeXdr = envelopeFor(scenario.function, orderedArgs);
+  const envelopeXdr = envelopeFor(contract, scenario.function, orderedArgs);
 
-  const events = event ? [event] : [];
+  // `scenario.events` supplies events the snapshot did not record (a
+  // snapshot only keeps the *last* invocation's events, which in the
+  // schedule tests is usually a read-only getter); see `scheduledEvent`.
+  const events = scenario.events ? scenario.events() : event ? [event] : [];
   let result;
   if (scenario.error) {
     result = { error: { name: scenario.error, code: errorCode(scenario.error) } };
@@ -251,7 +265,7 @@ const build = (scenario) => {
   }
 
   const expectedTransaction = {
-    contract: CONTRACT_ID,
+    contract,
     function: scenario.function,
     args,
     source: signer.publicKey(),
@@ -375,6 +389,283 @@ const scenarios = [
     result: canonicalOf(loadStoredStream(snapshot, "1"), "Stream"),
   })),
 ];
+
+// ---------------------------------------------------------------------------
+// Scheduled intents (contracts/streaming-payments/src/schedule_test.rs).
+//
+// Sources: the `schedule_test` snapshots. A snapshot records the final ledger
+// plus only the *last* invocation's events, and every schedule test ends with
+// a read-only getter, so only `StreamScheduled` is recorded verbatim. For the
+// other outcomes the stored `Intent`/`Stream` ledger entries supply every
+// value, and the event payloads are rebuilt from them exactly as the test
+// asserts them (e.g. `execute_creates_stream_and_pays_keeper` asserts the
+// events are `[StreamCreated, ScheduledStreamExecuted]`).
+// ---------------------------------------------------------------------------
+const SCHEDULE_SNAPSHOT_DIR = join(
+  root,
+  "contracts",
+  "streaming-payments",
+  "test_snapshots",
+  "schedule_test"
+);
+const scheduleSnap = (name) => `${name}.1.json`;
+
+const mapOf = (node) =>
+  Object.fromEntries(node.map.map(({ key, val }) => [key.symbol, val]));
+
+/** The stored `Intent(1)` entry of a schedule snapshot. */
+const loadStoredIntent = (snapshotFile) => {
+  const matches = loadSnapshot(snapshotFile, SCHEDULE_SNAPSHOT_DIR)
+    .ledger.ledger_entries.map((item) => item.entry?.data?.contract_data)
+    .filter(
+      (data) =>
+        data && data.key?.vec?.[0]?.symbol === "Intent" && data.key.vec[1]?.u64 === "1"
+    );
+  if (matches.length !== 1) {
+    throw new Error(`${snapshotFile}: expected one stored Intent 1, found ${matches.length}`);
+  }
+  return { contract: matches[0].contract, fields: mapOf(matches[0].val) };
+};
+
+/**
+ * The keeper is the third address `Address::generate` hands the test fixture;
+ * it is never part of a stored intent, but its token balance equals the fee it
+ * was paid, so it is recoverable from the happy-path snapshot.
+ */
+const KEEPER_SOURCE = scheduleSnap("execute_creates_stream_and_pays_keeper");
+const KEEPER = (() => {
+  const intent = loadStoredIntent(KEEPER_SOURCE);
+  const fee = intent.fields.fee_budget.i128;
+  const paid = loadSnapshot(KEEPER_SOURCE, SCHEDULE_SNAPSHOT_DIR)
+    .ledger.ledger_entries.map((item) => item.entry?.data?.contract_data)
+    .filter(
+      (data) =>
+        data &&
+        data.contract === intent.fields.token.address &&
+        data.key?.vec?.[0]?.symbol === "Balance" &&
+        data.key.vec[1].address !== intent.contract &&
+        data.key.vec[1].address !== intent.fields.sender.address &&
+        mapOf(data.val).amount.i128 === fee
+    );
+  if (paid.length !== 1) throw new Error("cannot identify the keeper in the snapshot");
+  return paid[0].key.vec[1].address;
+})();
+
+/**
+ * A contract event in snapshot JSON shape. Map keys are sorted by symbol, the
+ * order the host stores a Soroban map in (and the order every recorded event
+ * above already has).
+ */
+const scheduledEvent = (contract, topic, intentId, data) => ({
+  contract_id: contract,
+  type: "contract",
+  body: {
+    v0: {
+      topics: [{ symbol: topic }, { u64: intentId }],
+      data: {
+        map: Object.entries(data)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([key, val]) => ({ key: { symbol: key }, val })),
+      },
+    },
+  },
+});
+
+const VOID_RESULT = () => scValXdr({ void: true }, StrKey);
+
+/** Cross-checks that a revert snapshot used the same actors as the happy path. */
+const sameActors = (snapshotFile) => {
+  const happy = loadStoredIntent(KEEPER_SOURCE);
+  const intent = loadStoredIntent(snapshotFile);
+  for (const field of ["sender", "recipient", "token"]) {
+    if (intent.fields[field].address !== happy.fields[field].address) {
+      throw new Error(`${snapshotFile}: ${field} differs from ${KEEPER_SOURCE}`);
+    }
+  }
+  return intent;
+};
+
+const scheduleRevert = ({ name, snapshot, fn, error, provenance, args }) => {
+  const intent = sameActors(scheduleSnap(snapshot));
+  return {
+    name,
+    provenance,
+    snapshotDir: SCHEDULE_SNAPSHOT_DIR,
+    snapshot: scheduleSnap(snapshot),
+    contract: intent.contract,
+    event: null,
+    function: fn,
+    args: () => args(intent.fields),
+    error,
+  };
+};
+
+const scheduledScenarios = [
+  (() => {
+    const snapshot = scheduleSnap("schedule_emits_expected_event");
+    const dir = SCHEDULE_SNAPSHOT_DIR;
+    const contract = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM";
+    return {
+      name: "schedule-stream",
+      provenance:
+        "StreamScheduled payload from contracts/streaming-payments/test_snapshots/schedule_test/schedule_emits_expected_event.1.json (3-occurrence recurring intent); envelope built from the same values; returns the new intent id.",
+      snapshotDir: dir,
+      snapshot,
+      contract,
+      event: "stream_scheduled",
+      function: "schedule_stream",
+      args: (event) => ({
+        sender: eventField(event, "sender").address,
+        recipient: eventField(event, "recipient").address,
+        token: eventField(event, "token").address,
+        deposit_amount: eventField(event, "deposit").i128,
+        start_time: eventField(event, "start_time").u64,
+        end_time: eventField(event, "end_time").u64,
+        cancelable: eventField(event, "cancelable").bool,
+        interval: eventField(event, "interval").u64,
+        occurrences: String(eventField(event, "occurrences").u32),
+        fee_budget: eventField(event, "fee_budget").i128,
+        execute_after: eventField(event, "execute_after").u64,
+        expires_at: eventField(event, "expires_at").u64,
+      }),
+      resultScVal: (event) => scValXdr(event.body.v0.topics[1], StrKey),
+      result: "1",
+    };
+  })(),
+  (() => {
+    const snapshot = scheduleSnap("execute_creates_stream_and_pays_keeper");
+    const intent = loadStoredIntent(snapshot);
+    const f = intent.fields;
+    const stream = mapOf(
+      loadStoredStream(snapshot, "1", { dir: SCHEDULE_SNAPSHOT_DIR, contract: intent.contract })
+    );
+    const streamId = "1";
+    return {
+      name: "execute-scheduled",
+      provenance:
+        "Happy path of schedule_test::execute_creates_stream_and_pays_keeper: the stored Intent/Stream entries of its snapshot supply the values; events are the [StreamCreated, ScheduledStreamExecuted] pair that test asserts; returns the new stream id.",
+      snapshotDir: SCHEDULE_SNAPSHOT_DIR,
+      snapshot,
+      contract: intent.contract,
+      event: null,
+      function: "execute_scheduled",
+      args: () => ({ intent_id: f.id.u64, keeper: KEEPER }),
+      events: () => [
+        scheduledEvent(intent.contract, "stream_created", streamId, {
+          sender: stream.sender,
+          recipient: stream.recipient,
+          token: stream.token,
+          deposit: stream.deposit,
+          start_time: stream.start_time,
+          end_time: stream.end_time,
+          cancelable: stream.cancelable,
+        }),
+        scheduledEvent(intent.contract, "scheduled_stream_executed", f.id.u64, {
+          keeper: { address: KEEPER },
+          stream_id: { u64: streamId },
+          occurrence_index: { u32: f.occurrences_total.u32 - f.occurrences_remaining.u32 - 1 },
+          occurrences_remaining: f.occurrences_remaining,
+          fee_paid: f.fee_budget,
+        }),
+      ],
+      resultScVal: () => scValXdr({ u64: streamId }, StrKey),
+      result: streamId,
+    };
+  })(),
+  (() => {
+    const snapshot = scheduleSnap("cancel_before_window_refunds_and_blocks_execution");
+    const intent = sameActors(snapshot);
+    const f = intent.fields;
+    // refund = (deposit + fee) * outstanding occurrences; the test asserts
+    // DEPOSIT + FEE for its single occurrence.
+    const refund = String(
+      (BigInt(f.deposit.i128) + BigInt(f.fee_budget.i128)) * BigInt(f.occurrences_remaining.u32)
+    );
+    return {
+      name: "cancel-scheduled",
+      provenance:
+        "schedule_test::cancel_before_window_refunds_and_blocks_execution: cancelled before execute_after, full (deposit + fee) escrow refunded to the sender; ScheduledIntentCancelled as that test asserts it.",
+      snapshotDir: SCHEDULE_SNAPSHOT_DIR,
+      snapshot,
+      contract: intent.contract,
+      event: null,
+      function: "cancel_scheduled",
+      args: () => ({ sender: f.sender.address, intent_id: f.id.u64 }),
+      events: () => [
+        scheduledEvent(intent.contract, "scheduled_intent_cancelled", f.id.u64, {
+          sender: f.sender,
+          refund: { i128: refund },
+        }),
+      ],
+      resultScVal: VOID_RESULT,
+      result: null,
+    };
+  })(),
+  (() => {
+    const snapshot = scheduleSnap("reclaim_after_expiry_refunds_sender_permissionlessly");
+    const intent = sameActors(snapshot);
+    const f = intent.fields;
+    const refund = String(
+      (BigInt(f.deposit.i128) + BigInt(f.fee_budget.i128)) * BigInt(f.occurrences_remaining.u32)
+    );
+    return {
+      name: "reclaim-expired",
+      provenance:
+        "schedule_test::reclaim_after_expiry_refunds_sender_permissionlessly: an unexecuted intent reclaimed at expires_at by anyone; escrow refunded to the sender; ScheduledIntentExpired as that test asserts it.",
+      snapshotDir: SCHEDULE_SNAPSHOT_DIR,
+      snapshot,
+      contract: intent.contract,
+      event: null,
+      function: "reclaim_expired",
+      args: () => ({ intent_id: f.id.u64 }),
+      events: () => [
+        scheduledEvent(intent.contract, "scheduled_intent_expired", f.id.u64, {
+          sender: f.sender,
+          refund: { i128: refund },
+        }),
+      ],
+      resultScVal: VOID_RESULT,
+      result: null,
+    };
+  })(),
+  scheduleRevert({
+    name: "error-intent-not-yet-executable",
+    snapshot: "execute_before_due_reverts",
+    fn: "execute_scheduled",
+    error: "IntentNotYetExecutable",
+    provenance:
+      "schedule_test::execute_before_due_reverts: execute_scheduled before execute_after; the error is ScVal::Error(SCError::Contract(code)) with the IntentNotYetExecutable code from frontend/lib/errors.ts.",
+    args: (f) => ({ intent_id: f.id.u64, keeper: KEEPER }),
+  }),
+  scheduleRevert({
+    name: "error-intent-not-pending",
+    snapshot: "execute_twice_reverts_double_execution_race",
+    fn: "execute_scheduled",
+    error: "IntentNotPending",
+    provenance:
+      "schedule_test::execute_twice_reverts_double_execution_race: the second execute_scheduled of an already-executed one-shot intent (the first call succeeded; see execute-scheduled); the same code also rejects executing a cancelled intent.",
+    args: (f) => ({ intent_id: f.id.u64, keeper: KEEPER }),
+  }),
+  scheduleRevert({
+    name: "error-intent-not-cancellable",
+    snapshot: "cancel_after_window_opens_reverts",
+    fn: "cancel_scheduled",
+    error: "IntentNotCancellable",
+    provenance:
+      "schedule_test::cancel_after_window_opens_reverts: cancel_scheduled once execute_after has been reached.",
+    args: (f) => ({ sender: f.sender.address, intent_id: f.id.u64 }),
+  }),
+  scheduleRevert({
+    name: "error-intent-not-expired",
+    snapshot: "reclaim_before_expiry_reverts",
+    fn: "reclaim_expired",
+    error: "IntentNotExpired",
+    provenance:
+      "schedule_test::reclaim_before_expiry_reverts: reclaim_expired while expires_at is still in the future.",
+    args: (f) => ({ intent_id: f.id.u64 }),
+  }),
+];
+scenarios.push(...scheduledScenarios);
 
 mkdirSync(vectorsDir, { recursive: true });
 for (const scenario of scenarios) {
