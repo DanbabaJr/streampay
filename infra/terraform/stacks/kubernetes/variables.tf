@@ -129,6 +129,11 @@ variable "strict_secret_names" {
   description = "Names the operator must supply or the bootstrap commands fail. The funded extender key is added automatically once the extender spends."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for n in var.strict_secret_names : can(regex("^[A-Z][A-Z0-9_]*$", n))])
+    error_message = "Every strict_secret_names entry must be an uppercase environment-style name such as STREAMPAY_EXTENDER_SECRET."
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -155,6 +160,11 @@ variable "storage_requests" {
     prometheus   = "20Gi"
     alertmanager = "2Gi"
     grafana      = "5Gi"
+  }
+
+  validation {
+    condition     = alltrue([for size in values(var.storage_requests) : can(regex("^[1-9][0-9]*(Ki|Mi|Gi|Ti|K|M|G|T)$", size))])
+    error_message = "Every storage_requests value must be a Kubernetes quantity with a unit, such as 10Gi (a bare number means bytes and is almost always a mistake)."
   }
 }
 
@@ -230,6 +240,11 @@ variable "ingress_class_name" {
   description = "ingressClassName for the public listener. Empty omits it and lets the cluster default apply."
   type        = string
   default     = "nginx"
+
+  validation {
+    condition     = var.ingress_class_name == "" || can(regex("^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", var.ingress_class_name))
+    error_message = "ingress_class_name must be empty or a lowercase DNS-style name such as nginx."
+  }
 }
 
 variable "ingress_host" {
@@ -332,18 +347,33 @@ variable "extender_threshold_ledgers" {
   description = "Extend streams whose remaining TTL is below this many ledgers."
   type        = number
   default     = 200000
+
+  validation {
+    condition     = var.extender_threshold_ledgers >= 1 && var.extender_threshold_ledgers < 6312000
+    error_message = "extender_threshold_ledgers must be at least 1 and below Soroban's max_entry_ttl of 6312000."
+  }
 }
 
 variable "extender_to_ledgers" {
   description = "Ledgers to extend to. Must exceed the threshold and stay under Soroban's max_entry_ttl (6312000)."
   type        = number
   default     = 500000
+
+  validation {
+    condition     = var.extender_to_ledgers > var.extender_threshold_ledgers && var.extender_to_ledgers <= 6312000
+    error_message = "extender_to_ledgers must exceed extender_threshold_ledgers and stay at or below Soroban's max_entry_ttl (6312000); otherwise extension never lifts the cliff."
+  }
 }
 
 variable "extender_monthly_budget_xlm" {
   description = "Stop funding once this much XLM has been spent in the calendar month."
   type        = string
   default     = "1"
+
+  validation {
+    condition     = can(regex("^[0-9]+([.][0-9]+)?$", var.extender_monthly_budget_xlm))
+    error_message = "extender_monthly_budget_xlm must be a non-negative decimal XLM amount such as \"1\" or \"12.5\"."
+  }
 }
 
 variable "extender_schedule" {
@@ -361,30 +391,55 @@ variable "indexer_start_ledger" {
   description = "Ledger to begin indexing from. null starts at the current latest."
   type        = number
   default     = null
+
+  validation {
+    condition     = var.indexer_start_ledger == null ? true : var.indexer_start_ledger >= 1
+    error_message = "indexer_start_ledger must be null (start at the latest ledger) or a ledger sequence of at least 1."
+  }
 }
 
 variable "indexer_poll_interval_ms" {
   description = "Ledger poll interval; the indexer refuses anything below 250 ms."
   type        = number
   default     = 5000
+
+  validation {
+    condition     = var.indexer_poll_interval_ms >= 250 && var.indexer_poll_interval_ms <= 600000
+    error_message = "indexer_poll_interval_ms must be between 250 and 600000; the indexer refuses anything below 250 ms."
+  }
 }
 
 variable "rpc_fallback_urls" {
   description = "Extra Soroban RPC endpoints the indexer rotates through under rate limiting."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for u in var.rpc_fallback_urls : can(regex("^https?://[A-Za-z0-9._:/-]+$", u))])
+    error_message = "Every rpc_fallback_urls entry must be an http(s) URL with no query string."
+  }
 }
 
 variable "prometheus_retention" {
   description = "TSDB retention. The PVC size above is the real limit."
   type        = string
   default     = "15d"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.prometheus_retention))
+    error_message = "prometheus_retention must be a Prometheus duration with a unit, such as 15d or 720h."
+  }
 }
 
 variable "alert_repeat_interval" {
   description = "How often Alertmanager re-sends an unresolved warning."
   type        = string
   default     = "4h"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.alert_repeat_interval))
+    error_message = "alert_repeat_interval must be a duration with a unit, such as 4h or 30m."
+  }
 }
 
 variable "alert_receivers" {

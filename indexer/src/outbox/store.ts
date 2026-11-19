@@ -279,6 +279,22 @@ export class OutboxStore {
     return "scheduled";
   }
 
+  /**
+   * Graceful-shutdown release: hand one claim this process still holds back to
+   * `pending` without burning an attempt. Guarded by the claim token, so it can
+   * never steal an intent another dispatcher process has claimed or finished.
+   */
+  releaseClaim(intentId: number, claimToken: string): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE outbox_intents
+         SET state = 'pending', claimed_at = NULL, claim_token = NULL
+         WHERE id = ? AND state = 'in_flight' AND claim_token = ?`
+      )
+      .run(intentId, claimToken);
+    return res.changes === 1;
+  }
+
   /** Crash recovery: return in_flight intents whose claim timed out to pending. */
   reclaimStale(claimTimeoutMs: number, nowMs: number): number {
     const res = this.db
