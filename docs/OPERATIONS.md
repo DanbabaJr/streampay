@@ -26,6 +26,7 @@ StreamPay is a non-custodial, linear streaming payment protocol on the Stellar n
 2. A Next.js web application (`frontend/`).
 3. An operational TTL and rent monitoring service (`infra/ttl-sentinel/`).
 4. Governed release and rehearsal automation (`scripts/`, `.github/workflows/`).
+5. An event indexer service (`indexer/`) that projects contract events into SQLite and serves the query API.
 
 This handbook defines the non-code responsibilities required to keep StreamPay online, secure, and reproducible:
 - Managing cryptographic keys, secrets, and environment variables.
@@ -142,6 +143,20 @@ flowchart TD
 | **Freighter Wallet Extension / Horizon API** | Signature acquisition in frontend (`[VERIFIED: frontend/lib/stellar.ts:148-150]`) | Transaction submission | "Freighter not detected" or wallet popup fails to open | Verify extension version in browser; test basic keypair generation in CLI | Stellar Foundation / Freighter repo | Sign and submit transactions manually via Stellar Laboratory or Stellar CLI |
 | **Testnet Friendbot (`friendbot.stellar.org`)** | Testnet deployment scripts (`[VERIFIED: scripts/deploy_testnet.sh:45-47]`) and canary smoke stream setup | CI rehearsal workflows (`rehearsal.yml`) and local testnet testing | Scripts fail with `502 Bad Gateway` or curl timeout | Run `curl -sf "https://friendbot.stellar.org?addr=<ADDR>"` | On-Call Maintainer / Stellar Status | Use existing pre-funded testnet accounts or wait for testnet reset; mock mode (`--mock`) in `scripts/canary_check.sh` allows offline verification |
 | **GitHub Actions Service** | Promotion pipeline (`promote.yml`), CI gates (`ci.yml`), release drafts (`release.yml`) | Automated deployments, dependency audit gates, merge verification | PR checks hang; promotion workflow cannot run | Check `www.githubstatus.com` | GitHub Support / Maintainers | Execute release gates locally using `scripts/release_gates.sh` and deploy using CLI script `scripts/deploy_contract.sh` (`[VERIFIED: docs/DEPLOY_PIPELINE.md:13-20]`) |
+
+---
+
+### 3.3 Indexer Service Operations
+
+The event indexer (`indexer/`) is operated separately from the release pipeline:
+it polls Soroban RPC, keeps its own SQLite cursor in `DATABASE_PATH`, and runs a
+transactional outbox for downstream consumers. Its configuration (every env
+var), initial backfill from a chosen ledger, catch-up after downtime, dead-letter
+replay and shutdown/drain semantics are documented in
+[docs/INDEXER_OPERATIONS.md](./INDEXER_OPERATIONS.md), with the delivery contract
+in [docs/OUTBOX.md](./OUTBOX.md) and the ingestion design in
+[docs/INDEXER_INGEST.md](./INDEXER_INGEST.md). Alert runbooks for the outbox are
+in §5 of [docs/RUNBOOK.md](./RUNBOOK.md#5-transactional-outbox-alerts).
 
 ---
 
