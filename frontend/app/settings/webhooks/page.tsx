@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SettingsNav from "@/components/SettingsNav";
 import { useEffect, useState, useCallback } from "react";
 import { useToast } from "@/components/toast";
 
@@ -222,6 +223,7 @@ export default function WebhooksSettingsPage() {
           <span>/</span>
           <span className="text-neutral-200">Webhook Settings</span>
         </div>
+        <SettingsNav />
 
         {/* Title */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
