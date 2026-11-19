@@ -6,7 +6,16 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    ignores: ["node_modules/**", ".next/**", "out/**", "next-env.d.ts"],
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "out/**",
+      "next-env.d.ts",
+      // Storybook + Playwright build output (docs/STORYBOOK.md).
+      "storybook-static/**",
+      "test-results/**",
+      "playwright-report/**",
+    ],
   },
 ]);
 

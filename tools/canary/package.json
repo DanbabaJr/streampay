@@ -1,0 +1,20 @@
+{
+  "name": "@streampay/testnet-canary",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "canary": "node --experimental-strip-types runner.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,701 @@
+{
+  "records": [
+    {
+      "file": "records/admin_0000.bin",
+      "kind": "admin",
+      "durability": "Instance",
+      "key": "vec[symbol:Admin]",
+      "fields": {
+        "value": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+      }
+    },
+    {
+      "file": "records/asset_0000.bin",
+      "kind": "asset",
+      "durability": "Persistent",
+      "key": "vec[symbol:Asset,address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL]",
+      "fields": {
+        "value": "bool:false"
+      }
+    },
+    {
+      "file": "records/contract_frozen_0000.bin",
+      "kind": "contract_frozen",
+      "durability": "Instance",
+      "key": "vec[symbol:ContractFrozen]",
+      "fields": {
+        "value": "bool:true"
+      }
+    },
+    {
+      "file": "records/contract_instance_0000.bin",
+      "kind": "contract_instance",
+      "durability": "Persistent",
+      "key": "ledger_key_contract_instance",
+      "fields": {
+        "executable": "wasm:fd6c588c7f264c1900d67e02e7dbd87128703163e6287de876a613c87226fd6c",
+        "storage[vec[symbol:Admin]]": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5",
+        "storage[vec[symbol:ContractFrozen]]": "bool:true",
+        "storage[vec[symbol:FeeBps]]": "u32:100",
+        "storage[vec[symbol:GlobalStreamPolicy]]": "map{symbol:max_duration=u64:0,symbol:max_rate=i128:0,symbol:min_deposit=i128:1,symbol:min_duration=u64:1,symbol:min_rate=i128:1}",
+        "storage[vec[symbol:Governor]]": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "storage[vec[symbol:MigrationCursor]]": "u64:6",
+        "storage[vec[symbol:PendingUpgrade]]": "map{symbol:new_wasm_hash=bytes:fa1b4481671bc1b9f65e52b3e97717aba072a666d0e32ed9cc493acaba10a11d,symbol:unlock_time=u64:1701641600}",
+        "storage[vec[symbol:SchemaVersion]]": "u32:2",
+        "storage[vec[symbol:TimelockDelay]]": "u64:864000"
+      }
+    },
+    {
+      "file": "records/fee_bps_0000.bin",
+      "kind": "fee_bps",
+      "durability": "Instance",
+      "key": "vec[symbol:FeeBps]",
+      "fields": {
+        "value": "u32:100"
+      }
+    },
+    {
+      "file": "records/global_stream_policy_0000.bin",
+      "kind": "global_stream_policy",
+      "durability": "Instance",
+      "key": "vec[symbol:GlobalStreamPolicy]",
+      "fields": {
+        "max_duration": "u64:0",
+        "max_rate": "i128:0",
+        "min_deposit": "i128:1",
+        "min_duration": "u64:1",
+        "min_rate": "i128:1"
+      }
+    },
+    {
+      "file": "records/governor_0000.bin",
+      "kind": "governor",
+      "durability": "Instance",
+      "key": "vec[symbol:Governor]",
+      "fields": {
+        "value": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+      }
+    },
+    {
+      "file": "records/intent_0000.bin",
+      "kind": "intent",
+      "durability": "Persistent",
+      "key": "vec[symbol:Intent,u64:1]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1700950400",
+        "execute_after": "u64:1700086400",
+        "expires_at": "u64:1702592000",
+        "fee_budget": "i128:20000000",
+        "id": "u64:1",
+        "interval": "u64:0",
+        "occurrences_remaining": "u32:0",
+        "occurrences_total": "u32:1",
+        "params_hash": "bytes:e9c51596faa314dd4f51389e5afe4c4055c78527d1351c1982f0a10b4bfea45c",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "status": "vec[symbol:Executed]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "records/intent_0001.bin",
+      "kind": "intent",
+      "durability": "Persistent",
+      "key": "vec[symbol:Intent,u64:2]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1701036800",
+        "execute_after": "u64:1700172800",
+        "expires_at": "u64:1705184000",
+        "fee_budget": "i128:20000000",
+        "id": "u64:2",
+        "interval": "u64:86400",
+        "occurrences_remaining": "u32:1",
+        "occurrences_total": "u32:2",
+        "params_hash": "bytes:52f94f88f19f7825ebd0c1cb5b833c602ddff4121b0f4567ba897e33891cde42",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700172800",
+        "status": "vec[symbol:Pending]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "records/intent_0002.bin",
+      "kind": "intent",
+      "durability": "Persistent",
+      "key": "vec[symbol:Intent,u64:3]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1701296000",
+        "execute_after": "u64:1700432000",
+        "expires_at": "u64:1703456000",
+        "fee_budget": "i128:20000000",
+        "id": "u64:3",
+        "interval": "u64:0",
+        "occurrences_remaining": "u32:1",
+        "occurrences_total": "u32:1",
+        "params_hash": "bytes:9384a8d2e6229593b99bd39d4cf8fef57d219dab3d34b2d7105767a2dc83715d",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700432000",
+        "status": "vec[symbol:Cancelled]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "records/intent_0003.bin",
+      "kind": "intent",
+      "durability": "Persistent",
+      "key": "vec[symbol:Intent,u64:4]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1700172800",
+        "execute_after": "u64:1700086400",
+        "expires_at": "u64:1700172800",
+        "fee_budget": "i128:20000000",
+        "id": "u64:4",
+        "interval": "u64:0",
+        "occurrences_remaining": "u32:1",
+        "occurrences_total": "u32:1",
+        "params_hash": "bytes:5530e7e71f07f4cb20a0202ea4e6fd69a2616bcf569b8e149d636a9d96c60edd",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "status": "vec[symbol:Expired]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "records/migration_cursor_0000.bin",
+      "kind": "migration_cursor",
+      "durability": "Instance",
+      "key": "vec[symbol:MigrationCursor]",
+      "fields": {
+        "value": "u64:6"
+      }
+    },
+    {
+      "file": "records/next_intent_id_0000.bin",
+      "kind": "next_intent_id",
+      "durability": "Persistent",
+      "key": "vec[symbol:NextIntentId]",
+      "fields": {
+        "value": "u64:5"
+      }
+    },
+    {
+      "file": "records/next_stream_id_0000.bin",
+      "kind": "next_stream_id",
+      "durability": "Persistent",
+      "key": "vec[symbol:NextStreamId]",
+      "fields": {
+        "value": "u64:7"
+      }
+    },
+    {
+      "file": "records/pending_governor_0000.bin",
+      "kind": "pending_governor",
+      "durability": "Instance",
+      "key": "vec[symbol:PendingGovernor]",
+      "fields": {
+        "value": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
+      }
+    },
+    {
+      "file": "records/pending_upgrade_0000.bin",
+      "kind": "pending_upgrade",
+      "durability": "Instance",
+      "key": "vec[symbol:PendingUpgrade]",
+      "fields": {
+        "new_wasm_hash": "bytes:fa1b4481671bc1b9f65e52b3e97717aba072a666d0e32ed9cc493acaba10a11d",
+        "unlock_time": "u64:1701641600"
+      }
+    },
+    {
+      "file": "records/queued_asset_0000.bin",
+      "kind": "queued_asset",
+      "durability": "Persistent",
+      "key": "vec[symbol:QueuedAsset,address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN]",
+      "fields": {
+        "allowed": "bool:false",
+        "executable_after": "u64:1701468800",
+        "queued_at": "u64:1700604800"
+      }
+    },
+    {
+      "file": "records/recipient_streams_0000.bin",
+      "kind": "recipient_streams",
+      "durability": "Persistent",
+      "key": "vec[symbol:RecipientStreams,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4]",
+      "fields": {
+        "value": "vec[u64:1,u64:2,u64:3,u64:4,u64:5]"
+      }
+    },
+    {
+      "file": "records/recipient_streams_0001.bin",
+      "kind": "recipient_streams",
+      "durability": "Persistent",
+      "key": "vec[symbol:RecipientStreams,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON]",
+      "fields": {
+        "value": "vec[u64:6]"
+      }
+    },
+    {
+      "file": "records/schema_version_0000.bin",
+      "kind": "schema_version",
+      "durability": "Instance",
+      "key": "vec[symbol:SchemaVersion]",
+      "fields": {
+        "value": "u32:2"
+      }
+    },
+    {
+      "file": "records/sender_intents_0000.bin",
+      "kind": "sender_intents",
+      "durability": "Persistent",
+      "key": "vec[symbol:SenderIntents,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM]",
+      "fields": {
+        "value": "vec[u64:1,u64:2,u64:3,u64:4]"
+      }
+    },
+    {
+      "file": "records/sender_streams_0000.bin",
+      "kind": "sender_streams",
+      "durability": "Persistent",
+      "key": "vec[symbol:SenderStreams,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM]",
+      "fields": {
+        "value": "vec[u64:1,u64:2,u64:3,u64:4,u64:5,u64:6]"
+      }
+    },
+    {
+      "file": "records/stream_0000.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:1]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:12000000000",
+        "end_time": "u64:1702678400",
+        "id": "u64:1",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700000000",
+        "status": "vec[symbol:Active]",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "withdrawn": "i128:322580645"
+      }
+    },
+    {
+      "file": "records/stream_0001.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:2]",
+      "fields": {
+        "cancelable": "bool:false",
+        "deposit": "i128:5000000000",
+        "end_time": "u64:1702851200",
+        "id": "u64:2",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "status": "vec[symbol:Cancelled]",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "withdrawn": "i128:312500000"
+      }
+    },
+    {
+      "file": "records/stream_0002.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:3]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:5000000000",
+        "end_time": "u64:1700518400",
+        "id": "u64:3",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "status": "vec[symbol:Depleted]",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "withdrawn": "i128:5000000000"
+      }
+    },
+    {
+      "file": "records/stream_0003.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:4]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1700950400",
+        "id": "u64:4",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "status": "vec[symbol:Active]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+        "withdrawn": "i128:0"
+      }
+    },
+    {
+      "file": "records/stream_0004.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:5]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1701036800",
+        "id": "u64:5",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700172800",
+        "status": "vec[symbol:Active]",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+        "withdrawn": "i128:0"
+      }
+    },
+    {
+      "file": "records/stream_0005.bin",
+      "kind": "stream",
+      "durability": "Persistent",
+      "key": "vec[symbol:Stream,u64:6]",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:100000000",
+        "end_time": "u64:1705788800",
+        "id": "u64:6",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700604800",
+        "status": "vec[symbol:Active]",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "withdrawn": "i128:0"
+      }
+    },
+    {
+      "file": "records/stream_fee_0000.bin",
+      "kind": "stream_fee",
+      "durability": "Persistent",
+      "key": "vec[symbol:StreamFee,u64:3]",
+      "fields": {
+        "amount": "i128:50000000",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+      }
+    },
+    {
+      "file": "records/stream_fee_0001.bin",
+      "kind": "stream_fee",
+      "durability": "Persistent",
+      "key": "vec[symbol:StreamFee,u64:6]",
+      "fields": {
+        "amount": "i128:1000000",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+      }
+    },
+    {
+      "file": "records/stream_policy_0000.bin",
+      "kind": "stream_policy",
+      "durability": "Persistent",
+      "key": "vec[symbol:StreamPolicy,address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN]",
+      "fields": {
+        "max_duration": "u64:31536000",
+        "max_rate": "i128:1000000",
+        "min_deposit": "i128:1000",
+        "min_duration": "u64:86400",
+        "min_rate": "i128:100"
+      }
+    },
+    {
+      "file": "records/timelock_delay_0000.bin",
+      "kind": "timelock_delay",
+      "durability": "Instance",
+      "key": "vec[symbol:TimelockDelay]",
+      "fields": {
+        "value": "u64:864000"
+      }
+    },
+    {
+      "file": "records/treasury_0000.bin",
+      "kind": "treasury",
+      "durability": "Persistent",
+      "key": "vec[symbol:Treasury,address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL]",
+      "fields": {
+        "charged_total": "i128:51000000",
+        "withdrawn_total": "i128:25500000"
+      }
+    }
+  ],
+  "events": [
+    {
+      "file": "events/contract_frozen_state_changed.bin",
+      "name": "contract_frozen_state_changed",
+      "topics": "vec[symbol:contract_frozen_state_changed,bool:true]",
+      "data": "map{symbol:changed_by=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM}",
+      "fields": {
+        "changed_by": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+      }
+    },
+    {
+      "file": "events/contract_upgraded.bin",
+      "name": "contract_upgraded",
+      "topics": "vec[symbol:contract_upgraded,bytes:fa1b4481671bc1b9f65e52b3e97717aba072a666d0e32ed9cc493acaba10a11d]",
+      "data": "map{symbol:executed_by=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM}",
+      "fields": {
+        "executed_by": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+      }
+    },
+    {
+      "file": "events/fee_charged.bin",
+      "name": "fee_charged",
+      "topics": "vec[symbol:fee_charged,u64:3]",
+      "data": "map{symbol:amount=i128:50000000,symbol:fee_bps=u32:100,symbol:payer=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM,symbol:token=address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL}",
+      "fields": {
+        "amount": "i128:50000000",
+        "fee_bps": "u32:100",
+        "payer": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+      }
+    },
+    {
+      "file": "events/fee_withdrawn.bin",
+      "name": "fee_withdrawn",
+      "topics": "vec[symbol:fee_withdrawn,address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL]",
+      "data": "map{symbol:amount=i128:25500000,symbol:governor=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM,symbol:recipient=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4,symbol:withdrawn_total=i128:25500000}",
+      "fields": {
+        "amount": "i128:25500000",
+        "governor": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "withdrawn_total": "i128:25500000"
+      }
+    },
+    {
+      "file": "events/policy_asset_executed.bin",
+      "name": "policy_asset_executed",
+      "topics": "vec[symbol:policy_asset_executed,address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL]",
+      "data": "map{symbol:allowed=bool:false}",
+      "fields": {
+        "allowed": "bool:false"
+      }
+    },
+    {
+      "file": "events/policy_asset_queued.bin",
+      "name": "policy_asset_queued",
+      "topics": "vec[symbol:policy_asset_queued,address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL]",
+      "data": "map{symbol:allowed=bool:false,symbol:executable_after=u64:1701468800}",
+      "fields": {
+        "allowed": "bool:false",
+        "executable_after": "u64:1701468800"
+      }
+    },
+    {
+      "file": "events/policy_handoff_accepted.bin",
+      "name": "policy_handoff_accepted",
+      "topics": "vec[symbol:policy_handoff_accepted,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5]",
+      "data": "map{}",
+      "fields": {}
+    },
+    {
+      "file": "events/policy_handoff_cancelled.bin",
+      "name": "policy_handoff_cancelled",
+      "topics": "vec[symbol:policy_handoff_cancelled,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5]",
+      "data": "map{}",
+      "fields": {}
+    },
+    {
+      "file": "events/policy_handoff_proposed.bin",
+      "name": "policy_handoff_proposed",
+      "topics": "vec[symbol:policy_handoff_proposed,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N]",
+      "data": "map{symbol:proposed_admin=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5}",
+      "fields": {
+        "proposed_admin": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+      }
+    },
+    {
+      "file": "events/policy_initialized.bin",
+      "name": "policy_initialized",
+      "topics": "vec[symbol:policy_initialized]",
+      "data": "map{symbol:admin=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N}",
+      "fields": {
+        "admin": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+      }
+    },
+    {
+      "file": "events/scheduled_intent_cancelled.bin",
+      "name": "scheduled_intent_cancelled",
+      "topics": "vec[symbol:scheduled_intent_cancelled,u64:3]",
+      "data": "map{symbol:refund=i128:1020000000,symbol:sender=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM}",
+      "fields": {
+        "refund": "i128:1020000000",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+      }
+    },
+    {
+      "file": "events/scheduled_intent_expired.bin",
+      "name": "scheduled_intent_expired",
+      "topics": "vec[symbol:scheduled_intent_expired,u64:4]",
+      "data": "map{symbol:refund=i128:1020000000,symbol:sender=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM}",
+      "fields": {
+        "refund": "i128:1020000000",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+      }
+    },
+    {
+      "file": "events/scheduled_stream_executed.bin",
+      "name": "scheduled_stream_executed",
+      "topics": "vec[symbol:scheduled_stream_executed,u64:1]",
+      "data": "map{symbol:fee_paid=i128:20000000,symbol:keeper=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5,symbol:occurrence_index=u32:0,symbol:occurrences_remaining=u32:0,symbol:stream_id=u64:4}",
+      "fields": {
+        "fee_paid": "i128:20000000",
+        "keeper": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5",
+        "occurrence_index": "u32:0",
+        "occurrences_remaining": "u32:0",
+        "stream_id": "u64:4"
+      }
+    },
+    {
+      "file": "events/storage_migrated.bin",
+      "name": "storage_migrated",
+      "topics": "vec[symbol:storage_migrated,u32:1,u32:2]",
+      "data": "map{symbol:end_id=u64:6,symbol:is_complete=bool:true,symbol:start_id=u64:1}",
+      "fields": {
+        "end_id": "u64:6",
+        "is_complete": "bool:true",
+        "start_id": "u64:1"
+      }
+    },
+    {
+      "file": "events/stream_cancelled.bin",
+      "name": "stream_cancelled",
+      "topics": "vec[symbol:stream_cancelled,u64:2]",
+      "data": "map{symbol:cancelled_by=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM,symbol:recipient_amount=i128:312500000,symbol:sender_amount=i128:4687500000}",
+      "fields": {
+        "cancelled_by": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "recipient_amount": "i128:312500000",
+        "sender_amount": "i128:4687500000"
+      }
+    },
+    {
+      "file": "events/stream_created.bin",
+      "name": "stream_created",
+      "topics": "vec[symbol:stream_created,u64:1]",
+      "data": "map{symbol:cancelable=bool:true,symbol:deposit=i128:10000000000,symbol:end_time=u64:1702678400,symbol:recipient=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4,symbol:sender=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM,symbol:start_time=u64:1700000000,symbol:token=address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL}",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:10000000000",
+        "end_time": "u64:1702678400",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700000000",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+      }
+    },
+    {
+      "file": "events/stream_paused.bin",
+      "name": "stream_paused",
+      "topics": "vec[symbol:stream_paused,u64:1]",
+      "data": "map{symbol:paused_at=u64:1701641600}",
+      "fields": {
+        "paused_at": "u64:1701641600"
+      }
+    },
+    {
+      "file": "events/stream_policy_set.bin",
+      "name": "stream_policy_set",
+      "topics": "vec[symbol:stream_policy_set]",
+      "data": "map{symbol:new_policy=map{symbol:max_duration=u64:31536000,symbol:max_rate=i128:1000000,symbol:min_deposit=i128:1000,symbol:min_duration=u64:86400,symbol:min_rate=i128:100},symbol:token=address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN}",
+      "fields": {
+        "new_policy": "map{symbol:max_duration=u64:31536000,symbol:max_rate=i128:1000000,symbol:min_deposit=i128:1000,symbol:min_duration=u64:86400,symbol:min_rate=i128:100}",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "events/stream_resumed.bin",
+      "name": "stream_resumed",
+      "topics": "vec[symbol:stream_resumed,u64:1]",
+      "data": "map{symbol:new_end_time=u64:1702678400}",
+      "fields": {
+        "new_end_time": "u64:1702678400"
+      }
+    },
+    {
+      "file": "events/stream_scheduled.bin",
+      "name": "stream_scheduled",
+      "topics": "vec[symbol:stream_scheduled,u64:1]",
+      "data": "map{symbol:cancelable=bool:true,symbol:deposit=i128:1000000000,symbol:end_time=u64:1700950400,symbol:execute_after=u64:1700086400,symbol:expires_at=u64:1702592000,symbol:fee_budget=i128:20000000,symbol:interval=u64:0,symbol:occurrences=u32:1,symbol:recipient=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4,symbol:sender=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM,symbol:start_time=u64:1700086400,symbol:token=address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN}",
+      "fields": {
+        "cancelable": "bool:true",
+        "deposit": "i128:1000000000",
+        "end_time": "u64:1700950400",
+        "execute_after": "u64:1700086400",
+        "expires_at": "u64:1702592000",
+        "fee_budget": "i128:20000000",
+        "interval": "u64:0",
+        "occurrences": "u32:1",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        "start_time": "u64:1700086400",
+        "token": "address:CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+      }
+    },
+    {
+      "file": "events/stream_topped_up.bin",
+      "name": "stream_topped_up",
+      "topics": "vec[symbol:stream_topped_up,u64:1]",
+      "data": "map{symbol:amount=i128:2000000000,symbol:new_deposit=i128:12000000000,symbol:sender=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM}",
+      "fields": {
+        "amount": "i128:2000000000",
+        "new_deposit": "i128:12000000000",
+        "sender": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+      }
+    },
+    {
+      "file": "events/streams_created.bin",
+      "name": "streams_created",
+      "topics": "vec[symbol:streams_created,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM]",
+      "data": "map{symbol:stream_ids=vec[u64:6]}",
+      "fields": {
+        "stream_ids": "vec[u64:6]"
+      }
+    },
+    {
+      "file": "events/upgrade_cancelled.bin",
+      "name": "upgrade_cancelled",
+      "topics": "vec[symbol:upgrade_cancelled,bytes:fa1b4481671bc1b9f65e52b3e97717aba072a666d0e32ed9cc493acaba10a11d]",
+      "data": "map{symbol:cancelled_by=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM}",
+      "fields": {
+        "cancelled_by": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+      }
+    },
+    {
+      "file": "events/upgrade_proposed.bin",
+      "name": "upgrade_proposed",
+      "topics": "vec[symbol:upgrade_proposed,bytes:fa1b4481671bc1b9f65e52b3e97717aba072a666d0e32ed9cc493acaba10a11d]",
+      "data": "map{symbol:proposer=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM,symbol:unlock_time=u64:1701641600}",
+      "fields": {
+        "proposer": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "unlock_time": "u64:1701641600"
+      }
+    },
+    {
+      "file": "events/withdrawn.bin",
+      "name": "withdrawn",
+      "topics": "vec[symbol:withdrawn,u64:1]",
+      "data": "map{symbol:amount=i128:322580645,symbol:recipient=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4,symbol:withdrawn_total=i128:322580645}",
+      "fields": {
+        "amount": "i128:322580645",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "withdrawn_total": "i128:322580645"
+      }
+    }
+  ]
+}

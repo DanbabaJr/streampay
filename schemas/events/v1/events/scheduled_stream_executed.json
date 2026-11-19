@@ -1,0 +1,65 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/scheduled_stream_executed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a keeper executes one occurrence of a scheduled intent, creating the stream and paying itself the escrowed per-occurrence fee.",
+  "properties": {
+    "fee_paid": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "keeper": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "occurrence_index": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "occurrences_remaining": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "stream_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "keeper",
+    "stream_id",
+    "occurrence_index",
+    "occurrences_remaining",
+    "fee_paid"
+  ],
+  "title": "ScheduledStreamExecuted",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "scheduled_stream_executed",
+    "fingerprint": "sha256:318937479fdb35060d6640657c70d51fcda211fc4408f5902b7eac1224f89f06",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "intent_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

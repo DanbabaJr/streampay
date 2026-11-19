@@ -1,0 +1,9 @@
+read instance ContractFrozen
+read persistent Stream(1)
+read persistent PendingSenderTransfer(1)
+write persistent PendingSenderTransfer(1)
+event SenderTransferProposed
+read instance ContractFrozen
+read persistent PendingSenderTransfer(1)
+remove persistent PendingSenderTransfer(1)
+event SenderTransferExpired

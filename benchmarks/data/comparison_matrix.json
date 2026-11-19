@@ -1,0 +1,222 @@
+{
+  "benchmark_metadata": {
+    "version": "1.0.0",
+    "updated_at": "2026-10-19",
+    "description": "Cross-chain reproducible streaming benchmark comparing StreamPay, Sablier V2, and Superfluid CFA on storage, claim, cancel, and rent axes."
+  },
+  "economic_assumptions": {
+    "eth_price_usd": 3000.0,
+    "xlm_price_usd": 0.12,
+    "matic_price_usd": 0.50,
+    "gas_prices": {
+      "ethereum_l1_gwei": 20.0,
+      "arbitrum_l2_gwei": 0.1,
+      "polygon_pos_gwei": 35.0,
+      "stellar_stroop_base": 100
+    }
+  },
+  "comparison_axes": {
+    "storage_bytes_per_stream": {
+      "streampay": {
+        "raw_bytes": 484,
+        "description": "444 B Stream struct + 40 B persistent ledger DataKey (XDR encoded)",
+        "keys_count": 1,
+        "additional_index_bytes": "76 B per index entry (amortized)",
+        "state_model": "Stellar persistent ledger entry (subject to TTL / State Archival)"
+      },
+      "sablier_v2": {
+        "raw_bytes": 128,
+        "description": "4 EVM storage slots (32 bytes each) + 32 B ERC-721 ownership mapping entry",
+        "keys_count": 4,
+        "additional_index_bytes": "ERC-721 enumeration (if enabled: additional 2 slots)",
+        "state_model": "EVM permanent contract storage (perpetual state bloat, no rent)"
+      },
+      "superfluid_cfa": {
+        "raw_bytes": 128,
+        "description": "2 slots agreement struct + 2 slots sender/receiver net-flow rate accumulator in SuperToken",
+        "keys_count": 4,
+        "additional_index_bytes": "Agreement bitmap tracking (1 bit per active agreement)",
+        "state_model": "EVM permanent contract storage (perpetual state bloat, no rent)"
+      }
+    },
+    "cost_per_second_of_stream_life": {
+      "streampay": {
+        "native_units": "0.968 stroops / sec",
+        "usd_per_second": 0.0000000116,
+        "usd_per_30_days": 0.0301,
+        "protocol_mechanism": "Stellar State Archival explicit rent (~0.01 stroops/byte/ledger, 1 ledger = 5s)",
+        "prepaid_buffer": "Initial 500,000 ledgers (~29 days) TTL prepaid on creation (0.242 XLM ~ $0.029)",
+        "maintenance": "Automatically extended on touch (claims, top-ups, cancellations)"
+      },
+      "sablier_v2": {
+        "native_units": "0 gas / sec",
+        "usd_per_second": 0.0,
+        "usd_per_30_days": 0.0,
+        "protocol_mechanism": "None on EVM (zero ongoing storage rent; storage paid 100% upfront via SSTORE gas at stream creation)",
+        "prepaid_buffer": "None",
+        "maintenance": "Perpetual without maintenance"
+      },
+      "superfluid_cfa": {
+        "native_units": "0 gas / sec",
+        "usd_per_second": 0.0,
+        "usd_per_30_days": 0.0,
+        "protocol_mechanism": "None for state rent; requires locked 4-hour liquidation buffer deposit",
+        "prepaid_buffer": "4-hour buffer deposit locked (e.g. $5.56 on $1000/mo stream)",
+        "maintenance": "Continuous solvency monitoring; liquidation bots execute closeStream if account balance hits zero"
+      }
+    },
+    "claim_cost": {
+      "streampay": {
+        "operation": "withdraw / withdraw_max",
+        "cpu_instructions": 384170,
+        "memory_bytes": 153255,
+        "event_bytes": 236,
+        "native_fee": "0.000245 XLM (2,450 stroops)",
+        "usd_stellar": 0.000029,
+        "tx_count_per_claim": 1
+      },
+      "sablier_v2": {
+        "operation": "withdraw / withdrawMax",
+        "evm_gas_units": 59320,
+        "native_fee_l1_eth": "0.001186 ETH (at 20 gwei)",
+        "usd_ethereum_l1": 3.56,
+        "native_fee_l2_eth": "0.00000593 ETH (at 0.1 gwei)",
+        "usd_arbitrum_l2": 0.0178,
+        "tx_count_per_claim": 1
+      },
+      "superfluid_cfa": {
+        "operation": "Passive continuous accrual (0-tx)",
+        "evm_gas_units": 0,
+        "native_fee_l1_eth": "0 ETH",
+        "usd_ethereum_l1": 0.0,
+        "usd_arbitrum_l2": 0.0,
+        "tx_count_per_claim": 0,
+        "unwrapping_cost_note": "If converting SuperToken back to ERC-20 via downgrade: ~52,000 gas ($3.12 on L1 / $0.015 on L2)"
+      }
+    },
+    "cancel_cost": {
+      "streampay": {
+        "operation": "cancel_stream",
+        "cpu_instructions": 591737,
+        "memory_bytes": 197100,
+        "event_bytes": 248,
+        "native_fee": "0.000320 XLM (3,200 stroops)",
+        "usd_stellar": 0.000038,
+        "settlement_legs": "Recipient payout + sender unaccrued refund executed atomically in same tx"
+      },
+      "sablier_v2": {
+        "operation": "cancel",
+        "evm_gas_units": 84150,
+        "native_fee_l1_eth": "0.001683 ETH (at 20 gwei)",
+        "usd_ethereum_l1": 5.05,
+        "native_fee_l2_eth": "0.00000841 ETH (at 0.1 gwei)",
+        "usd_arbitrum_l2": 0.0252,
+        "settlement_legs": "Recipient payout + sender refund ERC-20 safeTransfers"
+      },
+      "superfluid_cfa": {
+        "operation": "deleteFlow",
+        "evm_gas_units": 78600,
+        "native_fee_l1_eth": "0.001572 ETH (at 20 gwei)",
+        "usd_ethereum_l1": 4.72,
+        "native_fee_l2_eth": "0.00000786 ETH (at 0.1 gwei)",
+        "usd_arbitrum_l2": 0.0236,
+        "settlement_legs": "Net flow rate zeroed + buffer deposit refund to sender"
+      }
+    },
+    "create_cost": {
+      "streampay": {
+        "operation": "create_stream",
+        "cpu_instructions": 546281,
+        "memory_bytes": 214280,
+        "native_fee": "0.000350 XLM (3,500 stroops)",
+        "usd_stellar": 0.000042
+      },
+      "sablier_v2": {
+        "operation": "createWithTimestamps (LockupLinear)",
+        "evm_gas_units": 218450,
+        "usd_ethereum_l1": 13.11,
+        "usd_arbitrum_l2": 0.0655
+      },
+      "superfluid_cfa": {
+        "operation": "createFlow (ConstantFlowAgreementV1)",
+        "evm_gas_units": 174800,
+        "usd_ethereum_l1": 10.49,
+        "usd_arbitrum_l2": 0.0524
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "name": "Scenario 1: Monthly Contractor / Payroll ($3,000 / month, 4 claims per month)",
+      "duration_days": 30,
+      "claims_count": 4,
+      "costs": {
+        "streampay_stellar": {
+          "create_usd": 0.000042,
+          "claims_usd": 0.000116,
+          "rent_usd": 0.0301,
+          "cancel_usd": 0.000038,
+          "total_lifecycle_usd": 0.0303
+        },
+        "sablier_arbitrum_l2": {
+          "create_usd": 0.0655,
+          "claims_usd": 0.0712,
+          "rent_usd": 0.0,
+          "cancel_usd": 0.0252,
+          "total_lifecycle_usd": 0.1619
+        },
+        "sablier_ethereum_l1": {
+          "create_usd": 13.11,
+          "claims_usd": 14.24,
+          "rent_usd": 0.0,
+          "cancel_usd": 5.05,
+          "total_lifecycle_usd": 32.40
+        },
+        "superfluid_arbitrum_l2": {
+          "create_usd": 0.0524,
+          "claims_usd": 0.0,
+          "rent_usd": 0.0,
+          "buffer_opportunity_cost_usd": 0.035,
+          "cancel_usd": 0.0236,
+          "total_lifecycle_usd": 0.111
+        }
+      }
+    },
+    {
+      "name": "Scenario 2: High-Frequency / Micro-Stream ($500 / month, daily claims: 30 claims)",
+      "duration_days": 30,
+      "claims_count": 30,
+      "costs": {
+        "streampay_stellar": {
+          "create_usd": 0.000042,
+          "claims_usd": 0.000870,
+          "rent_usd": 0.0301,
+          "cancel_usd": 0.000038,
+          "total_lifecycle_usd": 0.0311
+        },
+        "sablier_arbitrum_l2": {
+          "create_usd": 0.0655,
+          "claims_usd": 0.534,
+          "rent_usd": 0.0,
+          "cancel_usd": 0.0252,
+          "total_lifecycle_usd": 0.6247
+        },
+        "sablier_ethereum_l1": {
+          "create_usd": 13.11,
+          "claims_usd": 106.80,
+          "rent_usd": 0.0,
+          "cancel_usd": 5.05,
+          "total_lifecycle_usd": 124.96
+        },
+        "superfluid_arbitrum_l2": {
+          "create_usd": 0.0524,
+          "claims_usd": 0.0,
+          "rent_usd": 0.0,
+          "buffer_opportunity_cost_usd": 0.006,
+          "cancel_usd": 0.0236,
+          "total_lifecycle_usd": 0.082
+        }
+      }
+    }
+  ]
+}

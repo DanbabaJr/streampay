@@ -1,0 +1,8 @@
+# Storybook + visual regression output (docs/STORYBOOK.md)
+storybook-static/
+test-results/
+playwright-report/
+# Only the Linux baselines (rendered in the pinned Playwright container) are
+# committed; a local macOS/Windows run writes its own, which are not comparable.
+visual/__screenshots__/*
+!visual/__screenshots__/linux/

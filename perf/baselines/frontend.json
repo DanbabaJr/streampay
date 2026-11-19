@@ -1,0 +1,50 @@
+{
+  "commit": "8f219b2",
+  "updated_at": "2026-05-01T00:00:00Z",
+  "network_throttling": {
+    "profile": "slow-4G",
+    "rttMs": 150,
+    "throughputKbps": 1638.4,
+    "cpuSlowdownMultiplier": 4
+  },
+  "bundle_sizes_kb": {
+    "first_load_js": {
+      "budget": 160.0,
+      "baseline": 128.4,
+      "tolerance_percent": 10,
+      "description": "Total initial client bundle payload across shared chunks"
+    },
+    "stream_detail_chunk": {
+      "budget": 45.0,
+      "baseline": 32.1,
+      "tolerance_percent": 10,
+      "description": "Stream detail route async chunk"
+    },
+    "dashboard_chunk": {
+      "budget": 50.0,
+      "baseline": 38.6,
+      "tolerance_percent": 10,
+      "description": "Dashboard client islands chunk"
+    }
+  },
+  "lighthouse_timings_ms": {
+    "first_contentful_paint": {
+      "budget": 1800.0,
+      "baseline": 1250.0,
+      "tolerance_percent": 15,
+      "description": "FCP under pinned slow-4G / 4x CPU emulation"
+    },
+    "time_to_interactive": {
+      "budget": 3500.0,
+      "baseline": 2650.0,
+      "tolerance_percent": 15,
+      "description": "TTI under pinned slow-4G / 4x CPU emulation"
+    },
+    "hydration_timing": {
+      "budget": 450.0,
+      "baseline": 280.0,
+      "tolerance_percent": 15,
+      "description": "React root hydration duration"
+    }
+  }
+}

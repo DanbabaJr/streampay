@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  indexer:
+    image: node:22-alpine
+    container_name: streampay-indexer
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../indexer:/app
+    environment:
+      - NODE_ENV=production
+      - PORT=9090
+      - RPC_URL=https://soroban-testnet.stellar.org
+      - CONTRACT_ID=CDUMMYSTREAMCONTRACT123
+      - POLL_INTERVAL_MS=5000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=streampay-indexer
+    command: ["node", "dist/src/index.js"]
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      - otel-collector
+    networks:
+      - streampay-net
+
+  reconciler:
+    image: node:22-alpine
+    container_name: streampay-reconciler
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../reconciler:/app
+    environment:
+      - NODE_ENV=production
+      - PORT=9091
+      - SWEEP_INTERVAL_MS=60000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=streampay-reconciler
+    command: ["node", "dist/src/index.js"]
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      - otel-collector
+    networks:
+      - streampay-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55.0
+    container_name: streampay-jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger Query UI
+      - "14268:14268" # Jaeger HTTP collector
+    networks:
+      - streampay-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: streampay-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics exporter
+    depends_on:
+      - jaeger
+    networks:
+      - streampay-net
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: streampay-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9092:9090"
+    depends_on:
+      - indexer
+      - reconciler
+      - otel-collector
+    networks:
+      - streampay-net
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: streampay-alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "9093:9093"
+    networks:
+      - streampay-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: streampay-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/streampay-overview.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - streampay-net
+
+networks:
+  streampay-net:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:

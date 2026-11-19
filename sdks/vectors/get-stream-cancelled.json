@@ -1,0 +1,38 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "get-stream-cancelled",
+  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "provenance": "Stored Stream 1 (contract-data ledger entry) from contracts/streaming-payments/test_snapshots/test/cancel_before_start_refunds_everything_to_sender.1.json; status is the contract's Vec[Symbol] enum encoding.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAKZ2V0X3N0cmVhbQAAAAAAAQAAAAUAAAAAAAAAAQAAAAAAAAAAAAAAARRG0iwAAABAqDZL0V/EXU7EKpd+vLyfNgBnxW0AOpD5yBWphLQC4qBoVVZD8mSJ0oePVSLnZkGRULnGjEDJMkxq/i8TDGFjAg==",
+  "resultXdr": "AAAAEQAAAAEAAAALAAAADwAAAApjYW5jZWxhYmxlAAAAAAAAAAAAAAAAAA8AAAAHZGVwb3NpdAAAAAAKAAAAAAAAAAAAAAACVAvkAAAAAA8AAAAIZW5kX3RpbWUAAAAFAAAAAAAOgIAAAAAPAAAAAmlkAAAAAAAFAAAAAAAAAAEAAAAPAAAACXJlY2lwaWVudAAAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAPAAAABnNlbmRlcgAAAAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAA8AAAAKc3RhcnRfdGltZQAAAAAABQAAAAAAAVGAAAAADwAAAAZzdGF0dXMAAAAAABAAAAABAAAAAQAAAA8AAAAJQ2FuY2VsbGVkAAAAAAAADwAAAAV0b2tlbgAAAAAAABIAAAABSPG2uLwNYPcUDdSbYSD7rzzbqyra7qYxMT2fC66VMvEAAAAPAAAACnVzZV9vcmFjbGUAAAAAAAAAAAAAAAAADwAAAAl3aXRoZHJhd24AAAAAAAAKAAAAAAAAAAAAAAAAAAAAAA==",
+  "eventsXdr": [],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "get_stream",
+      "args": {
+        "stream_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": {
+        "id": "1",
+        "sender": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        "token": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "deposit": "10000000000",
+        "withdrawn": "0",
+        "start_time": "86400",
+        "end_time": "950400",
+        "cancelable": false,
+        "status": "Cancelled",
+        "use_oracle": false
+      }
+    },
+    "events": []
+  }
+}

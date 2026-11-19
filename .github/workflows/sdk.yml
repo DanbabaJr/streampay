@@ -1,0 +1,111 @@
+name: SDKs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/**"
+      - "contracts/streaming-payments/src/**"
+      - "contracts/streaming-payments/test_snapshots/**"
+      - "schemas/events/registry.json"
+      - "frontend/lib/errors.ts"
+      - ".github/workflows/sdk.yml"
+  pull_request:
+    paths:
+      - "sdks/**"
+      - "contracts/streaming-payments/src/**"
+      - "contracts/streaming-payments/test_snapshots/**"
+      - "schemas/events/registry.json"
+      - "frontend/lib/errors.ts"
+      - ".github/workflows/sdk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    name: Spec — schema guard / coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Re-derives the IR from the contract sources and fails on any drift,
+      # naming the missing/extra entrypoint, type, event or constant.
+      - name: Spec matches the contract surface
+        run: python3 sdks/generator/check_contract_surface.py
+
+      # Operation-set coverage (spec ⊇ contract entrypoints and surface.rs
+      # registry), parser completeness, event-registry agreement, error
+      # catalog reader, and vector/spec consistency.
+      - name: Spec, vector and catalog tests
+        run: python3 -m unittest discover -s sdks/generator -p "test_*.py" -v
+
+      - name: Generated clients are up to date
+        run: python3 sdks/generator/generate.py --check
+
+  vectors:
+    name: Conformance vectors — deterministic
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/vectors/builder
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/vectors/builder/package-lock.json
+
+      - run: npm ci
+
+      - name: Fixture regeneration is deterministic
+        run: |
+          node build-vectors.mjs
+          git diff --exit-code ..
+
+  typescript:
+    name: TypeScript SDK — typecheck / test / pack
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: npm ci
+
+      - name: Generated client is up to date
+        working-directory: .
+        run: python3 sdks/generator/generate.py --check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Includes the conformance suite: every sdks/vectors/*.json must decode
+      # to its recorded canonical JSON.
+      - name: Build + tests
+        run: npm test
+
+      - name: npm pack dry run
+        run: npm pack --dry-run

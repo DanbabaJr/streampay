@@ -1,0 +1,32 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/policy_handoff_cancelled.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a pending admin handoff is cancelled by the current admin.",
+  "properties": {},
+  "required": [],
+  "title": "PolicyHandoffCancelled",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "policy_handoff_cancelled",
+    "fingerprint": "sha256:fd8cfe1334f22571cb7e11fc9b80c3c1e7ef39e6f4bbd46c3a66fc621363f221",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "proposed_admin",
+        "type": "Address"
+      }
+    ]
+  }
+}

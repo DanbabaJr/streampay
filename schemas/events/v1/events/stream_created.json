@@ -1,0 +1,74 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_created.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a new stream is created and its deposit pulled in.",
+  "properties": {
+    "cancelable": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "deposit": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "end_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "start_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "token": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender",
+    "recipient",
+    "token",
+    "deposit",
+    "start_time",
+    "end_time",
+    "cancelable"
+  ],
+  "title": "StreamCreated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_created",
+    "fingerprint": "sha256:8e7e6d5ab578b8a656ecf6a58e712d15546c6bd95abc5030009597abb0ee5012",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

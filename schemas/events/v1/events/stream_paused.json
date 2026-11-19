@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_paused.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the sender pauses a stream, freezing accrual at `paused_at`.",
+  "properties": {
+    "paused_at": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "paused_at"
+  ],
+  "title": "StreamPaused",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_paused",
+    "fingerprint": "sha256:0d457030c164b4e062b06573927350f9782f0cb22409977ae4d6f01e17fb557e",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

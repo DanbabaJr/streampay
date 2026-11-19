@@ -1,0 +1,73 @@
+name: Key rotation drill
+
+# Quarterly drill of the operational security layer (issue #208): deploys the
+# contract to a FRESH testnet address, rotates the governor and policy admin
+# roles two-step, and asserts that no privileged operation survives an old
+# key. Every key is generated in-memory and funded by friendbot, so the drill
+# needs no repository or environment secrets.
+#
+# Schedule: 03:17 UTC on the 1st of Jan/Apr/Jul/Oct (quarterly, off the hour
+# to avoid the cron thundering herd). Manual re-runs: workflow_dispatch —
+# also used by the key-compromise incident template to re-validate early.
+
+on:
+  schedule:
+    - cron: "17 3 1 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  drill:
+    name: Rotate roles on fresh testnet deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install Rust toolchain (contract build)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-drill-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-drill-
+
+      # Pin must stay in sync with ci.yml / promote.yml / devcontainer.json.
+      - name: Install stellar-cli v28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: npm ci
+
+      - name: Run the key-rotation drill
+        working-directory: scripts
+        run: npm run drill:key-rotation
+
+      - name: Upload pass/fail matrix
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: key-rotation-matrix
+          path: logs/
+          if-no-files-found: warn

@@ -1,0 +1,41 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "withdraw-max",
+  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "provenance": "Withdrawn payload from contracts/streaming-payments/test_snapshots/test/withdraw_max_emits_withdrawn_event.1.json; returns the paid amount.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAMd2l0aGRyYXdfbWF4AAAAAQAAAAUAAAAAAAAAAQAAAAAAAAAAAAAAARRG0iwAAABABS0nFdfv2TXks3L3XXKozJgfT6KOcCdcH3qkxZ9u8eRMktjWlFjZbrPXpzaoaCqRvyItvsthWxcbXwvipFByBA==",
+  "resultXdr": "AAAACgAAAAAAAAAAAAAAADuaygA=",
+  "eventsXdr": [
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAEAAAAAAAAAAgAAAA8AAAAJd2l0aGRyYXduAAAAAAAABQAAAAAAAAABAAAAEQAAAAEAAAADAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAA7msoAAAAADwAAAAlyZWNpcGllbnQAAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAADwAAAA93aXRoZHJhd25fdG90YWwAAAAACgAAAAAAAAAAAAAAADuaygA="
+  ],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "withdraw_max",
+      "args": {
+        "stream_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": "1000000000"
+    },
+    "events": [
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "name": "Withdrawn",
+        "topics": {
+          "stream_id": "1"
+        },
+        "data": {
+          "amount": "1000000000",
+          "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+          "withdrawn_total": "1000000000"
+        }
+      }
+    ]
+  }
+}

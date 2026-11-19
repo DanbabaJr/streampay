@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_topped_up.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the sender adds funds to an existing stream.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "new_deposit": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender",
+    "amount",
+    "new_deposit"
+  ],
+  "title": "StreamToppedUp",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_topped_up",
+    "fingerprint": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

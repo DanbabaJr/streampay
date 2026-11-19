@@ -1,0 +1,29 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "error-not-active",
+  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "provenance": "WithdrawMax envelope against a cancelled stream; result is ScVal::Error(SCError::Contract(code)) with the StreamNotActive code from frontend/lib/errors.ts.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAMd2l0aGRyYXdfbWF4AAAAAQAAAAUAAAAAAAAAAQAAAAAAAAAAAAAAARRG0iwAAABABS0nFdfv2TXks3L3XXKozJgfT6KOcCdcH3qkxZ9u8eRMktjWlFjZbrPXpzaoaCqRvyItvsthWxcbXwvipFByBA==",
+  "resultXdr": "AAAAAgAAAAAAAAAF",
+  "eventsXdr": [],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "withdraw_max",
+      "args": {
+        "stream_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "error": {
+        "name": "StreamNotActive",
+        "code": 5
+      }
+    },
+    "events": []
+  }
+}

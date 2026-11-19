@@ -1,0 +1,108 @@
+name: Testnet lifecycle canary
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      force_failure:
+        description: "Exercise the failure alert path without making a network request"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: testnet-canary-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Live testnet lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            tools/canary/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install canary dependencies
+        working-directory: tools/canary
+        run: npm ci --ignore-scripts
+
+      # runner.ts reuses the signing-free builders in
+      # frontend/lib/stellar-ops.ts instead of duplicating them. Node resolves a
+      # bare specifier from the importing file's own directory upwards, so that
+      # module looks for @stellar/stellar-sdk in frontend/lib/node_modules, then
+      # frontend/node_modules, then the repository root — never in
+      # tools/canary/node_modules. Installing the frontend's locked graph is what
+      # makes the imported module loadable; a tools/canary-only install leaves it
+      # unresolvable and the suite dies at import time with ERR_MODULE_NOT_FOUND.
+      # Same shape as the Nightly Client Parity job.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      - name: Audit production dependencies
+        working-directory: tools/canary
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Test alert formatting
+        working-directory: tools/canary
+        run: npm test
+
+      - name: Type-check canary
+        working-directory: tools/canary
+        run: npm run typecheck
+
+      - name: Run testnet lifecycle
+        id: live-canary
+        continue-on-error: true
+        working-directory: tools/canary
+        env:
+          STREAMPAY_CANARY_CONTRACT_ID: ${{ vars.STREAMPAY_CANARY_CONTRACT_ID }}
+          STREAMPAY_CANARY_TOKEN_ID: ${{ vars.STREAMPAY_CANARY_TOKEN_ID }}
+          STREAMPAY_CANARY_SECRET_KEY: ${{ secrets.STREAMPAY_CANARY_SECRET_KEY }}
+          STREAMPAY_CANARY_RPC_URL: ${{ vars.STREAMPAY_CANARY_RPC_URL }}
+          STREAMPAY_CANARY_FORCE_FAILURE: ${{ inputs.force_failure && '1' || '' }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: npm run canary
+
+      - name: Deliver failure alert
+        if: ${{ always() && steps.live-canary.outcome == 'failure' && hashFiles('tools/canary/canary-result.json') != '' }}
+        working-directory: tools/canary
+        env:
+          ONCALL_WEBHOOK_URL: ${{ secrets.ONCALL_WEBHOOK_URL }}
+        run: node alert.mjs canary-result.json
+
+      - name: Report missing canary evidence
+        if: ${{ always() && steps.live-canary.outcome == 'failure' && hashFiles('tools/canary/canary-result.json') == '' }}
+        run: |
+          echo "::error::The canary failed before writing canary-result.json; alert details are unavailable."
+          printf '## Canary failure\n\nThe runner failed before writing evidence, so the detailed alert could not be generated.\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canary evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: testnet-canary-${{ github.run_id }}-${{ github.sha }}
+          path: tools/canary/canary-result.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Preserve canary failure status
+        if: ${{ always() && steps.live-canary.outcome == 'failure' }}
+        run: exit 1

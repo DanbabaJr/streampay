@@ -1,0 +1,11 @@
+read instance ContractFrozen
+read persistent Stream(1)
+read persistent StreamPause(1)
+write persistent StreamPause(1)
+event StreamPaused
+read instance ContractFrozen
+read persistent Stream(1)
+read persistent StreamPause(1)
+write persistent Stream(1)
+remove persistent StreamPause(1)
+event StreamResumed

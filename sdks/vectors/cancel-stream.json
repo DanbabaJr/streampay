@@ -1,0 +1,42 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "cancel-stream",
+  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "provenance": "StreamCancelled payload from contracts/streaming-payments/test_snapshots/test/events_are_emitted_with_expected_payloads.1.json.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAANY2FuY2VsX3N0cmVhbQAAAAAAAAIAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABQAAAAAAAAABAAAAAAAAAAAAAAABFEbSLAAAAEBSibuLbPpHKWd/WVFPPXkJjbi1PzgyhL8RGlR/EpfzWnzs4P8TjSPzX/mhKtg0YQawkFNTaSlRhk+sXcNttZsH",
+  "resultXdr": "AAAAAQ==",
+  "eventsXdr": [
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAEAAAAAAAAAAgAAAA8AAAAQc3RyZWFtX2NhbmNlbGxlZAAAAAUAAAAAAAAAAQAAABEAAAABAAAAAwAAAA8AAAAMY2FuY2VsbGVkX2J5AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAA8AAAAQcmVjaXBpZW50X2Ftb3VudAAAAAoAAAAAAAAAAAAAAAB3NZAYAAAADwAAAA1zZW5kZXJfYW1vdW50AAAAAAAACgAAAAAAAAAAAAAAAdzWUAA="
+  ],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "cancel_stream",
+      "args": {
+        "caller": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        "stream_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": null
+    },
+    "events": [
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "name": "StreamCancelled",
+        "topics": {
+          "stream_id": "1"
+        },
+        "data": {
+          "cancelled_by": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+          "recipient_amount": "1999999000",
+          "sender_amount": "8000000000"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+# StreamPay promotion log — append-only. Never edit or remove a line.
+# Format: <timestamp> | tag=<tag> | env=<env> | result=<promoted|rolled-back|rehearsed> | digest=<sha256> | interface=<sha256> | contract=<id> | actor=<who> | run=<url>
+# Written by scripts/record_promotion.sh. See deployments/README.md.

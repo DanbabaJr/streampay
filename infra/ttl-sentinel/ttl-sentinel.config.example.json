@@ -1,0 +1,61 @@
+{
+  "//": "Example TTL-sentinel config. Copy to ttl-sentinel.config.json (untracked) and edit; pass with --config. Every field is optional and falls back to the defaults below, which are derived from the cliff model in src/cliff.ts.",
+
+  "//contractId": "Deployed StreamPay contract id (C...). STREAMPAY_CONTRACT_ID overrides.",
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+
+  "//rpcUrl": "Soroban RPC endpoint. TTL_SENTINEL_RPC_URL overrides.",
+  "rpcUrl": "https://soroban-rpc.stellar.org",
+  "networkPassphrase": "Public Global Stellar Network ; September 2015",
+
+  "//scanIntervalSec": "Wall seconds between scans. Worst-case scan gap is computed at floorLedgerSec (1 s), never at the 5 s target.",
+  "scanIntervalSec": 300,
+
+  "//statePath": "Cache of the last counter value + seen addresses. Alerts and the spend meter live beside it as <statePath>.alerts.json and <statePath>.spender.json.",
+  "statePath": ".ttl-sentinel.state.json",
+
+  "//alertsJsonlPath": "Append alerts as JSON lines here (empty disables). Alert text always goes to stderr, so --json stdout stays machine-readable.",
+  "alertsJsonlPath": "",
+  "//webhookUrl": "POST alert batches here (empty disables). TTL_SENTINEL_WEBHOOK_URL overrides.",
+  "webhookUrl": "",
+
+  "//monitorContractEntries": "Also watch the contract instance and Wasm code entries — never extended on-chain by the contract, so their cliff is 4095 ledgers (~5.7 h).",
+  "monitorContractEntries": true,
+
+  "//maxStreams": "Enumeration safety valve: stop after this many stream ids in one scan.",
+  "maxStreams": 100000,
+
+  "//counterFallbackProbeRun": "When the counter entry is unreadable (archived), probe this many ids past the cached high-water mark to catch streams created during downtime.",
+  "counterFallbackProbeRun": 200,
+
+  "//sorobanStateSizeBytes": "Current live Soroban state size, for the rent curve. 0 (unknown) uses the CAP-0066 floor fee of 1000 stroops/KB; the fee scales to 10000 at the 3 GB target.",
+  "sorobanStateSizeBytes": "0",
+
+  "//reAlertEveryLedgers": "Re-fire crit/expired alerts once per this many ledgers of observation age (8640 ≈ 12 h at 5 s/ledger).",
+  "reAlertEveryLedgers": 8640,
+
+  "//schedules": "Per-class thresholds in ledgers REMAINING; warnLedgers must stay below the class cliff or scan refuses to run. stream/index are extended on-chain (worst-case cliff 200000 ledgers, extend-to 500000), so they warn at 75% of the cliff. counter/instance/code are never extended on-chain (cliff 4095 ledgers ≈ 5.7 h), so their thresholds sit far lower.",
+  "schedules": {
+    "stream": { "warnLedgers": 150000, "critLedgers": 60000 },
+    "index": { "warnLedgers": 150000, "critLedgers": 60000 },
+    "counter": { "warnLedgers": 3000, "critLedgers": 1200 },
+    "instance": { "warnLedgers": 3000, "critLedgers": 1200 },
+    "code": { "warnLedgers": 3000, "critLedgers": 1200 }
+  },
+
+  "//extender": "OPTIONAL funded component. Off by default; the core sentinel is read-only. `extend` is also dry-run unless --execute is passed.",
+  "extender": {
+    "enabled": false,
+    "//secretKeyEnv": "Env var holding the extender's Stellar secret key. Never a CLI flag (argv leaks via ps) and never read by `scan`.",
+    "secretKeyEnv": "TTL_SENTINEL_EXTENDER_SECRET",
+    "//thresholdLedgers": "Only extend entries whose remaining TTL is below this.",
+    "thresholdLedgers": 200000,
+    "//extendTo": "Extend target past the current ledger (a floor, not an exact value). Must exceed thresholdLedgers and stay under max_entry_ttl (6312000).",
+    "extendTo": 500000,
+    "maxEntriesPerTx": 20,
+    "//dryRun": "Print the plan without submitting. --execute overrides per run.",
+    "dryRun": true,
+    "//monthlyBudgetXlm": "Hard monthly cap on extension fees, enforced from the persisted spend meter.",
+    "monthlyBudgetXlm": "1"
+  }
+}
