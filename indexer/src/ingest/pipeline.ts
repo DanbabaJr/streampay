@@ -421,7 +421,18 @@ export class IngestPipeline {
   }
 
   private decodeAll(events: RpcEvent[]): DecodedEvent[] {
-    return events.map((event) => this.cfg.decode(event));
+    const decoded: DecodedEvent[] = [];
+    for (const event of events) {
+      try {
+        decoded.push(this.cfg.decode(event));
+      } catch (err) {
+        console.warn(
+          `[ingest] undecodable event ${event.id} skipped:`,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+    return decoded;
   }
 
   private commit(read: WindowRead, acc: TickAccumulator): void {
