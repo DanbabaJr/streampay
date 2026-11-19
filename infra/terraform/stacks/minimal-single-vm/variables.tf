@@ -81,54 +81,99 @@ variable "ssm_path_prefix" {
   description = "secrets_strategy=ssm: SecureStrings are read from <prefix>/<SECRET_NAME>."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.ssm_path_prefix == "" || can(regex("^/[a-zA-Z0-9_/._-]+[a-zA-Z0-9_/.-]$", var.ssm_path_prefix))
+    error_message = "ssm_path_prefix must be empty or an absolute SSM hierarchy such as /streampay/testnet."
+  }
 }
 
 variable "ssm_region" {
   description = "secrets_strategy=ssm: region for the AWS CLI call. Empty uses the instance's own region."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.ssm_region == "" || can(regex("^[a-z]{2}(-[a-z0-9]+)+-[0-9]$", var.ssm_region))
+    error_message = "ssm_region must be empty or an AWS region code such as us-east-1."
+  }
 }
 
 variable "vault_mount" {
   description = "secrets_strategy=vault: KV v2 mount and path holding the secret map, e.g. kv/streampay/testnet."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.vault_mount == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9/_-]*$", var.vault_mount))
+    error_message = "vault_mount must be empty or a KV path such as kv/streampay/testnet (no leading slash, no spaces)."
+  }
 }
 
 variable "strict_secret_names" {
   description = "Names the source must provide or the fetch fails, regardless of optional_secrets. Put the funded extender key here once the extender is enabled."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for n in var.strict_secret_names : can(regex("^[A-Z][A-Z0-9_]*$", n))])
+    error_message = "Every strict_secret_names entry must be an uppercase environment-style name such as STREAMPAY_EXTENDER_SECRET."
+  }
 }
 
 variable "bundle_dir" {
   description = "Where the rendered bundle is written. Defaults to this stack's build/ directory (git-ignored) so a workstation run never touches /opt; set it to install_dir on the VM so the bundle is applied in place."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.bundle_dir == null || can(regex("^/[A-Za-z0-9._/-]+$", var.bundle_dir))
+    error_message = "bundle_dir must be null or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "local_repo_root" {
   description = "Checkout of this repo on the machine running Terraform. Used only to hash the Dockerfiles into the apply trigger, so editing an image definition re-runs the bootstrap."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.local_repo_root == null || can(regex("^/[A-Za-z0-9._/-]+$", var.local_repo_root))
+    error_message = "local_repo_root must be null or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "install_dir" {
   description = "Host directory the stack is installed into by install.sh."
   type        = string
   default     = "/opt/streampay"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9._/-]+$", var.install_dir))
+    error_message = "install_dir must be an absolute POSIX path with no spaces."
+  }
 }
 
 variable "config_dir" {
   description = "Host directory holding the rendered config and the 0600 secret files."
   type        = string
   default     = "/etc/streampay"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9._/-]+$", var.config_dir))
+    error_message = "config_dir must be an absolute POSIX path with no spaces."
+  }
 }
 
 variable "repo_root" {
   description = "Path of this repo's checkout on the machine that runs install.sh; the local image builds read their contexts from here."
   type        = string
   default     = "/opt/streampay/src"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9._/-]+$", var.repo_root))
+    error_message = "repo_root must be an absolute POSIX path with no spaces."
+  }
 }
 
 variable "apply_locally" {
@@ -184,48 +229,88 @@ variable "tls_domain" {
   description = "Public hostname for the listener. Required when tls_mode=acme."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_domain == "" || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.tls_domain))
+    error_message = "tls_domain must be empty or a fully qualified lowercase hostname (no scheme, port or path)."
+  }
 }
 
 variable "tls_email" {
   description = "Let's Encrypt registration address (tls_mode=acme). An alias is better than a personal address: ACME stores it."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_email == "" || can(regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}$", var.tls_email))
+    error_message = "tls_email must be empty or a plain email address."
+  }
 }
 
 variable "tls_cert_file" {
   description = "tls_mode=file: host path of the certificate chain, delivered by the secret mechanism."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_cert_file == "" || can(regex("^/[A-Za-z0-9._/-]+$", var.tls_cert_file))
+    error_message = "tls_cert_file must be empty or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "tls_key_file" {
   description = "tls_mode=file: host path of the private key, expected mode 0600."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.tls_key_file == "" || can(regex("^/[A-Za-z0-9._/-]+$", var.tls_key_file))
+    error_message = "tls_key_file must be empty or an absolute POSIX path with no spaces."
+  }
 }
 
 variable "grafana_host_port" {
   description = "Loopback port Grafana listens on (127.0.0.1 by default). 0 means reach it only through the TLS listener."
   type        = number
   default     = 3000
+
+  validation {
+    condition     = var.grafana_host_port >= 0 && var.grafana_host_port <= 65535
+    error_message = "grafana_host_port must be a TCP port between 0 and 65535 (0 keeps it off the host)."
+  }
 }
 
 variable "prometheus_host_port" {
   description = "Loopback port for Prometheus. It has no authentication, so it stays unpublished by default; use an SSH tunnel or Grafana."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.prometheus_host_port >= 0 && var.prometheus_host_port <= 65535
+    error_message = "prometheus_host_port must be a TCP port between 0 and 65535 (0 keeps it off the host)."
+  }
 }
 
 variable "indexer_host_port" {
   description = "Loopback port for the indexer API. 0 keeps it on the docker network only."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.indexer_host_port >= 0 && var.indexer_host_port <= 65535
+    error_message = "indexer_host_port must be a TCP port between 0 and 65535 (0 keeps it container-only)."
+  }
 }
 
 variable "admin_bind_address" {
   description = "Address the operator-only ports bind on. Keep it on loopback."
   type        = string
   default     = "127.0.0.1"
+
+  validation {
+    condition     = can(regex("^[0-9]{1,3}([.][0-9]{1,3}){3}$|^::1$|^localhost$", var.admin_bind_address))
+    error_message = "admin_bind_address must be an IPv4 address, localhost or ::1 — the operator ports are not meant to be public."
+  }
 }
 
 variable "expose_indexer_api" {
@@ -262,54 +347,99 @@ variable "extender_threshold_ledgers" {
   description = "Extend streams whose remaining TTL is below this many ledgers."
   type        = number
   default     = 200000
+
+  validation {
+    condition     = var.extender_threshold_ledgers >= 1 && var.extender_threshold_ledgers < 6312000
+    error_message = "extender_threshold_ledgers must be at least 1 and below Soroban's max_entry_ttl of 6312000."
+  }
 }
 
 variable "extender_to_ledgers" {
   description = "Ledgers to extend to when a stream falls below the threshold. Must exceed the threshold and stay under Soroban's max_entry_ttl (6312000)."
   type        = number
   default     = 500000
+
+  validation {
+    condition     = var.extender_to_ledgers > var.extender_threshold_ledgers && var.extender_to_ledgers <= 6312000
+    error_message = "extender_to_ledgers must exceed extender_threshold_ledgers and stay at or below Soroban's max_entry_ttl (6312000); otherwise extension never lifts the cliff."
+  }
 }
 
 variable "extender_monthly_budget_xlm" {
   description = "Stop funding once this much XLM has been spent in the calendar month. The sentinel keeps the meter on its state volume."
   type        = string
   default     = "1"
+
+  validation {
+    condition     = can(regex("^[0-9]+([.][0-9]+)?$", var.extender_monthly_budget_xlm))
+    error_message = "extender_monthly_budget_xlm must be a non-negative decimal XLM amount such as \"1\" or \"12.5\"."
+  }
 }
 
 variable "extender_schedule" {
   description = "systemd calendar expression for the extender timer."
   type        = string
   default     = "hourly"
+
+  validation {
+    condition     = length(trimspace(var.extender_schedule)) > 0
+    error_message = "extender_schedule must be a non-empty systemd calendar expression such as hourly or *-*-* 00/6:00:00."
+  }
 }
 
 variable "indexer_start_ledger" {
   description = "Ledger to begin indexing from. Leave unset to start at the current latest ledger; set it when re-indexing history, and remember the SQLite file already holds whatever it indexed before."
   type        = number
   default     = null
+
+  validation {
+    condition     = var.indexer_start_ledger == null ? true : var.indexer_start_ledger >= 1
+    error_message = "indexer_start_ledger must be null (start at the latest ledger) or a ledger sequence of at least 1."
+  }
 }
 
 variable "indexer_poll_interval_ms" {
   description = "Ledger poll interval. The indexer refuses anything below 250 ms."
   type        = number
   default     = 5000
+
+  validation {
+    condition     = var.indexer_poll_interval_ms >= 250 && var.indexer_poll_interval_ms <= 600000
+    error_message = "indexer_poll_interval_ms must be between 250 and 600000; the indexer refuses anything below 250 ms."
+  }
 }
 
 variable "rpc_fallback_urls" {
   description = "Extra Soroban RPC endpoints the indexer rotates through when the primary one rate-limits it."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for u in var.rpc_fallback_urls : can(regex("^https?://[A-Za-z0-9._:/-]+$", u))])
+    error_message = "Every rpc_fallback_urls entry must be an http(s) URL with no query string."
+  }
 }
 
 variable "prometheus_retention" {
   description = "TSDB retention for Prometheus. The disk on a hobby VM is the real limit here."
   type        = string
   default     = "15d"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.prometheus_retention))
+    error_message = "prometheus_retention must be a Prometheus duration with a unit, such as 15d or 720h."
+  }
 }
 
 variable "alert_repeat_interval" {
   description = "How often Alertmanager re-sends an unresolved warning."
   type        = string
   default     = "4h"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[smhdwy]$", var.alert_repeat_interval))
+    error_message = "alert_repeat_interval must be a duration with a unit, such as 4h or 30m."
+  }
 }
 
 variable "alert_receivers" {
@@ -350,6 +480,11 @@ variable "log_max_size" {
   description = "Per-container JSON log rotation size."
   type        = string
   default     = "10m"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*[kKmMgG]?$", var.log_max_size))
+    error_message = "log_max_size must be a size such as 10m or 1g (docker's <number><unit> form)."
+  }
 }
 
 variable "additional_notes" {
