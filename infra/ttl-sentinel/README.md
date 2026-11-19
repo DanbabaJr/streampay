@@ -54,7 +54,7 @@ Soroban TTL rules that decide everything here (verified against
    It is a floor, never an exact value.
 3. A brand-new persistent entry gets `min_persistent_entry_ttl`, counted
    inclusive of the creating ledger (`remaining = min - 1`).
-4. An entry is live *through* its `liveUntilLedger`; it archives at the next
+4. An entry is live _through_ its `liveUntilLedger`; it archives at the next
    ledger close.
 
 StreamPay's contract (`contracts/streaming-payments/src/stream.rs`) uses
@@ -63,19 +63,19 @@ StreamPay's contract (`contracts/streaming-payments/src/stream.rs`) uses
 `DataKey::NextStreamId`, the contract instance entry, or the Wasm code entry.
 From those four facts, the cliff per entry class falls out:
 
-| class | key | extended on-chain? | worst case | best case | at 5 s/ledger |
-|---|---|---|---|---|---|
-| stream | `DataKey::Stream(id)` | yes, on every write | **200,000** ledgers | 500,000 | 11.6 d / 28.9 d |
-| index | `SenderStreams(addr)` / `RecipientStreams(addr)` | yes, on write **and** page read | **200,000** | 500,000 | 11.6 d / 28.9 d |
-| counter | `DataKey::NextStreamId` | **never** | **4,095** ledgers | 4,095 | **5.7 h** |
-| instance | contract instance entry | **never** | **4,095** | 4,095 | **5.7 h** |
-| code | Wasm code entry | **never** | **4,095** | 4,095 | **5.7 h** |
+| class    | key                                              | extended on-chain?              | worst case          | best case | at 5 s/ledger   |
+| -------- | ------------------------------------------------ | ------------------------------- | ------------------- | --------- | --------------- |
+| stream   | `DataKey::Stream(id)`                            | yes, on every write             | **200,000** ledgers | 500,000   | 11.6 d / 28.9 d |
+| index    | `SenderStreams(addr)` / `RecipientStreams(addr)` | yes, on write **and** page read | **200,000**         | 500,000   | 11.6 d / 28.9 d |
+| counter  | `DataKey::NextStreamId`                          | **never**                       | **4,095** ledgers   | 4,095     | **5.7 h**       |
+| instance | contract instance entry                          | **never**                       | **4,095**           | 4,095     | **5.7 h**       |
+| code     | Wasm code entry                                  | **never**                       | **4,095**           | 4,095     | **5.7 h**       |
 
 ### Deriving the 200,000-ledger stream cliff
 
-Take the last write that *ever* extends a stream entry: it sets
+Take the last write that _ever_ extends a stream entry: it sets
 `liveUntil = L_ext + 500_000`. Any later write happens while
-`remaining >= 200_000`, i.e. at most `500_000 - 200_000 = 300_000` ledgers
+`remaining >= 200,000`, i.e. at most `500_000 - 200_000 = 300_000` ledgers
 after `L_ext`, and does **not** extend anything. So the final write of the
 entry's life happens no later than `L_ext + 300_000`, leaving at least
 
@@ -88,7 +88,7 @@ hair above) leaves exactly the cliff. `test/cliff.test.ts` replays 5,000
 pseudo-random write sequences and asserts both the invariant and its
 tightness; `test/constants-sync.test.ts` fails if the contract's constants or
 its extension behaviour drift — including asserting that the counter is
-*never* extended, which is what makes the 4,095-ledger cliff real.
+_never_ extended, which is what makes the 4,095-ledger cliff real.
 
 ### Deriving the 4,095-ledger cliffs — the finding that matters
 
@@ -105,8 +105,8 @@ target, and:
   A `stellar contract deploy` (no TTL flag) therefore leaves a deployment
   that bricks roughly 5.7 hours later, for every entrypoint — including
   `get_stream`. Restoring grants `min_persistent_entry_ttl` again: a ~6-hour
-  treadmill unless the entries are *extended*, which is what the optional
-  extender (`extendTo = 500_000` ≈ 28.9 d) does.
+  treadmill unless the entries are _extended_, which is what the optional
+  extender (`extendTo = 500,000` ≈ 28.9 d) does.
 
 This is exactly why the sentinel models classes separately instead of using
 one threshold: applying the stream schedule to the counter would page
@@ -115,27 +115,27 @@ that contrast explicitly).
 
 ### Schedule vs. cliff (the margin, justified)
 
-Worst-case *scan gap* is computed at the **fastest credible cadence, 1 s per
+Worst-case _scan gap_ is computed at the **fastest credible cadence, 1 s per
 ledger** (consecutive whole-second close times may differ by as little as one
 second) — never at the 5 s target. With a 5-minute scan interval
 (`scanIntervalSec = 300`):
 
-| class | warn | crit | worst scan gap (1 s) | warn margin `cliff-(warn+gap)` | crit lead `crit-gap` |
-|---|---:|---:|---:|---:|---:|
-| stream / index | 150,000 (75 % of cliff) | 60,000 | 300 | **+49,700** ledgers (≈ 2.8 d @5 s) | 59,700 ledgers (≈ 3.5 d @5 s) |
-| counter / instance / code | 3,000 (73 % of cliff) | 1,200 | 300 | **+795** ledgers (≈ 66 min @5 s) | 900 ledgers (≈ 75 min @5 s) |
+| class                     |                    warn |   crit | worst scan gap (1 s) |     warn margin `cliff-(warn+gap)` |          crit lead `crit-gap` |
+| ------------------------- | ----------------------: | -----: | -------------------: | ---------------------------------: | ----------------------------: |
+| stream / index            | 150,000 (75 % of cliff) | 60,000 |                  300 | **+49,700** ledgers (≈ 2.8 d @5 s) | 59,700 ledgers (≈ 3.5 d @5 s) |
+| counter / instance / code |   3,000 (73 % of cliff) |  1,200 |                  300 |   **+795** ledgers (≈ 66 min @5 s) |   900 ledgers (≈ 75 min @5 s) |
 
 `assertScheduleSafety()` runs on every `scan` and **refuses to run** with a
 schedule whose warning could land outside its class cliff; config validation
 enforces the weaker bound (`warn < cliff`) for every command. The margins in
-the table are the provable ones for a *single* missed interval (1 ledger/s ×
+the table are the provable ones for a _single_ missed interval (1 ledger/s ×
 300 s = 300 ledgers). `test/fastforward.test.ts` fast-forwards the ledger
 scan-by-scan at a deliberately slower 3,000 s cadence (600 ledgers per gap)
 and asserts the observed timings: the stream warns at 149,600 remaining, goes
 critical at 59,600 and archives exactly at `liveUntil`; counter, instance and
 code do the same on their 4,095-ledger cliff.
 
-**Coverage vs. prevention.** An alert is *preventive* only if it fires while
+**Coverage vs. prevention.** An alert is _preventive_ only if it fires while
 remaining TTL > 0. The schedule tolerates outages up to
 `warn - crit = 90,000` ledgers for streams (≈ 5.2 d at 5 s) and
 `3,000 - 1,200 = 1,800` ledgers (≈ 2.5 h) for never-extended entries; beyond
@@ -163,11 +163,11 @@ Monthly rent at current scale (30 d = 518,400 ledgers at 5 s/ledger; 120 KB
 Wasm placeholder; index entries pessimistically one id each):
 
 | streams | XLM/month at floor fee (`≤ 2 GB` state) | XLM/month at 3 GB-target ceiling |
-|---:|---:|---:|
-| 1 | 1.708 | 17.078 |
-| 100 | 5.008 | 50.078 |
-| 1,000 | 35.008 | 350.078 |
-| 10,000 | 335.009 | 3,350.079 |
+| ------: | --------------------------------------: | -------------------------------: |
+|       1 |                                   1.708 |                           17.078 |
+|     100 |                                   5.008 |                           50.078 |
+|   1,000 |                                  35.008 |                          350.078 |
+|  10,000 |                                 335.009 |                        3,350.079 |
 
 Marginal cost is **0.021 XLM per live stream per month** (0.21 at the
 ceiling) plus the fixed entries. Breakdown at 1,000 streams: 21.0 streams +
@@ -185,7 +185,7 @@ Two consequences for the pricing/dust work:
   dust-minimum decision.
 
 `npm run rent -- --streams N [--addresses A] [--code-bytes B] [--state-size S]`
-prints the table offline; `scan` reports it from *measured* on-chain sizes.
+prints the table offline; `scan` reports it from _measured_ on-chain sizes.
 Refresh `sorobanStateSizeBytes` (and the CAP-0066 constants) from the live
 network config before quoting production numbers — the fee curve is flat at
 1,000 stroops/KB until ~2 GB of live Soroban state.
@@ -196,8 +196,8 @@ network config before quoting production numbers — the fee curve is flat at
   `1..next_id-1` are fetched with batched `getLedgerEntries` (≤ 200 keys per
   request, RPC's hard limit). No dependency on event retention (a public RPC
   keeps ~7 days of events, far less than the cliffs above).
-- **Counter unavailable** — falls back to the cached high-water mark *plus a
-  bounded 200-id probe run* so streams created during downtime are still
+- **Counter unavailable** — falls back to the cached high-water mark _plus a
+  bounded 200-id probe run_ so streams created during downtime are still
   found; speculative ids that are absent are never reported as expired
   (they may simply not exist).
 - **Index keys** — probed for every address ever seen (sender and recipient),
@@ -211,7 +211,7 @@ network config before quoting production numbers — the fee curve is flat at
 
 ## The optional extender (separately funded, off by default)
 
-Auto-extension means *signing a transaction* with a funded account, so it
+Auto-extension means _signing a transaction_ with a funded account, so it
 raises two questions the read-only core deliberately does not answer: **who
 pays**, and **who holds the key**.
 
@@ -260,3 +260,13 @@ src/extender.ts    optional funded ExtendFootprintTTL submitter
 src/cli.ts         scan / rent / extend
 test/              unit tests + fake chain for fast-forward ledger scenarios
 ```
+
+## Dry-run report mode
+
+For a write-free preview of planned TTL extensions:
+
+```bash
+node dist/src/cli.js extend --config ./ttl-sentinel.config.json --dry-run --json
+```
+
+The default is already dry-run even without `--dry-run`. JSON includes entries near expiry, current and required TTL ledgers, per-entry and total rent estimates, and the exact `ExtendFootprintTTL` transactions. The human-readable output summarizes the same plan. Cost assumptions use the `rs-soroban-env` rent fee model and are based on the configured Soroban state size and measured entry sizes; see [`docs/FOOTPRINT.md`](../../docs/FOOTPRINT.md). Use `--execute` only to submit; `--execute` and `--dry-run` are mutually exclusive.

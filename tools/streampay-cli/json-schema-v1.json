@@ -148,9 +148,6 @@
       },
       "additionalProperties": false
     },
-    }
-  ],
-  "$defs": {
     "simulation": {
       "type": "object",
       "required": ["latestLedger", "minResourceFee", "footprint", "eventXdr", "expectedBalances"],
@@ -195,5 +192,4 @@
       "additionalProperties": false
     }
   }
-}
 }

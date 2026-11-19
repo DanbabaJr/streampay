@@ -1,10 +1,45 @@
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
+import dns from "node:dns/promises";
 import Database from "better-sqlite3";
 import { canonicalizeJson, generateSignatureHeader, verifySignatureHeader } from "./webhooks/hmac.js";
-import { validateWebhookUrl } from "./webhooks/ssrf.js";
+import { validateWebhookUrl, isDisallowedIpv4, isDisallowedIpv6 } from "./webhooks/ssrf.js";
 import { calculateNextRetryDelay, isTerminalAttempt, MAX_RETRY_ATTEMPTS } from "./webhooks/retry.js";
 import { WebhookStore } from "./webhooks/store.js";
+import { WebhookDispatcher } from "./webhooks/dispatcher.js";
+import { SSRF_BYPASS_FIXTURES, REDIRECT_ESCAPE_FIXTURES } from "./webhooks/ssrf-fixtures.js";
+
+// =========================================================================
+// Simulated DNS Resolution (no real network access in tests)
+// =========================================================================
+const simulatedDnsMap = new Map<string, Array<{ address: string; family: number }>>();
+
+// Seed standard public test domains
+simulatedDnsMap.set("example.com", [{ address: "93.184.216.34", family: 4 }]);
+simulatedDnsMap.set("public.example.com", [{ address: "93.184.216.34", family: 4 }]);
+simulatedDnsMap.set("webhook-source.example.com", [{ address: "93.184.216.34", family: 4 }]);
+
+// Seed all simulated DNS records defined in the SSRF bypass fixture catalog
+for (const fixture of SSRF_BYPASS_FIXTURES) {
+  if (fixture.simulatedDnsRecords) {
+    try {
+      const u = new URL(fixture.target);
+      simulatedDnsMap.set(u.hostname.toLowerCase(), fixture.simulatedDnsRecords);
+    } catch {}
+  }
+}
+
+// Intercept dns.lookup to use simulated DNS records
+mock.method(dns, "lookup", async (hostname: string, _options?: any) => {
+  const normHost = hostname.toLowerCase();
+  const records = simulatedDnsMap.get(normHost);
+  if (records) {
+    return records;
+  }
+  const err = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+  (err as any).code = "ENOTFOUND";
+  throw err;
+});
 
 describe("Webhook System", () => {
   describe("HMAC Signing & Dual-Signature Rotation", () => {
@@ -72,6 +107,7 @@ describe("Webhook System", () => {
   });
 
   describe("SSRF Protection Guard", () => {
+    // Original test cases preserved
     it("rejects loopback addresses", async () => {
       assert.strictEqual((await validateWebhookUrl("http://127.0.0.1:8080/webhook")).safe, false);
       assert.strictEqual((await validateWebhookUrl("http://localhost:3000/events")).safe, false);
@@ -102,6 +138,197 @@ describe("Webhook System", () => {
     it("accepts valid public domain webhooks", async () => {
       const res = await validateWebhookUrl("https://example.com/webhook");
       assert.strictEqual(res.safe, true);
+    });
+
+    // -------------------------------------------------------------
+    // Extended Modern SSRF Bypass Fixtures
+    // -------------------------------------------------------------
+    it("rejects expanded IPv6 loopback and unspecified representations", async () => {
+      const loopbackCases = [
+        "http://[::1]:9000/hook",
+        "http://[0:0:0:0:0:0:0:1]:8080/hook",
+        "http://[0000:0000:0000:0000:0000:0000:0000:0001]/hook",
+        "http://[::0001]/hook",
+        "http://[::]/hook",
+        "http://[0:0:0:0:0:0:0:0]/hook",
+      ];
+      for (const target of loopbackCases) {
+        const res = await validateWebhookUrl(target);
+        assert.strictEqual(res.safe, false, `Expected ${target} to be rejected`);
+      }
+    });
+
+    it("rejects IPv6 link-local, unique-local (ULA), and multicast variants", async () => {
+      const v6Cases = [
+        "http://[fe80::1]/hook",
+        "http://[fe80:0:0:0:200:5efe:127.0.0.1]/hook",
+        "http://[feb0::1]/hook",
+        "http://[fc00::1]/hook",
+        "http://[fd00::1]/hook",
+        "http://[fd12:3456:789a::1]/hook",
+        "http://[ff02::1]/hook",
+      ];
+      for (const target of v6Cases) {
+        const res = await validateWebhookUrl(target);
+        assert.strictEqual(res.safe, false, `Expected ${target} to be rejected`);
+      }
+    });
+
+    it("rejects IPv4-mapped IPv6, IPv4-compatible IPv6, and 6to4 addresses", async () => {
+      const mappedCases = [
+        "http://[::ffff:127.0.0.1]:8080/webhook",
+        "http://[::ffff:7f00:1]:8080/webhook",
+        "http://[::ffff:10.0.0.1]/webhook",
+        "http://[::ffff:a00:1]/webhook",
+        "http://[::ffff:169.254.169.254]/latest/meta-data",
+        "http://[::ffff:a9fe:a9fe]/computeMetadata/v1/",
+        "http://[::ffff:192.168.1.1]/webhook",
+        "http://[::ffff:c0a8:101]/webhook",
+        "http://[::ffff:172.16.0.1]/webhook",
+        "http://[0:0:0:0:0:ffff:127.0.0.1]/webhook",
+        "http://[0000:0000:0000:0000:0000:ffff:7f00:0001]/webhook",
+        "http://[::127.0.0.1]/webhook",
+        "http://[2002:7f00:0001::]/webhook",
+        "http://[2002:a9fe:a9fe::]/webhook",
+      ];
+      for (const target of mappedCases) {
+        const res = await validateWebhookUrl(target);
+        assert.strictEqual(res.safe, false, `Expected ${target} to be rejected`);
+      }
+    });
+
+    it("rejects decimal, octal, hex, and shorthand IPv4 encodings", async () => {
+      const encodingCases = [
+        "http://2130706433/webhook",
+        "http://0177.0.0.1/webhook",
+        "http://017700000001/webhook",
+        "http://0x7f000001/webhook",
+        "http://0x7f.0.0.1/webhook",
+        "http://127.1/webhook",
+        "http://127.0.1/webhook",
+        "http://0/webhook",
+        "http://2852039166/latest/meta-data",
+        "http://0xa9fea9fe/latest/meta-data",
+        "http://0251.0376.0251.0376/latest/meta-data",
+        "http://025177524776/latest/meta-data",
+        "http://167772161/webhook",
+        "http://012.0.0.1/webhook",
+        "http://0x0a000001/webhook",
+        "http://2886729729/webhook",
+        "http://3232235521/webhook",
+        "http://0300.0250.0.1/webhook",
+        "http://0xc0a80001/webhook",
+      ];
+      for (const target of encodingCases) {
+        const res = await validateWebhookUrl(target);
+        assert.strictEqual(res.safe, false, `Expected ${target} to be rejected`);
+      }
+    });
+
+    it("rejects hostnames resolving to private, loopback, or metadata ranges via simulated DNS", async () => {
+      const dnsCases = [
+        "http://simulated-loopback.internal-test/webhook",
+        "http://simulated-private-10.internal-test/webhook",
+        "http://simulated-private-172.internal-test/webhook",
+        "http://simulated-private-192.internal-test/webhook",
+        "http://simulated-metadata.internal-test/webhook",
+        "http://simulated-cgnat.internal-test/webhook",
+        "http://simulated-v6-loopback.internal-test/webhook",
+        "http://simulated-v6-linklocal.internal-test/webhook",
+        "http://simulated-v6-ula.internal-test/webhook",
+        "http://simulated-v6-mapped.internal-test/webhook",
+        "http://simulated-v6-mapped-hex.internal-test/webhook",
+        "http://simulated-rebind-multihomed.internal-test/webhook",
+        "http://simulated-rebind-v6.internal-test/webhook",
+      ];
+      for (const target of dnsCases) {
+        const res = await validateWebhookUrl(target);
+        assert.strictEqual(res.safe, false, `Expected ${target} to be rejected`);
+      }
+    });
+
+    it("validates all entries in the modern SSRF fixture catalog", async () => {
+      for (const fixture of SSRF_BYPASS_FIXTURES) {
+        const res = await validateWebhookUrl(fixture.target);
+        assert.strictEqual(
+          res.safe,
+          fixture.expectedSafe,
+          `Fixture failed for target: ${fixture.target} (${fixture.description})`
+        );
+      }
+    });
+  });
+
+  describe("Redirect-Based Escape Prevention (Dispatcher)", () => {
+    let db: Database.Database;
+    let store: WebhookStore;
+    let dispatcher: WebhookDispatcher;
+
+    it("rejects HTTP 3xx redirect escapes before any request is made to the target", async () => {
+      for (const fixture of REDIRECT_ESCAPE_FIXTURES) {
+        db = new Database(":memory:");
+        store = new WebhookStore(db);
+        dispatcher = new WebhookDispatcher(store);
+
+        const ep = store.createEndpoint({
+          url: "https://webhook-source.example.com/events",
+          events: ["*"],
+        });
+
+        const event = {
+          id: `evt_redir_${Date.now()}`,
+          name: "stream_created",
+          streamId: "99",
+          ledgerClosedAt: new Date().toISOString(),
+          data: { test: true },
+        };
+        store.queueDeliveriesForEvent(event);
+        const due = store.getDueDeliveries();
+        const delivery = due.find((d) => d.endpoint_id === ep.id);
+        assert.ok(delivery);
+
+        // Track all HTTP requests made
+        const dispatchedUrls: string[] = [];
+
+        // Mock global fetch to return 302 redirect on first request
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+          const urlStr = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+          dispatchedUrls.push(urlStr);
+
+          // Return redirect to the fixture target
+          return new Response("", {
+            status: 302,
+            headers: { Location: fixture.target },
+          });
+        }) as typeof fetch;
+
+        try {
+          const outcome = await dispatcher.deliverSingle(delivery);
+
+          // Assert the delivery was blocked
+          assert.strictEqual(outcome.success, false);
+          assert.ok(
+            outcome.statusCode === 403 || outcome.error?.includes("Disallowed protocol"),
+            `Expected 403 or disallowed protocol for ${fixture.target}, got ${outcome.statusCode}`
+          );
+
+          // CRITICAL ASSERTION: The escaped target must NEVER have been called!
+          // Only the initial safe webhook URL was dispatched.
+          assert.strictEqual(
+            dispatchedUrls.length,
+            1,
+            `Expected exactly 1 request to initial URL, but requests were made to: ${dispatchedUrls.join(", ")}`
+          );
+          assert.strictEqual(
+            dispatchedUrls[0],
+            "https://webhook-source.example.com/events",
+            `Initial URL mismatch: ${dispatchedUrls[0]}`
+          );
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      }
     });
   });
 

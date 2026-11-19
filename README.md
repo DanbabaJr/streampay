@@ -410,7 +410,8 @@ stellar contract deploy \
 
 The TypeScript CLI supports stream creation, withdrawals, cancellation,
 top-ups, and recipient `claim-all`, with environment, encrypted-file, and
-hardware-wallet handoff signers. Dry-runs use Soroban RPC transaction
+hardware-wallet handoff signers, plus read-only `status`/`get` snapshots with
+a `--watch` JSON-lines mode. Dry-runs use Soroban RPC transaction
 simulation and report its footprint and event-derived token deltas. It
 requires Node.js ≥ 22.6; setup, JSON schema v1, and exit codes are documented
 in [`tools/streampay-cli`](./tools/streampay-cli/README.md).
@@ -442,7 +443,7 @@ npm run rent -- --streams 1000             # rent + cost projection
 ```text
 contracts/streaming-payments/   the contract (lib.rs, stream.rs, schedule.rs, treasury.rs, errors.rs, events.rs, test.rs, schedule_test.rs)
 frontend/                       minimal Next.js UI (Freighter wallet)
-tools/streampay-cli/            read-only status/get + --watch JSON-lines CLI
+tools/streampay-cli/            headless CLI: transactions, key encrypt, status/get --watch
 indexer/                        Soroban event indexer (TypeScript + SQLite + REST API)
 fuzz/                           cargo-fuzz harness for the accrual math (own workspace)
 scripts/deploy_testnet.sh       one-command testnet demo

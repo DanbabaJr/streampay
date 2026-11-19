@@ -10,6 +10,12 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- CLI shell completions (#518): `streampay completion <bash|zsh|fish>` prints a
+  static completion script generated from the CLI's command registry
+  (`tools/streampay-cli/src/registry.ts`), which the argument parser and
+  dispatch now read too, so completions cannot drift from real commands.
+  Snapshot and drift-guard tests; install steps in the CLI README. The `--json`
+  output contract is unchanged.
 - `tools/streampay-cli` read-only `status` / `get` commands and a `--watch`
   JSON-lines mode: polls `get_stream`, emits one line per decoded state
   change, and flushes a summary line on SIGINT. `--interval` has a 1000 ms

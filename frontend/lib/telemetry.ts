@@ -10,6 +10,7 @@
  */
 
 import { sanitizeAttributes, sanitizeError } from "./privacy.ts";
+import { loadTelemetryConsent } from "./storage.ts";
 
 export type SpanKind = "INTERNAL" | "SERVER" | "CLIENT" | "PRODUCER" | "CONSUMER";
 export type SpanStatusCode = "UNSET" | "OK" | "ERROR";
@@ -195,7 +196,7 @@ export class Span {
   }
 
   setStatus(code: SpanStatusCode, message?: string): this {
-    this.status = { code, message };
+    this.status = { code, message: message ? sanitizeError(message) : undefined };
     if (code === "ERROR") {
       // Invariant: Error spans are tagged to guarantee tail-sampling 100% retention
       this.attributes["error"] = true;
@@ -290,7 +291,12 @@ export class OtlpHttpSpanExporter implements SpanExporter {
   private endpoint: string;
 
   constructor(endpoint?: string) {
-    const raw = endpoint || (typeof process !== "undefined" && process.env?.OTEL_EXPORTER_OTLP_ENDPOINT) || "http://localhost:4318";
+    const raw =
+      endpoint ||
+      (typeof process !== "undefined" &&
+        (process.env?.NEXT_PUBLIC_OTEL_EXPORTER_OTLP_ENDPOINT ||
+          process.env?.OTEL_EXPORTER_OTLP_ENDPOINT)) ||
+      "http://localhost:4318";
     this.endpoint = raw.endsWith("/v1/traces") ? raw : `${raw.replace(/\/$/, "")}/v1/traces`;
   }
 
@@ -402,12 +408,15 @@ export interface TracerOptions {
   serviceName: string;
   exporters?: SpanExporter[];
   resource?: Record<string, string>;
+  /** Checked for every finished span so consent changes take effect immediately. */
+  isEnabled?: () => boolean;
 }
 
 export class Tracer {
   public readonly serviceName: string;
   public readonly resource: Record<string, string>;
   private readonly exporters: SpanExporter[] = [];
+  private readonly isEnabled: () => boolean;
   private activeSpan: Span | null = null;
   private asyncLocalStorage?: {
     getStore: () => Span | undefined;
@@ -416,6 +425,7 @@ export class Tracer {
 
   constructor(options: TracerOptions) {
     this.serviceName = options.serviceName;
+    this.isEnabled = options.isEnabled ?? (() => true);
     this.resource = {
       "service.name": options.serviceName,
       "service.version": "0.1.0",
@@ -531,6 +541,7 @@ export class Tracer {
   }
 
   recordSpanEnd(span: Span): void {
+    if (!this.isEnabled()) return;
     const readable = span.toReadableSpan();
     for (const exporter of this.exporters) {
       try {
@@ -609,6 +620,7 @@ export function registerTraceCorrelation(
   context: SpanContext,
   streamId?: string
 ): void {
+  if (!loadTelemetryConsent()) return;
   traceCorrelationRegistry.register(txHash, context, streamId);
 
   const indexerUrl =
@@ -634,4 +646,5 @@ export function registerTraceCorrelation(
 export const globalFrontendTracer = new Tracer({
   serviceName: "streampay-frontend",
   exporters: [new OtlpHttpSpanExporter()],
+  isEnabled: loadTelemetryConsent,
 });

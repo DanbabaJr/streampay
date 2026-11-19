@@ -93,4 +93,6 @@ jobs:
       - name: Run piecewise accrual fuzz session
         working-directory: fuzz
         run: |
-          cargo +nightly fuzz run rate_schedule --             -max_total_time=${{ github.event.inputs.max_total_time || '60' }}             -rss_limit_mb=4096
+          cargo +nightly fuzz run rate_schedule -- \
+            -max_total_time=${{ github.event.inputs.max_total_time || '60' }} \
+            -rss_limit_mb=4096

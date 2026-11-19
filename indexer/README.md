@@ -25,6 +25,7 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `OUTBOX_BATCH_SIZE` | `200` | Max intent claims per consumer per tick (cap 1000) |
 | `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
 | `OUTBOX_MAX_DEPTH` | off | Global backpressure threshold for pending+in-flight intents |
+| `SHUTDOWN_DRAIN_MS` | `10000` | On SIGTERM/SIGINT, how long in-flight ingest and outbox dispatch may finish before the process exits (exit code `0` if drained, `1` if the window expired). Keep it below your orchestrator's kill grace period |
 
 ---
 
