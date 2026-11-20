@@ -648,6 +648,15 @@ jobs:
       - name: Check internal markdown links
         run: node scripts/check_docs_links.mjs
 
+      # The outbox/webhook dashboard (issue #542) is dashboard-as-code: it loads
+      # from the Grafana file provider with no manual import, so a malformed
+      # panel or a panel pointing at a metric the code never emits would silently
+      # render "No data" in the on-call UI. This validator fails on both, and its
+      # --self-test proves the fabricated-metric check actually fires.
+      # Dependency-free, same command contributors run (`npm run dashboard:check`).
+      - name: Grafana dashboards validate against emitted metrics
+        run: node scripts/check_dashboards.mjs --self-test
+
       # The migration plan operators read (docs/MIGRATION_AUDIT.md) is generated
       # from a captured record-layout snapshot, so changing the classifier or the
       # snapshot without regenerating the report is drift. Regenerate and diff,

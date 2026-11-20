@@ -39,12 +39,13 @@
     "eol:check": "bash scripts/check_line_endings.sh",
     "codes:check": "bash scripts/check_error_codes.sh",
     "links:check": "node scripts/check_docs_links.mjs",
+    "dashboard:check": "node scripts/check_dashboards.mjs --self-test",
     "json:check": "node scripts/check_duplicate_json_keys.mjs --self-test",
 
     "errors:check": "bash scripts/check_generated.sh surface",
     "errors:regen": "cargo run -p streampay-contract --example error_surface_doc",
 
-    "matrix": "npm run codes:check && npm run lint && npm run test && npm run build:contract && npm run build:frontend && npm run typecheck && npm run audit && npm run generated:check && npm run eol:check && npm run links:check && npm run json:check",
+    "matrix": "npm run codes:check && npm run lint && npm run test && npm run build:contract && npm run build:frontend && npm run typecheck && npm run audit && npm run generated:check && npm run eol:check && npm run links:check && npm run dashboard:check && npm run json:check",
 
     "ci:contract": "npm run codes:check && npm run lint && npm run test && npm run build:contract && npm run generated:surface",
     "ci:frontend": "npm run build:frontend && npm run typecheck && npm run audit"
