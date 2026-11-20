@@ -69,12 +69,7 @@ async function simulateRead(
   return simulated.result?.retval ?? null;
 }
 
-export async function readStream(streamId: string): Promise<StreamView> {
-  const retval = await simulateRead("get_stream", [u64(streamId)]);
-  if (!retval) {
-    throw new Error(`Stream #${streamId} not found or RPC unavailable`);
-  }
-  const raw = scValToNative(retval) as Record<string, unknown>;
+function toStreamView(raw: Record<string, unknown>): StreamView {
   return {
     id: String(raw.id),
     sender: String(raw.sender),
@@ -87,6 +82,27 @@ export async function readStream(streamId: string): Promise<StreamView> {
     cancelable: Boolean(raw.cancelable),
     status: String(raw.status),
   };
+}
+
+export async function readStream(streamId: string): Promise<StreamView> {
+  const retval = await simulateRead("get_stream", [u64(streamId)]);
+  if (!retval) {
+    throw new Error(`Stream #${streamId} not found or RPC unavailable`);
+  }
+  return toStreamView(scValToNative(retval) as Record<string, unknown>);
+}
+
+/**
+ * Absence-only read for route resolution: `null` means the contract returned
+ * no value for this id, while a transport/RPC failure still throws. That keeps
+ * an RPC outage from being rendered as a 404.
+ */
+export async function readStreamOptional(
+  streamId: string
+): Promise<StreamView | null> {
+  const retval = await simulateRead("get_stream", [u64(streamId)]);
+  if (!retval) return null;
+  return toStreamView(scValToNative(retval) as Record<string, unknown>);
 }
 
 export async function readAvailable(streamId: string): Promise<bigint> {
