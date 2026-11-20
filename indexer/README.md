@@ -241,6 +241,7 @@ is [`src/grpc/server.ts`](src/grpc/server.ts).
   and fails on any drift between the proto, the registry and the
   generated table — when the registry gains an event, add its enum value
   here (alphabetical order) and regenerate the table.
+
 ### GraphQL Read API (persisted queries only)
 `POST /graphql` — body `{ "queryId": "<id>", "variables": { ... }, "tenant": "<tenant>" }`.
 Only allowlisted persisted queries run; ad-hoc `query` text, unknown
