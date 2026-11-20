@@ -207,4 +207,15 @@ export const de: Record<MessageKey, string> = {
   "form.amountTooPrecise":
     "Dieses Token hat höchstens {decimals, number} Nachkommastellen — der eingegebene Betrag müsste gerundet werden.",
   "form.amountInvalid": "Das ist kein lesbarer Betrag.",
+
+  "share.heading": "Diesen Zahlungslink teilen",
+  "share.body":
+    "Scanne den QR-Code oder kopiere den Link. Die Referenz wird in deinem Browser erzeugt und nie an Dritte gesendet.",
+  "share.qrLabel": "QR-Code für diesen Zahlungslink",
+  "share.copy": "Link kopieren",
+  "share.copyLabel": "Zahlungslink in die Zwischenablage kopieren",
+  "share.copied": "Zahlungslink in die Zwischenablage kopiert.",
+  "share.copiedButton": "Kopiert!",
+  "share.copyFailed":
+    "Der Link konnte nicht kopiert werden. Markiere ihn und kopiere ihn manuell.",
 };
