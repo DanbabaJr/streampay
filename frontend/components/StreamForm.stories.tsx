@@ -68,13 +68,20 @@ export const InvalidDeposit: Story = {
   },
 };
 
-/** Loading: submitted, waiting on the wallet signature. */
+/**
+ * Submitting: rendered with the wallet signature pending. The story drives the
+ * real submitting code path from props (`submitting`), so a static visual
+ * capture and CI both see the genuine state instead of a lookalike. The play
+ * assertion locks that in: pending label, disabled submit, disabled controls.
+ */
 export const Submitting: Story = {
-  args: { onCreate: fn(() => new Promise<void>(() => {})) },
+  args: { onCreate: fn(() => new Promise<void>(() => {})), submitting: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.type(canvas.getByLabelText(/recipient/i), RECIPIENT);
-    await userEvent.click(canvas.getByRole("button", { name: /create/i }));
-    await waitFor(() => expect(canvas.getByRole("button", { name: /streaming/i })).toBeDisabled());
+    const submit = canvas.getByRole("button", { name: /streaming/i });
+    await expect(submit).toBeDisabled();
+    await expect(canvas.getByLabelText(/recipient/i)).toBeDisabled();
+    await expect(canvas.getByLabelText(/deposit/i)).toBeDisabled();
+    await expect(canvas.getByLabelText(/duration/i)).toBeDisabled();
   },
 };

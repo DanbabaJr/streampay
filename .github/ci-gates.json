@@ -53,6 +53,12 @@
         "Tests",
         "Dependency audit"
       ],
+      "reconciler": [
+        "Typecheck",
+        "Build",
+        "Tests",
+        "Soak tests"
+      ],
       "cli-parity": [
         "Install CLI dependencies",
         "CLI tests including parity fixtures"

@@ -7,7 +7,7 @@ _streampay() {
   for ((i = 2; i < CURRENT; i++)); do
     w=${words[i]}
     case $w in
-      (--contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out) ((i++)); continue ;;
+      (--contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--profile|--config|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out|--unset) ((i++)); continue ;;
       (-*) continue ;;
     esac
     if [[ -z $cmd ]]; then cmd=$w; elif [[ -z $sub ]]; then sub=$w; fi
@@ -16,15 +16,15 @@ _streampay() {
   case $prev in
     (--network) compadd -- testnet mainnet; return ;;
     (--signer) compadd -- env file ledger; return ;;
-    (--key-file|--signed-xdr|--out) _files; return ;;
-    (--contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval) return 1 ;;
+    (--key-file|--signed-xdr|--config|--out) _files; return ;;
+    (--contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--profile|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--unset) return 1 ;;
   esac
 
-  opts=(--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --json --help)
+  opts=(--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --profile --config --json --help)
   case $cmd in
     ("")
       if [[ $cur != -* ]]; then
-        compadd -- create withdraw cancel top-up claim-all status get key completion help
+        compadd -- create withdraw cancel top-up claim-all status get key profile completion help
         return
       fi
       ;;
@@ -42,6 +42,20 @@ _streampay() {
       fi
       case $sub in
         (encrypt) opts+=(--out --force) ;;
+      esac
+      ;;
+    (profile)
+      if [[ -z $sub && $cur != -* ]]; then
+        compadd -- list show set remove use resolve
+        return
+      fi
+      case $sub in
+        (list) opts+=() ;;
+        (show) opts+=() ;;
+        (set) opts+=(--unset) ;;
+        (remove) opts+=() ;;
+        (use) opts+=() ;;
+        (resolve) opts+=() ;;
       esac
       ;;
     (completion)

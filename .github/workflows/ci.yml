@@ -59,8 +59,17 @@ jobs:
       # (docs/WASM_SIZE.md, "Gate decision — #407"); the strict smallest-whole-KB
       # reading of that rule would be 101 KB, and 105 is taken deliberately to
       # leave room for #407's review fixes. #441 (contract split) is now a
-      # prerequisite for further interface growth, not a recommendation.
-      WASM_SIZE_BUDGET_KB: 105
+      # prerequisite for further interface growth, not a recommendation. That
+      # pre-decision is overridden here by maintainer call, not by drift: #620
+      # (receivables advances, release conditions, stream templates, callback
+      # hooks — issues #564-#567) adds 16 entrypoints, 11 events, 26 error codes
+      # (100-125), 5 stored structs + 3 enums + 1 union, and no new dependencies,
+      # and measures 129,817 B (pinned stellar-cli 28.1.0). The gate moves to
+      # 127 KB (130,048 B) — the strict smallest-whole-KB reading, with no grace
+      # headroom this time: it sits 1,255 B under the 128 KiB protocol ceiling,
+      # so the very next interface addition must be #441's split, mechanically.
+      # Recorded in full in docs/WASM_SIZE.md ("Gate decision — #620").
+      WASM_SIZE_BUDGET_KB: 127
     steps:
       - uses: actions/checkout@v7
 
@@ -580,6 +589,36 @@ jobs:
       - name: Dependency audit
         run: npm audit --omit=dev --audit-level=high
 
+  reconciler:
+    name: Reconciler — test / typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reconciler
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: reconciler/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Tests
+        run: npm test
+
+      - name: Soak tests
+        run: npm run soak
+
   cli-parity:
     name: CLI — client parity smoke
     runs-on: ubuntu-latest
@@ -638,6 +677,15 @@ jobs:
       # SECURITY.md, the runbooks, and the audit docs form intact.
       - name: Check internal markdown links
         run: node scripts/check_docs_links.mjs
+
+      # The outbox/webhook dashboard (issue #542) is dashboard-as-code: it loads
+      # from the Grafana file provider with no manual import, so a malformed
+      # panel or a panel pointing at a metric the code never emits would silently
+      # render "No data" in the on-call UI. This validator fails on both, and its
+      # --self-test proves the fabricated-metric check actually fires.
+      # Dependency-free, same command contributors run (`npm run dashboard:check`).
+      - name: Grafana dashboards validate against emitted metrics
+        run: node scripts/check_dashboards.mjs --self-test
 
       # The migration plan operators read (docs/MIGRATION_AUDIT.md) is generated
       # from a captured record-layout snapshot, so changing the classifier or the

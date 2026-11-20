@@ -1,0 +1,63 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/advance_drawn.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a recipient draws an advance against future stream accrual.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "fee": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "lender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "repayment_bps": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "recipient",
+    "lender",
+    "amount",
+    "fee",
+    "repayment_bps"
+  ],
+  "title": "AdvanceDrawn",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "advance_drawn",
+    "fingerprint": "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

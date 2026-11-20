@@ -1,7 +1,7 @@
 {
   "schema": "streampay-vector/v1",
   "name": "error-intent-not-yet-executable",
-  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
   "provenance": "schedule_test::execute_before_due_reverts: execute_scheduled before execute_after; the error is ScVal::Error(SCError::Contract(code)) with the IntentNotYetExecutable code from frontend/lib/errors.ts.",
   "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAARZXhlY3V0ZV9zY2hlZHVsZWQAAAAAAAACAAAABQAAAAAAAAABAAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQAAAAAAAAAAAAAAARRG0iwAAABAfogESKeobAMobAfNKbovMZFO5RmkK1g2PD19zPeRG3hc/o9HM7wEUyrmnGqcXGvFQRyIKnlmt/QGzbwdl2+dDA==",
   "resultXdr": "AAAAAgAAAAAAAAAU",

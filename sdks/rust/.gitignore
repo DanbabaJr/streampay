@@ -1,0 +1,2 @@
+# Standalone library crate: the lockfile is resolved per consumer.
+Cargo.lock

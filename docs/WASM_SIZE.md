@@ -460,6 +460,36 @@ at ~680 B per entrypoint it cannot be absorbed by any budget short of the split,
 and editing this number for it would be the product decision-by-size-knob that
 the #426 and #407 sections both refuse to make.
 
+## Gate decision — #620 (105 KB → 127 KB)
+
+#620 is the interface addition the #407 section said this gate would block, and
+the maintainer call lands the other way. Merged tree: **129,817 B** (pinned
+stellar-cli 28.1.0), +26,503 B over #407's 103,314 B: 16 new entrypoints across
+four feature modules (receivables advances, oracle-attested release conditions,
+stream templates with lineage, callback hooks), 11 events, 26 error codes
+(100–125), 5 stored structs, 3 enums, 1 union and several `DataKey` variants —
+no new dependencies, contract tests/clippy/fmt green on the contributor's tree.
+
+The gate moves to **127 KB** (130,048 B, 231 B of headroom) — the strict
+smallest-whole-KB reading, with *no* grace headroom this time, unlike #407's
+deliberate +4 KB. Three numbers frame the decision:
+
+| Point | Detail |
+|---|---|
+| The "bump is closed" declaration is overridden, not forgotten | #407's section made #441 (the contract split) a prerequisite for further interface growth. #620 arrives before that prerequisite is met and is merged anyway as a maintainer decision: four issues' worth of shipped, tested, gated functionality (#564–#567) was judged to outweigh enforcing the process rule by rejection. |
+| #35's 120 KB deploy budget is **exceeded** | 129,817 B is 6,937 B over the 122,880 B figure issue #35 set. That figure was a doc-level ratification target, not an enforced gate (nothing in CI or the deploy scripts checks it), but operators that pinned against it (watchtowers, allow-lists, deploy rehearsal tooling) must re-baseline before this Wasm ships. The digest-change notes below apply unchanged. |
+| The protocol ceiling makes 127 KB final | The 128 KiB (131,072 B) network contract-size limit leaves 1,255 B above this build. There is no bump-with-headroom left to take: any further interface addition **cannot deploy**, and #441 stops being policy and becomes physics. The 231 B of headroom is deliberate — a renamed parameter will fail the gate, and that failure is the intended signal. |
+
+Probes before accepting the number:
+
+| Probe | Result |
+|---|---|
+| Interface accounting | 15 entrypoints at #426's measured ~680 B/entrypoint ≈ 10 KB of entrypoint cost; the remaining ~16 KB is the 4 modules' shared logic, spec entries for 9 new types, and 11 events — consistent with #426/#407's per-item measurements, i.e. no anomalous bloat. |
+| `gate_interface_docs.py --check` | Runs in the Contract job; green on the merged tree. |
+| `scripts/check_error_codes.sh` | Codes 1–125 contiguous and unique; #620 takes exactly 100–125. |
+| Function-level Wasm diff | 191 new functions, 0 removed, +37,887 B (unshaken build) — reviewed as part of the four modules' behavior surface; advisory `max_delta` raised to 40,960 B in the same commit as this decision. |
+| Storage layout | Additive side keys and new record types only; the schema-guard golden (`test_snapshots/schema_guard_test/schema_fingerprint_matches_stored.1.json`) was regenerated from the tree and the upgrade-replay test runs it. |
+
 ## Categories investigated and rejected (with measurements)
 
 | Candidate | Verdict |
