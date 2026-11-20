@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { StreamView } from "@/lib/stellar";
+import { useModalFocus } from "@/lib/use-modal-focus";
 import {
   computeRateBucket,
   computeDurationBucket,
@@ -48,6 +49,11 @@ export default function DiscoveryConsentModal({
     };
   } | null>(null);
   const [existingListingId, setExistingListingId] = useState<string | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Same focus contract as WalletModal: inside on open, trapped while open,
+  // Escape dismisses, opener regains focus on close.
+  useModalFocus(cardRef, isOpen, onClose);
 
   const durationSecs = Math.max(1, stream.endTime - stream.startTime);
   const rateBucket = computeRateBucket(stream.deposit, durationSecs);
@@ -214,6 +220,9 @@ export default function DiscoveryConsentModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="discovery-consent-title"
       style={{
         position: "fixed",
         top: 0,
@@ -230,6 +239,7 @@ export default function DiscoveryConsentModal({
       }}
     >
       <div
+        ref={cardRef}
         className="card"
         style={{
           maxWidth: "560px",
@@ -239,9 +249,17 @@ export default function DiscoveryConsentModal({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0, fontSize: "20px" }}>Discovery Directory Listing</h2>
+          <h2
+            id="discovery-consent-title"
+            tabIndex={-1}
+            data-autofocus
+            style={{ margin: 0, fontSize: "20px", outline: "none" }}
+          >
+            Discovery Directory Listing
+          </h2>
           <button
             onClick={onClose}
+            aria-label="Close discovery listing dialog"
             style={{
               background: "transparent",
               color: "var(--muted)",
