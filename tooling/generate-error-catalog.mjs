@@ -13,114 +13,8 @@ import { resolve, dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
+import { makeReproMetadata } from './error-catalog-repro-metadata.mjs';
 
-const ERRORS_RS = resolve(ROOT, 'contracts/streaming-payments/src/errors.rs');
-const SURFACE_RS = resolve(ROOT, 'contracts/streaming-payments/src/surface.rs');
-
-const errorsContent = readFileSync(ERRORS_RS, 'utf8');
-const surfaceContent = readFileSync(SURFACE_RS, 'utf8');
-
-// Deterministic schema fingerprint: derived from the catalog's actual source
-// content, NOT from HEAD or the environment. The CI regeneration-diff gate
-// (`node tooling/generate-error-catalog.mjs && git diff --exit-code ...`)
-// requires that regenerating the same tree always reproduces byte-identical
-// output, so nothing volatile (git sha, timestamps) may appear in generated
-// files. Line endings are normalized first: a contributor on Windows (CRLF
-// working tree) and CI on Linux (LF) must compute the same fingerprint.
-const norm = (s) => s.replace(/\r\n/g, '\n');
-const schemaFingerprint = createHash('sha256')
-  .update(norm(errorsContent))
-  .update(norm(surfaceContent))
-  .digest('hex')
-  .slice(0, 16);
-
-// Parse enum StreamError variants
-const variantRegex = /^\s*([A-Za-z0-9_]+)\s*=\s*(\d+),/gm;
-const variants = [];
-let match;
-while ((match = variantRegex.exec(errorsContent)) !== null) {
-  variants.push({
-    name: match[1],
-    code: parseInt(match[2], 10),
-  });
-}
-
-// Verification probes are *derived*, never curated.
-//
-// Each error page links to the code that proves the failure is reachable. Those
-// links used to be hand-written per code, and most of them named test functions
-// that do not exist — a reader (or an auditor) clicking one landed on a dead
-// symbol, and `scripts/check_docs_links.mjs` reported ~50 warnings on every CI
-// run. Deriving them from the branch registry makes the catalog structurally
-// honest: `surface.rs::Branch::error()` is the same file the contract's coverage
-// test walks, so a code that has a branch has a real probe, and one that does
-// not is retired.
-//
-// Everything emitted here is re-checked against the source before writing, so a
-// future refactor that renames a branch or a test fails generation instead of
-// silently shipping a dead link.
-const fileCache = new Map();
-const sourceOf = (relPath) => {
-  if (!fileCache.has(relPath)) {
-    try {
-      fileCache.set(relPath, readFileSync(resolve(ROOT, relPath), 'utf8'));
-    } catch {
-      fileCache.set(relPath, null);
-    }
-  }
-  return fileCache.get(relPath);
-};
-
-const refExists = (ref) => {
-  const sep = ref.indexOf('::');
-  const path = sep === -1 ? ref : ref.slice(0, sep);
-  const symbol = sep === -1 ? null : ref.slice(sep + 2);
-  const content = sourceOf(path);
-  if (content === null) return false;
-  return symbol === null || content.includes(symbol);
-};
-
-// `Branch::A | Branch::B => StreamError::C` — alternations are wrapped across
-// lines in the registry, so rejoin them before scanning.
-const branchesByError = new Map();
-const registrySource = surfaceContent.replace(/\r?\n\s*\|\s*/g, ' ');
-for (const m of registrySource.matchAll(/Branch::([A-Za-z0-9_]+)((?:\s*\|\s*Branch::[A-Za-z0-9_]+)*)\s*=>\s*StreamError::([A-Za-z0-9_]+)/g)) {
-  const group = [`Branch::${m[1]}`, m[2] || ''];
-  const names = [...group.join(' ').matchAll(/Branch::([A-Za-z0-9_]+)/g)].map((x) => x[1]);
-  const target = m[3];
-  if (!branchesByError.has(target)) branchesByError.set(target, []);
-  for (const name of names) {
-    if (!branchesByError.get(target).includes(name)) branchesByError.get(target).push(name);
-  }
-}
-
-const REGISTRY = 'contracts/streaming-payments/src/surface.rs';
-const MATRIX_TEST =
-  'contracts/streaming-payments/src/error_surface_test.rs::error_surface_matrix_proves_every_branch_is_reachable';
-
-function probeFor(variantName) {
-  const branches = branchesByError.get(variantName) || [];
-  // Retired variants keep their wire code but have no instrumented branch, so
-  // the registry's retirement list is the honest pointer.
-  const ref = branches.length ? `${REGISTRY}::${branches[0]}` : `${REGISTRY}::RETIRED_CODES`;
-  if (!refExists(ref)) {
-    throw new Error(
-      `generated probe '${ref}' for ${variantName} does not resolve in the source — ` +
-        'the branch registry changed shape; fix this generator rather than emitting a dead link'
-    );
-  }
-  return { ref, branches };
-}
-
-for (const ref of [MATRIX_TEST, REGISTRY, 'contracts/streaming-payments/src/errors.rs']) {
-  if (!refExists(ref)) {
-    throw new Error(`catalog cross-link '${ref}' does not resolve in the source`);
-  }
-}
-
-// Curated authoritative remediations, client mappings and tests for StreamPay errors
 const ERROR_METADATA = {
   1: {
     remediation: 'Verify the stream ID exists in your transaction history or recipient dashboard before calling any stream entrypoint.',
@@ -440,22 +334,260 @@ const ERROR_METADATA = {
     retryable: false,
     reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet unauthorized = Address::generate(&f.env);\nlet mut pubs = soroban_sdk::Vec::new(&f.env);\npubs.push_back(pub1);\nf.client.mock_all_auths().set_oracle_config(&f.governor, &pubs, &1, &3600);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_submit_oracle_time(&unauthorized, &now));',
   },
+}
+
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
+
+const ERRORS_RS = resolve(ROOT, 'contracts/streaming-payments/src/errors.rs');
+const SURFACE_RS = resolve(ROOT, 'contracts/streaming-payments/src/surface.rs');
+
+const errorsContent = readFileSync(ERRORS_RS, 'utf8');
+const surfaceContent = readFileSync(SURFACE_RS, 'utf8');
+
+// Deterministic schema fingerprint: derived from the catalog's actual source
+// content, NOT from HEAD or the environment. The CI regeneration-diff gate
+// (`node tooling/generate-error-catalog.mjs && git diff --exit-code ...`)
+// requires that regenerating the same tree always reproduces byte-identical
+// output, so nothing volatile (git sha, timestamps) may appear in generated
+// files. Line endings are normalized first: a contributor on Windows (CRLF
+// working tree) and CI on Linux (LF) must compute the same fingerprint.
+const norm = (s) => s.replace(/\r\n/g, '\n');
+const schemaFingerprint = createHash('sha256')
+  .update(norm(errorsContent))
+  .update(norm(surfaceContent))
+  .digest('hex')
+  .slice(0, 16);
+
+// Parse enum StreamError variants
+const variantRegex = /^\s*([A-Za-z0-9_]+)\s*=\s*(\d+),/gm;
+const variants = [];
+let match;
+while ((match = variantRegex.exec(errorsContent)) !== null) {
+  variants.push({
+    name: match[1],
+    code: parseInt(match[2], 10),
+  });
+}
+
+// Verification probes are *derived*, never curated.
+//
+// Each error page links to the code that proves the failure is reachable. Those
+// links used to be hand-written per code, and most of them named test functions
+// that do not exist — a reader (or an auditor) clicking one landed on a dead
+// symbol, and `scripts/check_docs_links.mjs` reported ~50 warnings on every CI
+// run. Deriving them from the branch registry makes the catalog structurally
+// honest: `surface.rs::Branch::error()` is the same file the contract's coverage
+// test walks, so a code that has a branch has a real probe, and one that does
+// not is retired.
+//
+// Everything emitted here is re-checked against the source before writing, so a
+// future refactor that renames a branch or a test fails generation instead of
+// silently shipping a dead link.
+const fileCache = new Map();
+const sourceOf = (relPath) => {
+  if (!fileCache.has(relPath)) {
+    try {
+      fileCache.set(relPath, readFileSync(resolve(ROOT, relPath), 'utf8'));
+    } catch {
+      fileCache.set(relPath, null);
+    }
+  }
+  return fileCache.get(relPath);
 };
+
+const refExists = (ref) => {
+  const sep = ref.indexOf('::');
+  const path = sep === -1 ? ref : ref.slice(0, sep);
+  const symbol = sep === -1 ? null : ref.slice(sep + 2);
+  const content = sourceOf(path);
+  if (content === null) return false;
+  return symbol === null || content.includes(symbol);
+};
+
+// `Branch::A | Branch::B => StreamError::C` — alternations are wrapped across
+// lines in the registry, so rejoin them before scanning.
+const registrySource = surfaceContent.replace(/\r?\n\s*\|\s*/g, ' ');
+
+// Two maps on purpose. Codes below 50 belong to the companion issue, whose
+// generated pages must stay byte-identical here. Their existing links omit arms
+// wrapped as `=> { StreamError::X }` (notably #15 and #38), so keep that legacy
+// shape for that range. Codes 50-99 use the brace-tolerant map, which correctly
+// resolves #78 and #99 (both wrapped arms) to their real registry branches.
+const branchesByError = new Map();
+const branchesByErrorWithBraces = new Map();
+for (const [map, re] of [
+  [branchesByError, /Branch::([A-Za-z0-9_]+)((?:\s*\|\s*Branch::[A-Za-z0-9_]+)*)\s*=>\s*StreamError::([A-Za-z0-9_]+)/g],
+  [
+    branchesByErrorWithBraces,
+    /Branch::([A-Za-z0-9_]+)((?:\s*\|\s*Branch::[A-Za-z0-9_]+)*)\s*=>\s*(?:\{\s*)?StreamError::([A-Za-z0-9_]+)/g,
+  ],
+]) {
+  for (const m of registrySource.matchAll(re)) {
+    const group = [`Branch::${m[1]}`, m[2] || ''];
+    const names = [...group.join(' ').matchAll(/Branch::([A-Za-z0-9_]+)/g)].map((x) => x[1]);
+    const target = m[3];
+    if (!map.has(target)) map.set(target, []);
+    for (const name of names) {
+      if (!map.get(target).includes(name)) map.get(target).push(name);
+    }
+  }
+}
+
+const REGISTRY = 'contracts/streaming-payments/src/surface.rs';
+const MATRIX_TEST =
+  'contracts/streaming-payments/src/error_surface_test.rs::error_surface_matrix_proves_every_branch_is_reachable';
+
+const REPRO_METADATA = makeReproMetadata(MATRIX_TEST);
+
+function probeFor(variantName, includeBraced = false) {
+  const branches =
+    (includeBraced ? branchesByErrorWithBraces : branchesByError).get(variantName) || [];
+  // Retired variants keep their wire code but have no instrumented branch, so
+  // the registry's retirement list is the honest pointer.
+  const ref = branches.length ? `${REGISTRY}::${branches[0]}` : `${REGISTRY}::RETIRED_CODES`;
+  if (!refExists(ref)) {
+    throw new Error(
+      `generated probe '${ref}' for ${variantName} does not resolve in the source — ` +
+        'the branch registry changed shape; fix this generator rather than emitting a dead link'
+    );
+  }
+  return { ref, branches };
+}
+
+for (const ref of [MATRIX_TEST, REGISTRY, 'contracts/streaming-payments/src/errors.rs']) {
+  if (!refExists(ref)) {
+    throw new Error(`catalog cross-link '${ref}' does not resolve in the source`);
+  }
+}
+
+// Exact trigger wording comes from `Branch::condition()`, the same registry the
+// contract's matrix test walks. Keep the slice tight: other matches in this file
+// also use `Branch::X => "..."` for error mappings.
+const conditionStart = surfaceContent.indexOf('pub const fn condition');
+const conditionEnd = surfaceContent.indexOf('pub const fn reachability');
+if (conditionStart === -1 || conditionEnd === -1 || conditionEnd <= conditionStart) {
+  throw new Error('surface.rs no longer exposes condition() before reachability(); update the catalog generator');
+}
+const conditionsByBranch = new Map();
+for (const m of surfaceContent
+  .slice(conditionStart, conditionEnd)
+  .matchAll(/Branch::([A-Za-z0-9_]+)\s*=>\s*(?:\{\s*)?"([^"]*)"/g)) {
+  conditionsByBranch.set(m[1], m[2]);
+}
+
+// Curated authoritative remediations, client mappings and tests for StreamPay errors
+
+
+// Codes 50-99 are the governance, policy, sponsor, dispute, rate, sender-transfer
+// and batch-withdraw surface. Their pages carry a generated reproduction excerpt
+// from the registry matrix test plus a focused-test pointer when one names the
+// condition. Do not add entries below 50: that range is owned by the companion
+// issue and must remain byte-identical in this change.
+
+
+const metadataFor = (code) => ({
+  remediation: 'Contact protocol support if this error persists.',
+  toastClass: 'error',
+  retryable: false,
+  ...(ERROR_METADATA[code] || {}),
+  ...(REPRO_METADATA[code] || {}),
+});
+
+// The matrix test is the source of the per-code excerpt. Arms are indented by
+// eight spaces and closed by exactly `        }`; nested blocks are deeper.
+function matrixArmFor(branchName) {
+  const matrixPath = MATRIX_TEST.split('::')[0];
+  const matrixSource = sourceOf(matrixPath);
+  if (matrixSource === null) {
+    throw new Error(`cannot read matrix test source '${matrixPath}'`);
+  }
+  const lines = matrixSource.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `        Branch::${branchName} => {`);
+  if (start === -1) {
+    throw new Error(`matrix test has no block arm for Branch::${branchName}`);
+  }
+  let end = start + 1;
+  while (end < lines.length && lines[end] !== '        }') end += 1;
+  if (end === lines.length) {
+    throw new Error(`matrix arm for Branch::${branchName} is not closed at eight-space indentation`);
+  }
+  return lines
+    .slice(start + 1, end)
+    .map((line) => (line.startsWith('            ') ? line.slice(12) : line))
+    .join('\n');
+}
 
 // Ensure directories exist
 mkdirSync(resolve(ROOT, 'docs/errors'), { recursive: true });
 
 // 1. Generate individual docs/errors/{code}.md pages
 for (const item of variants) {
-  const meta = ERROR_METADATA[item.code] || {
-    remediation: 'Contact protocol support if this error persists.',
-    toastClass: 'error',
-    retryable: false,
-  };
+  const meta = metadataFor(item.code);
+  const isReproCode = item.code >= 50 && item.code <= 99;
+  const reproMeta = isReproCode ? REPRO_METADATA[item.code] : null;
+  if (isReproCode && !reproMeta) {
+    throw new Error(`missing reproduction metadata for error #${item.code} (${item.name})`);
+  }
 
   const isRetired = item.code === 2 || item.code === 3;
   const status = isRetired ? 'Retired (Unreachable)' : 'Active (Enforced)';
-  const probe = probeFor(item.name);
+  const probe = probeFor(item.name, isReproCode);
+
+  let triggerSection = `This error is returned by the contract when:
+- \`${item.name}\` validation fails during entrypoint invocation.
+${isRetired ? '- *Note*: This code is reserved/retired on-chain to guarantee append-only numbering continuity.' : ''}`;
+  let reproSection = '';
+  let reference = '';
+
+  if (isReproCode) {
+    const missingConditions = probe.branches.filter((branch) => !conditionsByBranch.has(branch));
+    if (missingConditions.length) {
+      throw new Error(
+        `surface.rs condition() has no wording for ${missingConditions.join(', ')} (error #${item.code})`
+      );
+    }
+    const testRef = reproMeta.test || MATRIX_TEST;
+    if (!refExists(testRef)) {
+      throw new Error(`reproduction test '${testRef}' for error #${item.code} does not resolve in the source`);
+    }
+    if (!reproMeta.doc) {
+      throw new Error(`missing remediation doc pointer for error #${item.code}`);
+    }
+    const matrixBranch = probe.branches[0];
+    const reproArm = matrixArmFor(matrixBranch);
+    const focusedTest = testRef !== MATRIX_TEST;
+    const conditionLines = probe.branches
+      .map((branch) => `- \`Branch::${branch}\` — ${conditionsByBranch.get(branch)}.`)
+      .join('\n');
+
+    triggerSection = `The contract rejects the call when any of these registry conditions holds:
+${conditionLines}`;
+    reference = `\n>\n> **Reference**: [\`${reproMeta.doc}\`](../../${reproMeta.doc})`;
+    reproSection = `
+---
+
+## Minimal Reproduction
+
+${
+  focusedTest
+    ? `Focused regression test: [\`${testRef}\`](../../${testRef}). The matrix arm below is the smallest direct construction; \`rejected!\` records the fired branch and asserts its mapped code.`
+    : `No dedicated test names this condition; the registry matrix builds it directly below. \`rejected!\` records the fired branch and asserts its mapped code.`
+}
+
+\`\`\`rust
+// ${matrixBranch} — excerpt from error_surface_test.rs
+${reproArm}
+\`\`\`
+
+Run the ${focusedTest ? 'focused test' : 'matrix proof'}:
+
+\`\`\`bash
+cargo test -p streampay-contract --locked ${testRef.split('::')[1]}
+\`\`\`
+`;
+  }
   const siblingsNote =
     probe.branches.length > 1
       ? ` — ${probe.branches.length} registry branches map to this code (${probe.branches
@@ -478,15 +610,13 @@ for (const item of variants) {
 ---
 
 ## Trigger Conditions
-This error is returned by the contract when:
-- \`${item.name}\` validation fails during entrypoint invocation.
-${isRetired ? '- *Note*: This code is reserved/retired on-chain to guarantee append-only numbering continuity.' : ''}
-
+${triggerSection}
+${reproSection}
 ---
 
 ## User Remediation Guidance
 > **Plain-Language Remediation**:  
-> ${meta.remediation}
+> ${meta.remediation}${reference}
 
 ${meta.reproduction ? `---
 
@@ -546,11 +676,7 @@ Authoritative registry of all **${variants.length}** append-only on-chain error 
 `;
 
 for (const item of variants) {
-  const meta = ERROR_METADATA[item.code] || {
-    remediation: 'Contact protocol support if this error persists.',
-    toastClass: 'error',
-    retryable: false,
-  };
+  const meta = metadataFor(item.code);
   const isRetired = item.code === 2 || item.code === 3;
   const statusBadge = isRetired ? 'Retired' : 'Active';
   const retryBadge = meta.retryable ? 'Yes' : 'No';
@@ -600,11 +726,7 @@ export const ERROR_CATALOG: Record<number, ErrorCatalogEntry> = {
 `;
 
 for (const item of variants) {
-  const meta = ERROR_METADATA[item.code] || {
-    remediation: 'Contact protocol support if this error persists.',
-    toastClass: 'error',
-    retryable: false,
-  };
+  const meta = metadataFor(item.code);
   tsCode += `  ${item.code}: {
     code: ${item.code},
     name: "${item.name}",
