@@ -55,8 +55,8 @@ function sampleArgs(functionName: string): Record<string, TxValue> {
 }
 
 describe("canonical contract spec", () => {
-  it("is the expected 101-entrypoint surface", () => {
-    expect(SPEC_FUNCTIONS).toHaveLength(101);
+  it("is the expected 117-entrypoint surface", () => {
+    expect(SPEC_FUNCTIONS).toHaveLength(117);
     expect(SPEC_FUNCTIONS.map((entry) => entry.name)).toContain("create_stream");
     expect(SPEC_FUNCTIONS.map((entry) => entry.name)).toContain("governance_propose");
   });
