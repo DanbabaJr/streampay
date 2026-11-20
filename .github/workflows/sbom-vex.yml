@@ -292,16 +292,18 @@ jobs:
         run: |
           set -u
           mkdir -p advisories
-          # `--format json` alone is the single-document report (top-level
-          # "advisories"/"bans"/"licenses"/"sources" keys). Combining it with
-          # `--audit-compatible-output` instead makes cargo-deny emit one JSON
-          # document per advisory — the empty-file risk the redirect used to
-          # guard against is already caught by the explicit "is empty" check
-          # below, so we keep the single-document shape the parser expects.
+          # cargo-deny 0.21 `--format json` emits a stream of JSON documents
+          # (one per finding plus a final "summary") and writes it to stderr on
+          # success, leaving stdout empty — neither stream alone is the report.
+          # Both are concatenated for the gate, which parses document streams,
+          # and the presence of the summary document proves the check actually
+          # ran (a truncated or empty file must never read as "no advisories").
           cargo deny --format json check advisories \
-            > advisories/cargo-deny.json \
+            > advisories/cargo-deny.stdout.json \
             2> advisories/cargo-deny.diagnostics.json
           rc=$?
+          cat advisories/cargo-deny.stdout.json advisories/cargo-deny.diagnostics.json \
+            > advisories/cargo-deny.json
           # The exit code is a bitset per check: advisories=1, bans=2,
           # licenses=4, sources=8. Only the advisories bit is expected here, so
           # any other bit is a tooling/configuration failure, not a finding.
@@ -316,14 +318,21 @@ jobs:
           path = pathlib.Path("advisories/cargo-deny.json")
           text = path.read_text(encoding="utf-8")
           if not text.strip():
-              sys.exit(f"::error::{path} is empty: cargo-deny wrote no report to stdout")
-          try:
-              document = json.loads(text)
-          except json.JSONDecodeError as exc:
-              sys.exit(f"::error::{path} is not one complete JSON document: {exc}")
-          if not isinstance(document, dict) or not ({"advisories", "vulnerabilities"} & document.keys()):
-              keys = sorted(document) if isinstance(document, dict) else type(document).__name__
-              sys.exit(f"::error::{path} has no 'advisories'/'vulnerabilities' key (got {keys})")
+              sys.exit(f"::error::{path} is empty: cargo-deny wrote no JSON to either stream")
+          decoder = json.JSONDecoder()
+          documents, index = [], 0
+          while index < len(text):
+              while index < len(text) and text[index].isspace():
+                  index += 1
+              if index >= len(text):
+                  break
+              try:
+                  document, index = decoder.raw_decode(text, index)
+              except json.JSONDecodeError as exc:
+                  sys.exit(f"::error::{path} is not a JSON document stream: {exc}")
+              documents.append(document)
+          if not any(isinstance(d, dict) and d.get("type") == "summary" for d in documents):
+              sys.exit(f"::error::{path} has no cargo-deny 'summary' document: the check did not run to completion")
           PY
 
       - name: npm advisory reports
