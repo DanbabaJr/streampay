@@ -103,6 +103,10 @@ jobs:
           sha256sum ../artifacts/head/streampay_contract.wasm
 
       # Invoke the composite action: .github/actions/wasm-diff
+      # max_delta is raised 1024 -> 40960 for #620's four feature modules
+      # (+37,887 B measured; docs/WASM_SIZE.md "Gate decision — #620"). The
+      # enforcement ratchet is WASM_SIZE_BUDGET_KB in ci.yml (127 KB, 231 B of
+      # headroom); re-tighten this advisory threshold after the split (#441).
       - name: Run Wasm Function Diff Action
         id: diff
         uses: ./head-repo/.github/actions/wasm-diff
@@ -110,7 +114,7 @@ jobs:
           base_wasm: artifacts/base/streampay_contract.wasm
           head_wasm: artifacts/head/streampay_contract.wasm
           output_dir: artifacts
-          max_delta: 1024
+          max_delta: 40960
 
       - name: Display Report in CI Summary
         if: always()
@@ -125,7 +129,7 @@ jobs:
         shell: bash
         env:
           TOTAL_DELTA: ${{ steps.diff.outputs.total_delta }}
-          MAX_DELTA: 1024
+          MAX_DELTA: 40960
         run: |
           echo "Total Wasm byte delta: $TOTAL_DELTA B (budget: $MAX_DELTA B)"
           if [ -n "$TOTAL_DELTA" ] && [ "$TOTAL_DELTA" -gt "$MAX_DELTA" ]; then
