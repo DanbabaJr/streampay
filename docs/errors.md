@@ -15,65 +15,65 @@ Authoritative registry of all **99** append-only on-chain error codes returned b
 
 | Code | Variant Name | Status | Toast Level | Retryable | Remediation Guidance | Detail Page |
 | ---: | --- | --- | --- | :---: | --- | :---: |
-| **#1** | `StreamNotFound` | Active | `error` | No | Verify the stream ID from your transaction history or recipient dashboard before retrying. | [View Docs](errors/1.md) |
-| **#2** | `NotStreamSender` | Retired | `warning` | No | This role check is retired on-chain. Ensure caller owns or is authorized on the stream. | [View Docs](errors/2.md) |
-| **#3** | `NotStreamRecipient` | Retired | `warning` | No | This role check is retired on-chain. Ensure caller is the registered stream recipient. | [View Docs](errors/3.md) |
-| **#4** | `StreamNotCancellable` | Active | `error` | No | This stream was created without cancelable permissions; funds stream until duration ends. | [View Docs](errors/4.md) |
-| **#5** | `StreamNotActive` | Active | `error` | No | The stream has already completed or been cancelled. No further mutations can be performed. | [View Docs](errors/5.md) |
-| **#6** | `StartTimeInPast` | Active | `error` | Yes | Choose a start timestamp at or after the current ledger close time. | [View Docs](errors/6.md) |
-| **#7** | `InvalidTimeRange` | Active | `error` | Yes | Ensure end time is strictly greater than start time by at least 1 second. | [View Docs](errors/7.md) |
-| **#8** | `DurationTooLong` | Active | `error` | Yes | Stream duration exceeds protocol maximum (10 years). Decrease stream duration. | [View Docs](errors/8.md) |
-| **#9** | `ZeroAmount` | Active | `error` | Yes | Amount must be greater than zero. Enter a positive token amount. | [View Docs](errors/9.md) |
-| **#10** | `AmountExceedsAvailable` | Active | `warning` | Yes | Requested withdrawal exceeds available accrued balance. Check accrued amount or use withdraw max. | [View Docs](errors/10.md) |
-| **#11** | `MathOverflow` | Active | `error` | No | Calculation overflowed arithmetic bounds. Reduce deposit amount or duration scale. | [View Docs](errors/11.md) |
-| **#12** | `NotAuthorized` | Active | `error` | No | Sign transaction with the sender, recipient, or designated governor account required for this call. | [View Docs](errors/12.md) |
-| **#13** | `NothingToWithdraw` | Active | `info` | Yes | Zero unwithdrawn accrued funds available at current ledger timestamp. Wait for more funds to accrue. | [View Docs](errors/13.md) |
-| **#14** | `FeeRateTooHigh` | Active | `error` | Yes | Protocol fee rate exceeds MAX_FEE_BPS (1,000 bps = 10%). Provide rate at or below cap. | [View Docs](errors/14.md) |
-| **#15** | `NotGovernor` | Active | `error` | No | Caller is not the active treasury governor. Switch to authorized governor wallet. | [View Docs](errors/15.md) |
-| **#16** | `NoPendingGovernor` | Active | `warning` | No | No governor nomination is pending. Request current governor to nominate address first. | [View Docs](errors/16.md) |
-| **#17** | `InsufficientTreasuryBalance` | Active | `error` | No | Treasury withdrawal amount exceeds collected protocol fees for this asset token. | [View Docs](errors/17.md) |
-| **#49** | `SponsorNotFound` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/49.md) |
+| **#1** | `StreamNotFound` | Active | `error` | No | Verify the stream ID exists in your transaction history or recipient dashboard before calling any stream entrypoint. | [View Docs](errors/1.md) |
+| **#2** | `NotStreamSender` | Retired | `warning` | No | This role check is retired on-chain. Ensure the caller owns or is authorized on the stream via NotAuthorized (#12) checks. | [View Docs](errors/2.md) |
+| **#3** | `NotStreamRecipient` | Retired | `warning` | No | This role check is retired on-chain. Ensure the caller is the registered stream recipient via NotAuthorized (#12) checks. | [View Docs](errors/3.md) |
+| **#4** | `StreamNotCancellable` | Active | `error` | No | Check the stream cancelable flag before calling cancel_stream; non-cancelable streams run until their duration ends. | [View Docs](errors/4.md) |
+| **#5** | `StreamNotActive` | Active | `error` | No | Query the stream status before mutating it; completed or cancelled streams cannot be withdrawn from, topped up, or cancelled again. | [View Docs](errors/5.md) |
+| **#6** | `StartTimeInPast` | Active | `error` | Yes | Read the current ledger close time and set start_time at or after that value. | [View Docs](errors/6.md) |
+| **#7** | `InvalidTimeRange` | Active | `error` | Yes | Ensure end_time is strictly greater than start_time by at least 1 second before calling create_stream. | [View Docs](errors/7.md) |
+| **#8** | `DurationTooLong` | Active | `error` | Yes | Reduce the stream duration to at most MAX_DURATION_SECONDS (10 years). | [View Docs](errors/8.md) |
+| **#9** | `ZeroAmount` | Active | `error` | Yes | Pass a deposit amount greater than zero to create_stream, withdraw, or top_up. | [View Docs](errors/9.md) |
+| **#10** | `AmountExceedsAvailable` | Active | `warning` | Yes | Query get_stream to read the current accrued amount, then request at most that value or call withdraw_max. | [View Docs](errors/10.md) |
+| **#11** | `MathOverflow` | Active | `error` | No | Reduce the deposit amount or the stream duration so that deposit * duration fits within u128 arithmetic bounds. | [View Docs](errors/11.md) |
+| **#12** | `NotAuthorized` | Active | `error` | No | Sign the transaction with the sender, recipient, or designated governor account required for this call. | [View Docs](errors/12.md) |
+| **#13** | `NothingToWithdraw` | Active | `info` | Yes | Wait until the stream has started and funds have accrued, then retry withdraw or withdraw_max after the ledger timestamp advances. | [View Docs](errors/13.md) |
+| **#14** | `FeeRateTooHigh` | Active | `error` | Yes | Set the fee rate to at most MAX_FEE_BPS (1,000 bps = 10%) when calling set_fee_bps. | [View Docs](errors/14.md) |
+| **#15** | `NotGovernor` | Active | `error` | No | Switch to the authorized governor wallet before calling treasury or governance entrypoints. | [View Docs](errors/15.md) |
+| **#16** | `NoPendingGovernor` | Active | `warning` | No | Ask the current governor to call nominate_governor with the target address before calling accept_governor. | [View Docs](errors/16.md) |
+| **#17** | `InsufficientTreasuryBalance` | Active | `error` | No | Query the collected fee balance for the token before calling withdraw_treasury; request at most the available amount. | [View Docs](errors/17.md) |
+| **#49** | `SponsorNotFound` | Active | `error` | No | Ensure the sponsor address is registered before calling sponsored_withdraw. Register via register_sponsor if needed. | [View Docs](errors/49.md) |
 | **#50** | `SponsorInactive` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/50.md) |
 | **#51** | `BeneficiaryNotEnrolled` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/51.md) |
 | **#52** | `ClaimExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/52.md) |
 | **#53** | `ClaimNonceReplay` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/53.md) |
 | **#54** | `SponsorBudgetExceeded` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/54.md) |
 | **#55** | `BeneficiaryBudgetExceeded` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/55.md) |
-| **#18** | `IntentNotFound` | Active | `error` | No | Intent ID not found. Verify scheduled intent reference before retrying. | [View Docs](errors/18.md) |
-| **#19** | `IntentNotPending` | Active | `error` | No | Scheduled intent is already executed, cancelled, or expired. | [View Docs](errors/19.md) |
-| **#20** | `IntentNotYetExecutable` | Active | `info` | Yes | Current ledger timestamp has not reached execute_after time. Wait for scheduled window. | [View Docs](errors/20.md) |
-| **#21** | `IntentExpired` | Active | `warning` | No | Intent has passed expires_at deadline. Reclaim deposited funds via reclaim_expired. | [View Docs](errors/21.md) |
-| **#22** | `IntentNotCancellable` | Active | `error` | No | Execution window has already opened; scheduled intent can no longer be cancelled. | [View Docs](errors/22.md) |
-| **#23** | `InvalidScheduleParameters` | Active | `error` | Yes | Check occurrence count, interval spacing, and expiration ordering in schedule parameters. | [View Docs](errors/23.md) |
-| **#24** | `IntentParamsMismatch` | Active | `error` | No | Stored intent parameters do not match initial hash commitment. Contact security oncall. | [View Docs](errors/24.md) |
-| **#25** | `IntentNotExpired` | Active | `warning` | Yes | Cannot reclaim intent funds before expires_at timestamp has passed. | [View Docs](errors/25.md) |
-| **#26** | `DepositTransferFailed` | Active | `error` | Yes | Token pull failed on stream creation. Check account balance and token allowance for deposit + fee. | [View Docs](errors/26.md) |
-| **#27** | `TopUpTransferFailed` | Active | `error` | Yes | Token pull failed during top-up. Ensure sufficient token balance and trustline authorization. | [View Docs](errors/27.md) |
-| **#28** | `RecipientPayoutFailed` | Active | `error` | Yes | Recipient token payout failed. Verify recipient address has a valid trustline and is authorized. | [View Docs](errors/28.md) |
-| **#29** | `SenderRefundFailed` | Active | `error` | Yes | Sender refund payout failed during cancellation. Check sender token account status. | [View Docs](errors/29.md) |
-| **#30** | `TreasuryPayoutFailed` | Active | `error` | Yes | Treasury payout transfer failed. Ensure destination treasury account accepts this token. | [View Docs](errors/30.md) |
-| **#31** | `PolicyAssetNotAllowed` | Active | `error` | No | Token asset is not on the governance policy allowlist. Propose asset addition via governor. | [View Docs](errors/31.md) |
-| **#32** | `PolicyTimelockNotElapsed` | Active | `info` | Yes | Policy change timelock has not elapsed. Wait until queued timelock expiry before applying. | [View Docs](errors/32.md) |
-| **#33** | `PolicyNoQueuedChange` | Active | `warning` | No | No queued policy change found for this asset. Queue change proposal first. | [View Docs](errors/33.md) |
-| **#34** | `PolicyNotInitialized` | Active | `error` | No | Policy module is uninitialized. Call initialize_policy with initial governor and parameters. | [View Docs](errors/34.md) |
-| **#35** | `PolicyNoPendingHandoff` | Active | `warning` | No | No admin handoff proposal is pending. Request current admin to nominate successor. | [View Docs](errors/35.md) |
-| **#36** | `ContractFrozen` | Active | `warning` | Yes | Contract is currently frozen for maintenance. Operations resume once unfrozen. | [View Docs](errors/36.md) |
-| **#37** | `ContractNotFrozen` | Active | `error` | No | This operation requires the contract to be frozen first. | [View Docs](errors/37.md) |
-| **#38** | `NoPendingUpgrade` | Active | `warning` | No | No upgrade proposal is currently pending. | [View Docs](errors/38.md) |
-| **#39** | `TimelockNotExpired` | Active | `info` | Yes | Upgrade timelock delay has not expired. Wait for delay to complete. | [View Docs](errors/39.md) |
-| **#40** | `UpgradeDelayTooShort` | Active | `error` | Yes | Proposed upgrade delay is shorter than minimum timelock. Increase proposed delay. | [View Docs](errors/40.md) |
-| **#41** | `AlreadyMigrated` | Active | `info` | No | Storage migration has already been executed on this contract instance. | [View Docs](errors/41.md) |
-| **#42** | `PolicyRateBelowFloor` | Active | `error` | Yes | Stream payment rate is below governance policy floor. Increase flow rate. | [View Docs](errors/42.md) |
-| **#43** | `PolicyRateAboveCeiling` | Active | `error` | Yes | Stream payment rate exceeds governance policy ceiling. Decrease flow rate. | [View Docs](errors/43.md) |
-| **#44** | `PolicyDurationBelowFloor` | Active | `error` | Yes | Stream duration is shorter than minimum policy floor. Increase stream duration. | [View Docs](errors/44.md) |
-| **#45** | `PolicyDurationAboveCeiling` | Active | `error` | Yes | Stream duration exceeds maximum policy ceiling. Decrease stream duration. | [View Docs](errors/45.md) |
-| **#46** | `PolicyDepositBelowFloor` | Active | `error` | Yes | Stream deposit is below governance policy floor. Increase initial deposit amount. | [View Docs](errors/46.md) |
-| **#47** | `BatchEmpty` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/47.md) |
-| **#48** | `BatchTooLarge` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/48.md) |
-| **#56** | `InvalidOracleThreshold` | Active | `error` | Yes | Oracle threshold is invalid. Threshold must be between 1 and the publisher count. | [View Docs](errors/56.md) |
-| **#57** | `OraclePublishersNotConfigured` | Active | `error` | No | Oracle publishers are not configured. Governor must set oracle config first. | [View Docs](errors/57.md) |
-| **#58** | `OracleReportTooOld` | Active | `error` | Yes | Oracle report timestamp is too far in the past or future. Submit a fresh report. | [View Docs](errors/58.md) |
-| **#59** | `NotOraclePublisher` | Active | `error` | No | Caller is not an authorized oracle publisher. | [View Docs](errors/59.md) |
+| **#18** | `IntentNotFound` | Active | `error` | No | Verify the scheduled intent ID from your scheduling transaction receipt before calling execute_scheduled or cancel_scheduled. | [View Docs](errors/18.md) |
+| **#19** | `IntentNotPending` | Active | `error` | No | Check the intent status before calling execute_scheduled; already executed, cancelled, or expired intents cannot be re-executed. | [View Docs](errors/19.md) |
+| **#20** | `IntentNotYetExecutable` | Active | `info` | Yes | Wait until the current ledger timestamp reaches the intent execute_after time before calling execute_scheduled. | [View Docs](errors/20.md) |
+| **#21** | `IntentExpired` | Active | `warning` | No | The intent has expired. Call reclaim_expired to recover deposited funds, then schedule a new intent if needed. | [View Docs](errors/21.md) |
+| **#22** | `IntentNotCancellable` | Active | `error` | No | Cancel the scheduled intent before its execute_after timestamp; once the execution window opens, cancellation is no longer allowed. | [View Docs](errors/22.md) |
+| **#23** | `InvalidScheduleParameters` | Active | `error` | Yes | Validate occurrence_count > 0, interval > 0, and expires_at > execute_after before calling schedule_stream. | [View Docs](errors/23.md) |
+| **#24** | `IntentParamsMismatch` | Active | `error` | No | This is a security invariant failure. Stored intent parameters were tampered with. Report the incident to the protocol security oncall immediately. | [View Docs](errors/24.md) |
+| **#25** | `IntentNotExpired` | Active | `warning` | Yes | Wait until the current ledger timestamp is past the intent expires_at before calling reclaim_expired. | [View Docs](errors/25.md) |
+| **#26** | `DepositTransferFailed` | Active | `error` | Yes | Check the sender token balance and allowance cover deposit_amount + fee before calling create_stream. | [View Docs](errors/26.md) |
+| **#27** | `TopUpTransferFailed` | Active | `error` | Yes | Ensure the caller has sufficient token balance and an active trustline authorization before calling top_up. | [View Docs](errors/27.md) |
+| **#28** | `RecipientPayoutFailed` | Active | `error` | Yes | Verify the recipient address has a valid trustline for the stream asset token and is authorized to receive transfers. | [View Docs](errors/28.md) |
+| **#29** | `SenderRefundFailed` | Active | `error` | Yes | Check the sender token account status and trustline before cancelling; the refund transfer must be receivable. | [View Docs](errors/29.md) |
+| **#30** | `TreasuryPayoutFailed` | Active | `error` | Yes | Ensure the destination treasury account has an active trustline for the token and can receive transfers. | [View Docs](errors/30.md) |
+| **#31** | `PolicyAssetNotAllowed` | Active | `error` | No | Check the governance policy allowlist for the asset token before creating a stream; propose adding the asset via the governor. | [View Docs](errors/31.md) |
+| **#32** | `PolicyTimelockNotElapsed` | Active | `info` | Yes | Wait until the queued policy change timelock delay has elapsed before calling policy_execute_asset. | [View Docs](errors/32.md) |
+| **#33** | `PolicyNoQueuedChange` | Active | `warning` | No | Call policy_propose_asset to queue a change before calling policy_execute_asset. | [View Docs](errors/33.md) |
+| **#34** | `PolicyNotInitialized` | Active | `error` | No | Call policy_init with the initial governor and parameters before using any policy entrypoint. | [View Docs](errors/34.md) |
+| **#35** | `PolicyNoPendingHandoff` | Active | `warning` | No | Ask the current policy admin to call policy_propose_handoff before calling policy_accept_handoff. | [View Docs](errors/35.md) |
+| **#36** | `ContractFrozen` | Active | `warning` | Yes | The contract is frozen for maintenance. Wait for the governor to call set_frozen(false) before retrying operations. | [View Docs](errors/36.md) |
+| **#37** | `ContractNotFrozen` | Active | `error` | No | Call set_frozen(true) before invoking migrate_storage; migration requires the contract to be frozen first. | [View Docs](errors/37.md) |
+| **#38** | `NoPendingUpgrade` | Active | `warning` | No | Call propose_upgrade before calling execute_upgrade or cancel_upgrade. | [View Docs](errors/38.md) |
+| **#39** | `TimelockNotExpired` | Active | `info` | Yes | Wait until the upgrade timelock delay has fully elapsed before calling execute_upgrade. | [View Docs](errors/39.md) |
+| **#40** | `UpgradeDelayTooShort` | Active | `error` | Yes | Set the upgrade delay to at least MIN_UPGRADE_DELAY_SECONDS when calling propose_upgrade. | [View Docs](errors/40.md) |
+| **#41** | `AlreadyMigrated` | Active | `info` | No | Storage migration is a one-time operation. No action needed; the contract is already up to date. | [View Docs](errors/41.md) |
+| **#42** | `PolicyRateBelowFloor` | Active | `error` | Yes | Increase the deposit amount or decrease the duration so the payment rate meets the governance policy floor. | [View Docs](errors/42.md) |
+| **#43** | `PolicyRateAboveCeiling` | Active | `error` | Yes | Decrease the deposit amount or increase the duration so the payment rate stays at or below the governance policy ceiling. | [View Docs](errors/43.md) |
+| **#44** | `PolicyDurationBelowFloor` | Active | `error` | Yes | Increase the stream duration to at least the governance policy min_duration for this asset. | [View Docs](errors/44.md) |
+| **#45** | `PolicyDurationAboveCeiling` | Active | `error` | Yes | Decrease the stream duration to at most the governance policy max_duration for this asset. | [View Docs](errors/45.md) |
+| **#46** | `PolicyDepositBelowFloor` | Active | `error` | Yes | Increase the initial deposit to at least the governance policy min_deposit for this asset. | [View Docs](errors/46.md) |
+| **#47** | `BatchEmpty` | Active | `error` | No | Submit at least one entry in the create_streams_batch call. | [View Docs](errors/47.md) |
+| **#48** | `BatchTooLarge` | Active | `error` | No | Reduce the batch size to at most MAX_BATCH entries when calling create_streams_batch. | [View Docs](errors/48.md) |
+| **#56** | `InvalidOracleThreshold` | Active | `error` | Yes | Set the oracle threshold to a value between 1 and the publisher count. | [View Docs](errors/56.md) |
+| **#57** | `OraclePublishersNotConfigured` | Active | `error` | No | Call set_oracle_config to configure oracle publishers before calling oracle entrypoints. | [View Docs](errors/57.md) |
+| **#58** | `OracleReportTooOld` | Active | `error` | Yes | Verify the oracle report timestamp is within the configured staleness window and submit a fresh report. | [View Docs](errors/58.md) |
+| **#59** | `NotOraclePublisher` | Active | `error` | No | Ensure the caller address is in the configured oracle publisher list before calling submit_oracle_time. | [View Docs](errors/59.md) |
 | **#60** | `NoPendingOwnership` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/60.md) |
 | **#61** | `OwnershipProposalExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/61.md) |
 | **#62** | `InvalidTransferTarget` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/62.md) |
