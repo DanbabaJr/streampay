@@ -10,6 +10,9 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- `docs/WAVE_CONTRIBUTORS.md`: contributor guide for Drips Wave issues (claim,
+  branch/PR conventions, CI job to local command map, review and resolution),
+  cross-linked from the README and CONTRIBUTING.
 - Stream pause / resume (#24): `pause_stream` and `resume_stream`, sender only.
   While a stream is paused its accrual is frozen at the pause point (on the
   stream's own clock, so oracle-time streams freeze at the oracle time);
