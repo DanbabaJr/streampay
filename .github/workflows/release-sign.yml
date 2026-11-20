@@ -1,0 +1,210 @@
+name: Release signing (Sigstore keyless)
+
+# Issue #611. release.yml already builds the Wasm, double-builds it for
+# reproducibility, signs an Ed25519 attestation and attaches SLSA provenance.
+# This workflow adds the third, independent chain: a Sigstore keyless signature
+# per release asset, with its Rekor transparency-log entry, plus the gate that
+# refuses to call a release signed unless every signature verifies against THIS
+# repository's release workflow at THIS tag.
+#
+# Why it is a separate workflow rather than a step in release.yml: keyless
+# signing needs `id-token: write`, and giving the build job that permission
+# would let any step in it mint an OIDC identity. The build stays read-mostly;
+# only this job talks to Fulcio and Rekor. Nothing here reads a signing secret:
+# the certificate is minted from the run's workload identity and expires with it.
+#
+# The gate's self-tests run on every pull request that touches this chain, so a
+# verifier that stopped rejecting tampered artifacts or foreign identities goes
+# red on the change that broke it, not on the next release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "scripts/sigstore_lib.sh"
+      - "scripts/sigstore_sign.sh"
+      - "scripts/verify_sigstore.sh"
+      - "tests/sigstore_verify_test.sh"
+      - "docs/SIGSTORE.md"
+      - ".github/workflows/release-sign.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sign (default: the latest published release)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # A verifier nobody has watched reject anything is untested. This job breaks
+  # one control at a time — tampered bytes, another workflow's identity, another
+  # tag, another issuer, a bundle without a Rekor entry, a Wasm that is not the
+  # attested build — and requires the gate to fail every time.
+  self-test:
+    name: Gate self-test — tampered artifact and wrong identity must be rejected
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verification-gate self-tests
+        run: bash tests/sigstore_verify_test.sh
+
+  sign:
+    name: Sign release assets keylessly and verify the gate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write # attach the signatures, bundles and manifest to the release
+      id-token: write # the whole point: a short-lived OIDC identity, no stored key
+      attestations: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the release to sign
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::no release tag resolved; pass one with workflow_dispatch or run on a tag push"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "signing release $tag"
+
+      - name: Download the release assets to sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="${{ steps.rel.outputs.tag }}"
+          mkdir -p dist
+          # release.yml publishes exactly these; the attestation is what binds the
+          # signature to the reproducible build, so a release without one cannot
+          # pass the gate and this job says so instead of signing the Wasm alone.
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'streampay_contract.wasm' \
+            --pattern 'SHA256SUMS' \
+            --pattern 'release-metadata.json' \
+            --pattern 'UPGRADE_DIGESTS.txt' \
+            --pattern 'attestation.json' \
+            --dir dist
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: cosign version
+        run: cosign version
+
+      # Keyless signing: cosign exchanges the job's OIDC token for a Fulcio
+      # certificate scoped to this repository, workflow and tag, signs each
+      # artifact, and records a Rekor entry. sigstore_sign.sh keeps the
+      # certificate and bundle next to the artifact and writes the manifest that
+      # publishes the digests and log indices.
+      - name: Sign the release assets
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          tag="${{ steps.rel.outputs.tag }}"
+          args=()
+          for f in streampay_contract.wasm SHA256SUMS release-metadata.json UPGRADE_DIGESTS.txt; do
+            [ -f "dist/$f" ] && args+=(--artifact "dist/$f")
+          done
+          bash scripts/sigstore_sign.sh \
+            --tag "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow release-sign.yml \
+            --out dist/sigstore \
+            --attestation dist/attestation.json \
+            "${args[@]}"
+
+      # The gate. A release is not signed because a signature was produced; it is
+      # signed because every digest in the manifest verifies, against the exact
+      # tag-pinned identity, with a Rekor entry, and matches the reproducibility
+      # attestation. Any mismatch stops the release here.
+      - name: Verification gate (identity, digest, Rekor and attestation binding)
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          tag="${{ steps.rel.outputs.tag }}"
+          args=()
+          for f in streampay_contract.wasm SHA256SUMS release-metadata.json UPGRADE_DIGESTS.txt; do
+            [ -f "dist/$f" ] && args+=(--artifact "dist/$f")
+          done
+          bash scripts/verify_sigstore.sh \
+            --tag "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow release-sign.yml \
+            --manifest dist/sigstore/sigstore-manifest.json \
+            --attestation dist/attestation.json \
+            --sha256sums dist/SHA256SUMS \
+            --require-attestation \
+            "${args[@]}"
+
+      # Container images are signed by digest with the same identity. Opt-in
+      # because this repository has no published registry image yet: set the
+      # INDEXER_IMAGE repository variable to `registry/name@sha256:…` when one
+      # exists, and the same gate verifies it.
+      - name: Sign and verify the indexer image (when published)
+        if: vars.INDEXER_IMAGE != ''
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          tag="${{ steps.rel.outputs.tag }}"
+          image="${{ vars.INDEXER_IMAGE }}"
+          # By digest, never by tag: a tag can be repointed after signing, which
+          # would leave a valid signature describing a different image.
+          case "$image" in
+            *@sha256:*) : ;;
+            *) echo "::error::INDEXER_IMAGE must be pinned by digest (name@sha256:…)"; exit 1 ;;
+          esac
+          # cosign picks up the job's workload identity in Actions on its own.
+          cosign sign --yes "$image"
+          bash scripts/verify_sigstore.sh --tag "$tag" --repo "$GITHUB_REPOSITORY" \
+            --workflow release-sign.yml --manifest dist/sigstore/sigstore-manifest.json \
+            --image "$image"
+
+      - name: Attach the signatures, bundles and manifest to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="${{ steps.rel.outputs.tag }}"
+          gh release upload "$tag" \
+            dist/sigstore/*.sigstore.json \
+            dist/sigstore/*.pem \
+            dist/sigstore/sigstore-manifest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          echo "### Sigstore keyless signatures — $tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo 'The signed set, its digests and their Rekor log indices are in' >> "$GITHUB_STEP_SUMMARY"
+          echo '`sigstore-manifest.json` (schema `streampay.sigstore-manifest/v1`).' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Verify with `scripts/verify_sigstore.sh` — see `docs/SIGSTORE.md`.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the signed set as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sigstore-${{ steps.rel.outputs.tag || github.run_id }}
+          path: dist/sigstore/
+          if-no-files-found: warn
