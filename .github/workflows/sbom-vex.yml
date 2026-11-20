@@ -180,9 +180,16 @@ jobs:
               echo "::error::$dir/package-lock.json is absent; a published package must have a lockfile so it can have an SBOM"
               exit 1
             fi
+            # `--ignore-npm-errors`: the SBOM is derived from the lockfile, and
+            # `npm ls` exits non-zero for an incomplete-but-resolved tree (e.g.
+            # ELSPROBLEMS from a nested peer range capping eslint below what
+            # frontend declares). The JSON it still emits is complete; real
+            # install health is gated by the Frontend and Indexer jobs, and the
+            # empty-SBOM check below stays as the backstop.
             npx --yes @cyclonedx/cyclonedx-npm@6 \
               "$dir/package.json" \
               --package-lock-only --output-format JSON \
+              --ignore-npm-errors \
               --spec-version "$CYCLONEDX_SPEC" \
               --output-file "$PWD/sbom/$name.cdx.json"
             [ -s "sbom/$name.cdx.json" ] \
