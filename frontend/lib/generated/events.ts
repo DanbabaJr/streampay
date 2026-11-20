@@ -39,6 +39,37 @@ export interface WithdrawOutcome {
   amount: bigint;
 }
 
+/** Emitted when a recipient draws an advance against future stream accrual. */
+/** Event key `advance_drawn` — fingerprint `sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30`. */
+export interface AdvanceDrawnEvent {
+  stream_id: bigint;
+  recipient: string;
+  lender: string;
+  amount: bigint;
+  fee: bigint;
+  repayment_bps: number;
+}
+
+/** Emitted when an advance is liquidated upon stream cancellation. */
+/** Event key `advance_liquidated` — fingerprint `sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97`. */
+export interface AdvanceLiquidatedEvent {
+  stream_id: bigint;
+  recipient: string;
+  lender: string;
+  amount: bigint;
+  remaining_unpaid: bigint;
+}
+
+/** Emitted when an advance is partially or fully repaid. */
+/** Event key `advance_repaid` — fingerprint `sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49`. */
+export interface AdvanceRepaidEvent {
+  stream_id: bigint;
+  recipient: string;
+  lender: string;
+  amount: bigint;
+  remaining_owed: bigint;
+}
+
 /** Emitted once after a `withdraw_many` batch settles, alongside the per-stream [`Withdrawn`] events. The per-stream shape is unchanged so existing consumers keep working; this event is the batch-level view: every entry that paid, the total, and how many of the requested ids were skipped. */
 /** Event key `batch_withdraw_summary` — fingerprint `sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860`. */
 export interface BatchWithdrawSummaryEvent {
@@ -55,6 +86,27 @@ export interface BeneficiaryEnrolledEvent {
   beneficiary: string;
   kind: string;
   public_key: Uint8Array;
+}
+
+/** Emitted when a release condition expires without being met. */
+/** Event key `condition_expired` — fingerprint `sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036`. */
+export interface ConditionExpiredEvent {
+  stream_id: bigint;
+  condition_id: bigint;
+}
+
+/** Emitted when a release condition is attested and met. */
+/** Event key `condition_met` — fingerprint `sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2`. */
+export interface ConditionMetEvent {
+  stream_id: bigint;
+  condition_id: bigint;
+}
+
+/** Emitted when a release condition is registered for a stream. */
+/** Event key `condition_registered` — fingerprint `sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6`. */
+export interface ConditionRegisteredEvent {
+  stream_id: bigint;
+  condition_id: bigint;
 }
 
 /** Emitted when the contract freeze state is toggled by the governor. */
@@ -158,6 +210,32 @@ export interface GovernanceSignersSetEvent {
   set_by: string;
   signers: string[];
   veto_window: bigint;
+}
+
+/** Emitted when an integrator callback hook fails or reverts. */
+/** Event key `hook_failed` — fingerprint `sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f`. */
+export interface HookFailedEvent {
+  stream_id: bigint;
+  event_class: string;
+  callback_contract: string;
+  error_code: number;
+}
+
+/** Emitted when an integrator callback hook is invoked successfully. */
+/** Event key `hook_invoked` — fingerprint `sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e`. */
+export interface HookInvokedEvent {
+  stream_id: bigint;
+  event_class: string;
+  callback_contract: string;
+}
+
+/** Emitted when an integrator callback hook is registered. */
+/** Event key `hook_registered` — fingerprint `sha256:be27fe4f3537259a7dbc0b805c963dd2393d49967ca47f74de98d438b47fb9c0`. */
+export interface HookRegisteredEvent {
+  stream_id: bigint;
+  event_class: string;
+  callback_contract: string;
+  selector: string;
 }
 
 /** Emitted when a sponsor rotates its authorized operator (relayer) key. The previous operator key stops validating relay signatures immediately. */
@@ -464,6 +542,26 @@ export interface StreamsCreatedEvent {
   stream_ids: bigint[];
 }
 
+/** Emitted when governance approves a new stream template or version. */
+/** Event key `template_approved` — fingerprint `sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b`. */
+export interface TemplateApprovedEvent {
+  template_id: number;
+  version: number;
+  token: string;
+  duration: bigint;
+}
+
+/** Emitted when a stream is instantiated from an approved template. */
+/** Event key `template_instantiated` — fingerprint `sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af`. */
+export interface TemplateInstantiatedEvent {
+  template_id: number;
+  version: number;
+  stream_id: bigint;
+  sender: string;
+  recipient: string;
+  deposit: bigint;
+}
+
 /** Emitted when a pending contract upgrade is cancelled by the governor. */
 /** Event key `upgrade_cancelled` — fingerprint `sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523`. */
 export interface UpgradeCancelledEvent {
@@ -490,8 +588,14 @@ export interface WithdrawnEvent {
 
 /** The topic symbol each event publishes as its name. */
 export const EVENT_KEYS = {
+  AdvanceDrawn: "advance_drawn",
+  AdvanceLiquidated: "advance_liquidated",
+  AdvanceRepaid: "advance_repaid",
   BatchWithdrawSummary: "batch_withdraw_summary",
   BeneficiaryEnrolled: "beneficiary_enrolled",
+  ConditionExpired: "condition_expired",
+  ConditionMet: "condition_met",
+  ConditionRegistered: "condition_registered",
   ContractFrozenStateChanged: "contract_frozen_state_changed",
   ContractUpgraded: "contract_upgraded",
   DisputeExpired: "dispute_expired",
@@ -504,6 +608,9 @@ export const EVENT_KEYS = {
   GovernanceActionSigned: "governance_action_signed",
   GovernanceActionVetoed: "governance_action_vetoed",
   GovernanceSignersSet: "governance_signers_set",
+  HookFailed: "hook_failed",
+  HookInvoked: "hook_invoked",
+  HookRegistered: "hook_registered",
   OperatorKeyRotated: "operator_key_rotated",
   OracleConfigUpdated: "oracle_config_updated",
   OracleStaleFallback: "oracle_stale_fallback",
@@ -538,6 +645,8 @@ export const EVENT_KEYS = {
   StreamScheduled: "stream_scheduled",
   StreamToppedUp: "stream_topped_up",
   StreamsCreated: "streams_created",
+  TemplateApproved: "template_approved",
+  TemplateInstantiated: "template_instantiated",
   UpgradeCancelled: "upgrade_cancelled",
   UpgradeProposed: "upgrade_proposed",
   Withdrawn: "withdrawn",
@@ -547,7 +656,7 @@ export const EVENT_KEYS = {
 export type ContractEventName = (typeof EVENT_KEYS)[keyof typeof EVENT_KEYS];
 
 /** Every event this registry knows about, even if a consumer ignores it. */
-export const ALL_CONTRACT_EVENT_NAMES: readonly ContractEventName[] = ["batch_withdraw_summary", "beneficiary_enrolled", "contract_frozen_state_changed", "contract_upgraded", "dispute_expired", "dispute_raised", "dispute_resolved", "fee_charged", "fee_withdrawn", "governance_action_executed", "governance_action_proposed", "governance_action_signed", "governance_action_vetoed", "governance_signers_set", "operator_key_rotated", "oracle_config_updated", "oracle_stale_fallback", "oracle_time_reported", "ownership_accepted", "ownership_proposed", "policy_asset_executed", "policy_asset_queued", "policy_handoff_accepted", "policy_handoff_cancelled", "policy_handoff_proposed", "policy_initialized", "rate_change_accepted", "rate_change_proposed", "scheduled_intent_cancelled", "scheduled_intent_expired", "scheduled_stream_executed", "sender_transfer_expired", "sender_transfer_proposed", "sender_transferred", "sponsor_active_set", "sponsor_claim", "sponsor_registered", "storage_migrated", "stream_cancelled", "stream_created", "stream_paused", "stream_policy_set", "stream_record_migrated", "stream_refund_target_changed", "stream_resumed", "stream_scheduled", "stream_topped_up", "streams_created", "upgrade_cancelled", "upgrade_proposed", "withdrawn"] as const;
+export const ALL_CONTRACT_EVENT_NAMES: readonly ContractEventName[] = ["advance_drawn", "advance_liquidated", "advance_repaid", "batch_withdraw_summary", "beneficiary_enrolled", "condition_expired", "condition_met", "condition_registered", "contract_frozen_state_changed", "contract_upgraded", "dispute_expired", "dispute_raised", "dispute_resolved", "fee_charged", "fee_withdrawn", "governance_action_executed", "governance_action_proposed", "governance_action_signed", "governance_action_vetoed", "governance_signers_set", "hook_failed", "hook_invoked", "hook_registered", "operator_key_rotated", "oracle_config_updated", "oracle_stale_fallback", "oracle_time_reported", "ownership_accepted", "ownership_proposed", "policy_asset_executed", "policy_asset_queued", "policy_handoff_accepted", "policy_handoff_cancelled", "policy_handoff_proposed", "policy_initialized", "rate_change_accepted", "rate_change_proposed", "scheduled_intent_cancelled", "scheduled_intent_expired", "scheduled_stream_executed", "sender_transfer_expired", "sender_transfer_proposed", "sender_transferred", "sponsor_active_set", "sponsor_claim", "sponsor_registered", "storage_migrated", "stream_cancelled", "stream_created", "stream_paused", "stream_policy_set", "stream_record_migrated", "stream_refund_target_changed", "stream_resumed", "stream_scheduled", "stream_topped_up", "streams_created", "template_approved", "template_instantiated", "upgrade_cancelled", "upgrade_proposed", "withdrawn"] as const;
 
 /** Narrow an arbitrary RPC event name to a registered contract event. */
 export function isContractEventName(name: string): name is ContractEventName {
@@ -556,8 +665,14 @@ export function isContractEventName(name: string): name is ContractEventName {
 
 /** Decode helper: name the struct behind a registered event key. */
 export const EVENT_STRUCT_BY_KEY: Record<ContractEventName, string> = {
+  "advance_drawn": "AdvanceDrawn",
+  "advance_liquidated": "AdvanceLiquidated",
+  "advance_repaid": "AdvanceRepaid",
   "batch_withdraw_summary": "BatchWithdrawSummary",
   "beneficiary_enrolled": "BeneficiaryEnrolled",
+  "condition_expired": "ConditionExpired",
+  "condition_met": "ConditionMet",
+  "condition_registered": "ConditionRegistered",
   "contract_frozen_state_changed": "ContractFrozenStateChanged",
   "contract_upgraded": "ContractUpgraded",
   "dispute_expired": "DisputeExpired",
@@ -570,6 +685,9 @@ export const EVENT_STRUCT_BY_KEY: Record<ContractEventName, string> = {
   "governance_action_signed": "GovernanceActionSigned",
   "governance_action_vetoed": "GovernanceActionVetoed",
   "governance_signers_set": "GovernanceSignersSet",
+  "hook_failed": "HookFailed",
+  "hook_invoked": "HookInvoked",
+  "hook_registered": "HookRegistered",
   "operator_key_rotated": "OperatorKeyRotated",
   "oracle_config_updated": "OracleConfigUpdated",
   "oracle_stale_fallback": "OracleStaleFallback",
@@ -604,6 +722,8 @@ export const EVENT_STRUCT_BY_KEY: Record<ContractEventName, string> = {
   "stream_scheduled": "StreamScheduled",
   "stream_topped_up": "StreamToppedUp",
   "streams_created": "StreamsCreated",
+  "template_approved": "TemplateApproved",
+  "template_instantiated": "TemplateInstantiated",
   "upgrade_cancelled": "UpgradeCancelled",
   "upgrade_proposed": "UpgradeProposed",
   "withdrawn": "Withdrawn",
@@ -628,8 +748,14 @@ export interface EventShape {
 }
 
 export const EVENT_SHAPES: Record<ContractEventName, EventShape> = {
+  "advance_drawn": { struct: "AdvanceDrawn", eventKey: "advance_drawn", fingerprint: "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"recipient","type":"Address"},{"name":"lender","type":"Address"},{"name":"amount","type":"i128"},{"name":"fee","type":"i128"},{"name":"repayment_bps","type":"u32"}] },
+  "advance_liquidated": { struct: "AdvanceLiquidated", eventKey: "advance_liquidated", fingerprint: "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"recipient","type":"Address"},{"name":"lender","type":"Address"},{"name":"amount","type":"i128"},{"name":"remaining_unpaid","type":"i128"}] },
+  "advance_repaid": { struct: "AdvanceRepaid", eventKey: "advance_repaid", fingerprint: "sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"recipient","type":"Address"},{"name":"lender","type":"Address"},{"name":"amount","type":"i128"},{"name":"remaining_owed","type":"i128"}] },
   "batch_withdraw_summary": { struct: "BatchWithdrawSummary", eventKey: "batch_withdraw_summary", fingerprint: "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860", topics: [{"name":"recipient","type":"Address"}], data: [{"name":"settled","type":"Vec<WithdrawOutcome>"},{"name":"total","type":"i128"},{"name":"requested","type":"u32"},{"name":"skipped","type":"u32"}] },
   "beneficiary_enrolled": { struct: "BeneficiaryEnrolled", eventKey: "beneficiary_enrolled", fingerprint: "sha256:8a457d9c30ee67b51c5709af2eb838deacb19d55dc53a93055734d920e77e7d7", topics: [{"name":"beneficiary","type":"Address"},{"name":"kind","type":"Symbol"}], data: [{"name":"public_key","type":"BytesN<32>"}] },
+  "condition_expired": { struct: "ConditionExpired", eventKey: "condition_expired", fingerprint: "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"condition_id","type":"u64"}] },
+  "condition_met": { struct: "ConditionMet", eventKey: "condition_met", fingerprint: "sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"condition_id","type":"u64"}] },
+  "condition_registered": { struct: "ConditionRegistered", eventKey: "condition_registered", fingerprint: "sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"condition_id","type":"u64"}] },
   "contract_frozen_state_changed": { struct: "ContractFrozenStateChanged", eventKey: "contract_frozen_state_changed", fingerprint: "sha256:090c0be66d60a23f3122acb9d4df26f1c2efea8c18828a5d48614b93692f8f7f", topics: [{"name":"frozen","type":"bool"}], data: [{"name":"changed_by","type":"Address"}] },
   "contract_upgraded": { struct: "ContractUpgraded", eventKey: "contract_upgraded", fingerprint: "sha256:0228c88243ed185f32359dd32f813d0c1df5ef393fbe5416fc120720020dc2fe", topics: [{"name":"new_wasm_hash","type":"BytesN<32>"}], data: [{"name":"executed_by","type":"Address"}] },
   "dispute_expired": { struct: "DisputeExpired", eventKey: "dispute_expired", fingerprint: "sha256:36b0c23354cbcac4fb502ca41a70ddfe1f9eb2c559c9db99d3de4f790abf7ca1", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"recipient","type":"Address"},{"name":"bond","type":"i128"},{"name":"sender_share","type":"i128"},{"name":"recipient_share","type":"i128"}] },
@@ -642,6 +768,9 @@ export const EVENT_SHAPES: Record<ContractEventName, EventShape> = {
   "governance_action_signed": { struct: "GovernanceActionSigned", eventKey: "governance_action_signed", fingerprint: "sha256:05a46601921e524677a6b100a6b1d038f189fe1ab4e796b2ecf3cef374d94b4d", topics: [{"name":"proposal_id","type":"u64"}], data: [{"name":"signer","type":"Address"},{"name":"signature_count","type":"u32"}] },
   "governance_action_vetoed": { struct: "GovernanceActionVetoed", eventKey: "governance_action_vetoed", fingerprint: "sha256:fe6590a48703dc9d3f3f61e0e05c54467fc771245b0c63f546451909ad4230a7", topics: [{"name":"proposal_id","type":"u64"}], data: [{"name":"vetoed_by","type":"Address"}] },
   "governance_signers_set": { struct: "GovernanceSignersSet", eventKey: "governance_signers_set", fingerprint: "sha256:c80b3f90f2621ff7578044e47b82978b1f997300723831e782bc137d0ac33a16", topics: [{"name":"set_by","type":"Address"}], data: [{"name":"signers","type":"Vec<Address>"},{"name":"veto_window","type":"u64"}] },
+  "hook_failed": { struct: "HookFailed", eventKey: "hook_failed", fingerprint: "sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"event_class","type":"Symbol"},{"name":"callback_contract","type":"Address"},{"name":"error_code","type":"u32"}] },
+  "hook_invoked": { struct: "HookInvoked", eventKey: "hook_invoked", fingerprint: "sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"event_class","type":"Symbol"},{"name":"callback_contract","type":"Address"}] },
+  "hook_registered": { struct: "HookRegistered", eventKey: "hook_registered", fingerprint: "sha256:be27fe4f3537259a7dbc0b805c963dd2393d49967ca47f74de98d438b47fb9c0", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"event_class","type":"Symbol"},{"name":"callback_contract","type":"Address"},{"name":"selector","type":"Symbol"}] },
   "operator_key_rotated": { struct: "OperatorKeyRotated", eventKey: "operator_key_rotated", fingerprint: "sha256:e173c61697b4045d0fb1e94358fe8b4675bfca312369ac887f2ff23f21fb413b", topics: [{"name":"sponsor","type":"Address"},{"name":"kind","type":"Symbol"}], data: [{"name":"new_operator_key","type":"BytesN<32>"}] },
   "oracle_config_updated": { struct: "OracleConfigUpdated", eventKey: "oracle_config_updated", fingerprint: "sha256:91f894797f41c1566560dd5c04581611fb8d29bd0ac48bfc022d0ab4de0e6099", topics: [], data: [{"name":"threshold","type":"u32"},{"name":"max_stale_seconds","type":"u64"}] },
   "oracle_stale_fallback": { struct: "OracleStaleFallback", eventKey: "oracle_stale_fallback", fingerprint: "sha256:d1baed22ab39c524cd1297b2a5f14d39eeec300ef27ce95583562f1e2e26dbec", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"ledger_time","type":"u64"}] },
@@ -676,6 +805,8 @@ export const EVENT_SHAPES: Record<ContractEventName, EventShape> = {
   "stream_scheduled": { struct: "StreamScheduled", eventKey: "stream_scheduled", fingerprint: "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487", topics: [{"name":"intent_id","type":"u64"}], data: [{"name":"sender","type":"Address"},{"name":"recipient","type":"Address"},{"name":"token","type":"Address"},{"name":"deposit","type":"i128"},{"name":"start_time","type":"u64"},{"name":"end_time","type":"u64"},{"name":"cancelable","type":"bool"},{"name":"interval","type":"u64"},{"name":"occurrences","type":"u32"},{"name":"fee_budget","type":"i128"},{"name":"execute_after","type":"u64"},{"name":"expires_at","type":"u64"}] },
   "stream_topped_up": { struct: "StreamToppedUp", eventKey: "stream_topped_up", fingerprint: "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"sender","type":"Address"},{"name":"amount","type":"i128"},{"name":"new_deposit","type":"i128"}] },
   "streams_created": { struct: "StreamsCreated", eventKey: "streams_created", fingerprint: "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3", topics: [{"name":"sender","type":"Address"}], data: [{"name":"stream_ids","type":"Vec<u64>"}] },
+  "template_approved": { struct: "TemplateApproved", eventKey: "template_approved", fingerprint: "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b", topics: [{"name":"template_id","type":"u32"}], data: [{"name":"version","type":"u32"},{"name":"token","type":"Address"},{"name":"duration","type":"u64"}] },
+  "template_instantiated": { struct: "TemplateInstantiated", eventKey: "template_instantiated", fingerprint: "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af", topics: [{"name":"template_id","type":"u32"}], data: [{"name":"version","type":"u32"},{"name":"stream_id","type":"u64"},{"name":"sender","type":"Address"},{"name":"recipient","type":"Address"},{"name":"deposit","type":"i128"}] },
   "upgrade_cancelled": { struct: "UpgradeCancelled", eventKey: "upgrade_cancelled", fingerprint: "sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523", topics: [{"name":"new_wasm_hash","type":"BytesN<32>"}], data: [{"name":"cancelled_by","type":"Address"}] },
   "upgrade_proposed": { struct: "UpgradeProposed", eventKey: "upgrade_proposed", fingerprint: "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed", topics: [{"name":"new_wasm_hash","type":"BytesN<32>"}], data: [{"name":"unlock_time","type":"u64"},{"name":"proposer","type":"Address"}] },
   "withdrawn": { struct: "Withdrawn", eventKey: "withdrawn", fingerprint: "sha256:f236ec39ef8dd77ec1e7b30edbfc08ea71734a2ddc55d234bc8e434f8dcf3277", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"recipient","type":"Address"},{"name":"amount","type":"i128"},{"name":"withdrawn_total","type":"i128"}] },
@@ -683,8 +814,14 @@ export const EVENT_SHAPES: Record<ContractEventName, EventShape> = {
 
 /** Registry fingerprints keyed by event struct, for drift reporting. */
 export const EVENT_FINGERPRINTS: Record<string, string> = {
+  "AdvanceDrawn": "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30",
+  "AdvanceLiquidated": "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97",
+  "AdvanceRepaid": "sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49",
   "BatchWithdrawSummary": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
   "BeneficiaryEnrolled": "sha256:8a457d9c30ee67b51c5709af2eb838deacb19d55dc53a93055734d920e77e7d7",
+  "ConditionExpired": "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036",
+  "ConditionMet": "sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2",
+  "ConditionRegistered": "sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6",
   "ContractFrozenStateChanged": "sha256:090c0be66d60a23f3122acb9d4df26f1c2efea8c18828a5d48614b93692f8f7f",
   "ContractUpgraded": "sha256:0228c88243ed185f32359dd32f813d0c1df5ef393fbe5416fc120720020dc2fe",
   "DisputeExpired": "sha256:36b0c23354cbcac4fb502ca41a70ddfe1f9eb2c559c9db99d3de4f790abf7ca1",
@@ -697,6 +834,9 @@ export const EVENT_FINGERPRINTS: Record<string, string> = {
   "GovernanceActionSigned": "sha256:05a46601921e524677a6b100a6b1d038f189fe1ab4e796b2ecf3cef374d94b4d",
   "GovernanceActionVetoed": "sha256:fe6590a48703dc9d3f3f61e0e05c54467fc771245b0c63f546451909ad4230a7",
   "GovernanceSignersSet": "sha256:c80b3f90f2621ff7578044e47b82978b1f997300723831e782bc137d0ac33a16",
+  "HookFailed": "sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f",
+  "HookInvoked": "sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e",
+  "HookRegistered": "sha256:be27fe4f3537259a7dbc0b805c963dd2393d49967ca47f74de98d438b47fb9c0",
   "OperatorKeyRotated": "sha256:e173c61697b4045d0fb1e94358fe8b4675bfca312369ac887f2ff23f21fb413b",
   "OracleConfigUpdated": "sha256:91f894797f41c1566560dd5c04581611fb8d29bd0ac48bfc022d0ab4de0e6099",
   "OracleStaleFallback": "sha256:d1baed22ab39c524cd1297b2a5f14d39eeec300ef27ce95583562f1e2e26dbec",
@@ -731,6 +871,8 @@ export const EVENT_FINGERPRINTS: Record<string, string> = {
   "StreamScheduled": "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487",
   "StreamToppedUp": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
   "StreamsCreated": "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3",
+  "TemplateApproved": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",
+  "TemplateInstantiated": "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af",
   "UpgradeCancelled": "sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523",
   "UpgradeProposed": "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed",
   "Withdrawn": "sha256:f236ec39ef8dd77ec1e7b30edbfc08ea71734a2ddc55d234bc8e434f8dcf3277"

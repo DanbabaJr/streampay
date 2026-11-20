@@ -76,7 +76,40 @@ All alerting thresholds are justified from Issue #27 soak tests (50 streams/minu
 
 ---
 
-## Deploying the Stack
+## Delivery Lag — Outbox & Webhook Dashboard (issue #542)
+
+The dashboard [`grafana/dashboards/streampay-outbox-webhooks.json`](grafana/dashboards/streampay-outbox-webhooks.json) answers the operational question **"Is delivery falling behind?"** It is dashboard-as-code: the Grafana file provider (`provisioning/dashboards/dashboards.yml`) loads every `*.json` in that folder automatically — no manual import.
+
+It plots only metrics the indexer emits on `GET /metrics` from `indexer/src/outbox/metrics.ts`:
+
+| Metric | Type | Panel use |
+|---|---|---|
+| `streampay_outbox_depth{state=pending\|in_flight\|delivered\|dead}` | gauge | Pending / in-flight / dead-letter depth stats |
+| `streampay_outbox_lag_seconds` | gauge | Dispatch / queue latency (age of oldest pending intent) |
+| `streampay_outbox_dispatch_total{outcome}` | counter | Throughput, retry & dead-letter rate, overall success gauge |
+| `streampay_outbox_delivery_total{destination,outcome}` | counter | Webhook delivery success **by destination** |
+| `streampay_outbox_divergence_alarm` | gauge | The headline "falling behind" alarm tile |
+| `streampay_outbox_reclaims_total`, `streampay_outbox_retracted_total` | counter | Reclaim / retract churn |
+| `streampay_outbox_max_seq`, `streampay_outbox_events` | gauge | Journal high-water |
+
+`streampay_outbox_delivery_total` is the **additive** destination breakdown introduced for this dashboard: the dispatcher records the same outcomes as the unlabelled `streampay_outbox_dispatch_total`, now also keyed by the consumer/webhook host, so existing alerts and the overview dashboard are untouched.
+
+### Delivery alerts (group `streampay_outbox_alerts` in [`prometheus/rules/alerts.yml`](prometheus/rules/alerts.yml))
+
+| Alert | Condition | Severity | Runbook |
+|---|---|---|---|
+| `IndexerOutboxDepthDiverging` | divergence alarm == 1 for 1m | Critical | [`docs/OUTBOX.md`](../../docs/OUTBOX.md#configuration) |
+| `IndexerOutboxDeliveryLagHigh` | oldest pending intent > 60s for 3m | Warning | [`docs/OUTBOX.md`](../../docs/OUTBOX.md) |
+| `IndexerOutboxDeadLetterRateHigh` | > 50 dead letters/10m | Warning | [`docs/OUTBOX.md`](../../docs/OUTBOX.md) |
+| `IndexerOutboxBackpressured` | any backpressure rejection/5m | Warning | [`docs/OUTBOX.md`](../../docs/OUTBOX.md#configuration) |
+| `OutboxWebhookDestinationSuccessLow` | a destination < 95% success for 10m | Warning | [`docs/WEBHOOKS.md`](../../docs/WEBHOOKS.md) |
+| `OutboxWebhookDestinationDeadLettering` | a destination dead-lettering > 0/15m | Critical | [`docs/WEBHOOKS.md`](../../docs/WEBHOOKS.md) |
+
+### Validation
+
+`node scripts/check_dashboards.mjs --self-test` (wired as `npm run dashboard:check` and a CI step) fails if any dashboard references a `streampay_*` metric that no metrics module emits, or has a malformed panel / duplicate id / empty `expr`. The `--self-test` proves the fabricated-metric check fires.
+
+---
 
 ### Option A: Docker Compose Bundle
 

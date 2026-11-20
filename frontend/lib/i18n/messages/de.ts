@@ -236,4 +236,15 @@ export const de: Record<MessageKey, string> = {
     "Bitte den Zahler, den Link erneut zu senden, oder öffne die Übersicht.",
   "notFound.pay.malformedTitle": "Ungültiger Zahlungslink",
   "notFound.pay.malformedBody": "Dieser Zahlungslink ist fehlerhaft oder beschädigt.",
+
+  "share.heading": "Diesen Zahlungslink teilen",
+  "share.body":
+    "Scanne den QR-Code oder kopiere den Link. Die Referenz wird in deinem Browser erzeugt und nie an Dritte gesendet.",
+  "share.qrLabel": "QR-Code für diesen Zahlungslink",
+  "share.copy": "Link kopieren",
+  "share.copyLabel": "Zahlungslink in die Zwischenablage kopieren",
+  "share.copied": "Zahlungslink in die Zwischenablage kopiert.",
+  "share.copiedButton": "Kopiert!",
+  "share.copyFailed":
+    "Der Link konnte nicht kopiert werden. Markiere ihn und kopiere ihn manuell.",
 };

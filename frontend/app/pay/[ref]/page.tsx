@@ -19,5 +19,5 @@ export default async function PaymentLinkPage({
   }
   if (!resolution.stream) notFound();
 
-  return <PaymentLinkClient initialResolution={resolution} />;
+  return <PaymentLinkClient refValue={ref} initialResolution={resolution} />;
 }

@@ -243,6 +243,16 @@ export const en = {
     "Ask the payer to send the link again, or open the dashboard.",
   "notFound.pay.malformedTitle": "Invalid payment link",
   "notFound.pay.malformedBody": "This payment link is malformed or corrupted.",
+
+  "share.heading": "Share this payment link",
+  "share.body":
+    "Scan the QR code or copy the link. The reference is generated in your browser and never sent to a third party.",
+  "share.qrLabel": "QR code for this payment link",
+  "share.copy": "Copy link",
+  "share.copyLabel": "Copy payment link to clipboard",
+  "share.copied": "Payment link copied to clipboard.",
+  "share.copiedButton": "Copied!",
+  "share.copyFailed": "Could not copy the link. Select it and copy manually.",
 } as const;
 
 export type MessageKey = keyof typeof en;

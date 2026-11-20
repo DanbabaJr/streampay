@@ -1,5 +1,10 @@
 # StreamPay Event Indexer
 
+> **Running this against testnet or mainnet?** The development notes below are
+> not an operations runbook. Configuration (every env var), initial backfill from
+> a chosen ledger, catch-up after downtime, outbox replay and shutdown semantics
+> are in [docs/INDEXER_OPERATIONS.md](../docs/INDEXER_OPERATIONS.md).
+
 The StreamPay Event Indexer is a standalone TypeScript Node.js service that polls Soroban RPC `getEvents` for StreamPay smart contract events, decodes the contract's typed XDR event payloads using `@stellar/stellar-sdk`, persists stream metadata and an append-only event log in SQLite, maintains cursor persistence, and serves a lightweight HTTP query API.
 
 The service indexes the contract's emitted event topics: `stream_created`, `withdrawn`, `stream_cancelled`, and `stream_topped_up` (the Rust event types are `StreamCreated`, `Withdrawn`, `StreamCancelled`, and `StreamToppedUp`). It also recognizes `stream_paused` and `stream_resumed` for forward-compatible status updates. Unknown topics are filtered out at RPC.
@@ -26,6 +31,8 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
 | `OUTBOX_MAX_DEPTH` | off | Global backpressure threshold for pending+in-flight intents |
 | `SHUTDOWN_DRAIN_MS` | `10000` | On SIGTERM/SIGINT, how long in-flight ingest and outbox dispatch may finish before the process exits (exit code `0` if drained, `1` if the window expired). Keep it below your orchestrator's kill grace period |
+
+This table is the short version. [docs/INDEXER_OPERATIONS.md §1](../docs/INDEXER_OPERATIONS.md#1-configuration) explains each variable's behaviour, its validation, the ingest/RPC knobs read by the config code (`INGEST_*`, `RPC_MAX_RPS`, `RPC_URL_FALLBACK_n`), and deployment profiles.
 
 ---
 
@@ -220,3 +227,132 @@ Run all unit, decoder, database, and integration tests:
 ```bash
 npm test
 ```
+
+---
+
+## 6. Horizontal Sharding (issue #578)
+
+The indexer can partition ingestion and projections by stream-id range so
+throughput scales beyond a single node. The implementation lives in
+`src/sharding/` (`ShardMap`, `ShardedStore`, `ShardRebalancer`, metrics)
+and is covered by `src/sharding.test.ts`. The single-node `StreamStore` is
+unchanged: one shard *is* a `StreamStore`, and all of its guarantees
+(duplicate detection by event id, monotonic projection, transactional
+outbox) are reused per shard.
+
+### Shard map
+
+Stream ids are numeric (`u64`, e.g. `"7"`). The id space is cut into
+contiguous blocks of `rangeSize` ids (default 1000) — `[0, 1000)`,
+`[1000, 2000)`, … — assigned round-robin to shards: block `k` belongs to
+shard `k % shardCount` by default. A block is the unit of movement, and a
+single stream id belongs to exactly one block, so a shard boundary can
+never split a single stream's event order.
+
+```ts
+import { ShardedStore } from "./sharding/index.js";
+const store = new ShardedStore({ shardCount: 4, rangeSize: 1000 });
+// or one SQLite file per shard:
+const fileStore = new ShardedStore({ shardCount: 4, basePath: "./data/shard" });
+//   -> ./data/shard-shard-0.sqlite, ./data/shard-shard-1.sqlite, …
+```
+
+- **Routing:** every event is routed by its stream id; a stream's events
+  always land in the same shard, in ledger order. `ShardedStore` keeps one
+  `IngestSequencer` (seeded from the merged `maxLedgerByStream()` of all
+  shards) so per-stream ordering and ledger-gap detection (#117 / #483)
+  are reported across shards, exactly as on a single node.
+- **Stream-less events** (`streamId === null`) go to the designated shard
+  0 (`STREAMLESS_SHARD`); they touch no projection, as before.
+- **Non-numeric stream ids** (e.g. `batch_withdraw_summary`, published
+  keyed by a recipient address) are placed by an FNV-1a hash of the id, so
+  they are still deterministic and still land on exactly one shard.
+- **Global state:** `ShardedStore` implements the pipeline's `IngestSink`
+  (`ingestPage`, `getState`, `setState`, `maxLedgerByStream`), so
+  `IngestPipeline` runs unchanged on top of it. Global keys (`cursor`,
+  `lastLedger`, `ingest_ledger`) live on shard 0, the coordinator shard.
+
+### Cross-shard reads
+
+Single-stream reads (`getStream`, `getStreamHistory`, per-stream outbox
+replay) route to exactly one shard. Address portfolios (`listAddress`,
+`listStreamsByRecipient`, `listAllStreams`) fan out to all shards, dedup
+by stream id (keeping the highest `lastLedger`), and merge in one stable
+order: numeric stream ids ascending, then non-numeric ids
+lexicographically. `getEventsAfter` merges the per-shard journals in
+`(ledger, id)` order and dedups by event id.
+
+`listAddressPaged(address, { limit, cursor })` pages that same total
+order, so a cursor handed out before a rebalance still addresses the same
+position afterwards, and re-reading a cursor returns the same page.
+
+Exactly-once outbox (#212) holds per shard (journal + intents in the same
+transaction, `idempotency_key` unique) and across shards: merged outbox
+reads (`listOutboxEvents`) dedup by `idempotency_key`, so a row a rebalance
+transiently leaves on two shards is delivered once.
+
+### Rebalancer
+
+```ts
+import { ShardRebalancer } from "./sharding/index.js";
+const rebalancer = new ShardRebalancer(store);
+// Move the block [1000, 2000) to shard 2, checkpointing every 5 streams.
+rebalancer.startMove(1000n, 2, { batchSize: 5 });
+// After a crash, resume every incomplete move from its checkpoint:
+rebalancer.resumeAllIncomplete();
+```
+
+A move runs in five steps: **copy** the block's streams, events, outbox
+journal rows and outbox intents to the target in batches (all copies
+idempotent — `INSERT OR IGNORE` / monotonic upsert, and outbox intents are
+re-pointed at the target's own `seq` values); **catch-up** re-copy passes
+until a pass inserts nothing new; **verify** stream ids, event ids and
+per-stream `lastLedger` match between source and target (on mismatch the
+move fails *without* switching the map, so the source stays
+authoritative); **switch** the shard-map override for the block (the
+commit point); **delete** the source copy.
+
+Checkpoints are durable: after every batch the move's checkpoint
+(`shard_move:<moveId>` in shard 0's `indexer_state` table) records the
+last copied stream id, streams/events copied, and totals. A crash at any
+point — including a full node loss and reopen of file-backed databases —
+resumes from that checkpoint: already-copied streams are skipped, the
+move proceeds to switch/delete, and the result has no lost or duplicated
+streams or events (`sharding.test.ts` covers this end to end, including a
+close + reopen mid-move).
+
+The move runs synchronously in one JS turn, so no ingestion can interleave
+between verify and switch in-process. Known limitations, see below.
+
+### Metrics
+
+```ts
+import { collectShardingMetrics, renderShardingMetricsPrometheus } from "./sharding/index.js";
+const metrics = collectShardingMetrics(store, { tipLedger: latestLedger });
+renderShardingMetricsPrometheus(metrics);
+```
+
+Per shard: stream/event/outbox counts, `lastLedger` (highest projected
+ledger on that shard), and `lag` (`tipLedger - lastLedger`, when a tip is
+supplied). Prometheus gauges: `streampay_shard_streams`,
+`streampay_shard_events`, `streampay_shard_last_ledger`,
+`streampay_shard_lag_ledgers`, plus `streampay_rebalance_events_copied` /
+`streampay_rebalance_streams_copied` per move. `ShardRebalancer.progress(moveId)`
+reports ranges moved/total, events/streams copied, and the current
+checkpoint for an in-flight move.
+
+### Limitations / follow-ups
+
+- **Webhook deliveries are not moved.** They are per-endpoint dispatch
+  state, not projections; moving them would risk duplicate sends and
+  deleting them would lose pending deliveries. They stay on the source
+  shard. If a moved stream's pending webhook deliveries must follow it,
+  that needs a dispatch-aware migration.
+- **Multi-process write fence.** In-process the synchronous move makes
+  verify → switch → delete atomic w.r.t. ingestion. A deployment with
+  several indexer processes writing the same shard databases would need a
+  distributed lock / write fence for the moving range during that window.
+- **No HTTP wiring yet.** The sharding layer is a library (`ShardedStore`
+  as the pipeline sink); the HTTP server in `src/index.ts` still uses a
+  single `StreamStore`, and there is no `/metrics` sharding endpoint or
+  operator CLI for moves yet. Wiring those up is the natural follow-up.

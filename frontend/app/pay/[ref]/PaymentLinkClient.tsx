@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet-context";
 import WalletModal from "@/components/WalletModal";
+import PaymentShareActions from "@/components/PaymentShareActions";
 import { PaymentLinkResolution } from "@/app/actions";
 import { verifyRecipientBinding } from "@/lib/payment-link";
 import {
@@ -23,8 +24,10 @@ function shortenAddress(addr: string): string {
 }
 
 export default function PaymentLinkClient({
+  refValue,
   initialResolution,
 }: {
+  refValue: string;
   initialResolution: PaymentLinkResolution;
 }) {
   const { t, formatAmount, locale } = useLocale();
@@ -429,6 +432,10 @@ export default function PaymentLinkClient({
             {t("pay.note")}
           </p>
         </div>
+      </div>
+
+      <div className="max-w-xl mx-auto w-full mt-6">
+        <PaymentShareActions refValue={refValue} />
       </div>
 
       <footer className="max-w-2xl mx-auto w-full text-center py-6 text-xs text-neutral-500 border-t border-neutral-900 mt-8">
