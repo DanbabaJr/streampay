@@ -235,6 +235,15 @@ streampay --contract "$CONTRACT_ID" --signer env claim-all
 
 ---
 
+### State snapshots: `streampay-state verify`
+
+Before and after an upgrade or migration, export the contract's storage with the
+`streampay-state` tool and verify the snapshot's invariants. Scripts and drills
+should read its machine-readable report (`verify --format json`) rather than the
+text output: the report shape is a versioned contract, with a published JSON
+Schema and an additive-only compatibility policy, documented in
+[`tools/streampay-state/README.md`](../tools/streampay-state/README.md).
+
 ## 4. Troubleshooting Decision Tree
 
 When an operational failure occurs, engineers and operators must follow this decision tree. Every symptom is mapped to diagnostic commands, root causes, exact fixes, and escalation paths.
