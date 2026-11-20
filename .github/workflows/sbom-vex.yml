@@ -126,11 +126,26 @@ jobs:
         run: |
           set -eu
           mkdir -p sbom/rust
-          cargo cyclonedx --format json --spec-version "$CYCLONEDX_SPEC" \
-            --output-pattern package --all
-          wasm_sbom=contracts/streaming-payments/streampay-contract.cdx.json
-          [ -f "$wasm_sbom" ] || { echo "::error::cargo-cyclonedx produced no $wasm_sbom"; exit 1; }
-          mv "$wasm_sbom" sbom/rust/streampay-contract.cdx.json
+          rm -f contracts/streaming-payments/*.cdx.json
+          # `--output-pattern`/`--output-prefix` were removed from
+          # cargo-cyclonedx 0.5.10; the file is named after the package unless
+          # `--override-filename` names it. `--all` here means "every
+          # dependency" (already the default) — it is not "every workspace
+          # member", so the manifest path is explicit and the output is located
+          # by globbing rather than by guessing a filename.
+          cargo cyclonedx \
+            --manifest-path contracts/streaming-payments/Cargo.toml \
+            --format json \
+            --spec-version "$CYCLONEDX_SPEC"
+          shopt -s nullglob
+          produced=(contracts/streaming-payments/*.cdx.json)
+          if [ "${#produced[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one *.cdx.json from cargo-cyclonedx in contracts/streaming-payments, found ${#produced[@]}${produced[*]:+: ${produced[*]}}"
+            exit 1
+          fi
+          mv "${produced[0]}" sbom/rust/streampay-contract.cdx.json
+          grep -q '"bomFormat"' sbom/rust/streampay-contract.cdx.json \
+            || { echo "::error::the Rust SBOM is not a CycloneDX document"; exit 1; }
 
       # `--package-lock-only`: the SBOM is derived from the lockfile, so it
       # describes what `npm ci` resolves without installing node_modules again.
@@ -138,22 +153,40 @@ jobs:
         run: |
           set -eu
           mkdir -p sbom
-          npx --yes @cyclonedx/cyclonedx-npm --version
+          # Pinned major: the positional argument is the *package.json* (the
+          # generator finds the lockfile next to it), and an unpinned `npx`
+          # would let a new major change that contract under us.
+          npx --yes @cyclonedx/cyclonedx-npm@6 --version
           for pair in \
-            frontend=frontend/package-lock.json \
-            indexer=indexer/package-lock.json \
-            sdk=sdks/typescript/package-lock.json \
-            cli=tools/streampay-cli/package-lock.json; do
+            frontend=frontend \
+            indexer=indexer \
+            sdk=sdks/typescript \
+            cli=tools/streampay-cli; do
             name="${pair%%=*}"
-            lock="${pair#*=}"
-            if [ ! -f "$lock" ]; then
-              echo "::warning::$lock is absent; no SBOM for '$name'"
+            dir="${pair#*=}"
+            if [ ! -f "$dir/package.json" ]; then
+              echo "::warning::$dir/package.json is absent; no SBOM for '$name'"
               continue
             fi
-            npx --yes @cyclonedx/cyclonedx-npm \
+            if [ ! -f "$dir/package-lock.json" ]; then
+              # A package without a lockfile has no resolved dependency graph
+              # to describe. That is acceptable for a private, unpublished tool
+              # (it is installed with --no-package-lock in ci.yml) and never for
+              # something shipped, where the silence would hide the gap.
+              if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("private") else 1)' "$dir/package.json"; then
+                echo "::notice::$dir is a private package with no lockfile; no SBOM for '$name'"
+                continue
+              fi
+              echo "::error::$dir/package-lock.json is absent; a published package must have a lockfile so it can have an SBOM"
+              exit 1
+            fi
+            npx --yes @cyclonedx/cyclonedx-npm@6 \
+              "$dir/package.json" \
               --package-lock-only --output-format JSON \
               --spec-version "$CYCLONEDX_SPEC" \
-              --output-file "sbom/$name.cdx.json" "$lock"
+              --output-file "$PWD/sbom/$name.cdx.json"
+            [ -s "sbom/$name.cdx.json" ] \
+              || { echo "::error::cyclonedx-npm wrote no SBOM for '$name'"; exit 1; }
           done
           ls -l sbom
 
@@ -216,30 +249,74 @@ jobs:
           set -eu
           docker build -f infra/docker/Dockerfile.indexer -t streampay-indexer:${{ github.sha }} .
 
+      # `anchore/sbom-action` generates *and* uploads in one step, which hides
+      # which file the gate is meant to read. Installing the binary and running
+      # syft directly makes the command, its flags and its output explicit.
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Indexer image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: streampay-indexer:${{ github.sha }}
-          format: cyclonedx-json
-          output-file: sbom/indexer-image.cdx.json
-          artifact-name: sbom-indexer-image
-          upload-artifact: false
+        run: |
+          set -eu
+          syft version
+          syft "streampay-indexer:${{ github.sha }}" \
+            -o "cyclonedx-json=sbom/indexer-image.cdx.json" \
+            --quiet
+          if [ ! -s sbom/indexer-image.cdx.json ]; then
+            echo "::error::syft produced no SBOM for the indexer image"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          path = pathlib.Path("sbom/indexer-image.cdx.json")
+          try:
+              document = json.loads(path.read_text(encoding="utf-8"))
+          except json.JSONDecodeError as exc:
+              sys.exit(f"::error::{path} is not JSON: {exc}")
+          if document.get("bomFormat") != "CycloneDX":
+              sys.exit(f"::error::{path} is not a CycloneDX document")
+          if not document.get("components"):
+              sys.exit(f"::error::{path} lists no components: the image SBOM is empty")
+          PY
 
       # ── advisory inputs, the same three ecosystems the audit jobs use ────
       - name: cargo-deny advisory report
         run: |
-          set +e
+          set -u
           mkdir -p advisories
-          cargo deny --format json check advisories > advisories/cargo-deny.json
+          # `--audit-compatible-output` is the documented, single-document,
+          # cargo-audit-shaped report on stdout. The plain `--format json`
+          # shape is a stream of per-finding diagnostics, and older cargo-deny
+          # releases wrote those to stderr — which is exactly how a plain `>`
+          # redirect produced an empty file that then read as "no advisories".
+          cargo deny --format json check advisories --audit-compatible-output \
+            > advisories/cargo-deny.json \
+            2> advisories/cargo-deny.diagnostics.json
           rc=$?
-          set -e
-          # Exit code 1 means "advisories found", which is the gate's input, not
-          # a CI failure of this step; a parse/tooling failure (>=2) still is.
-          if [ "$rc" -gt 1 ]; then
-            echo "::error::cargo deny exited $rc (not an advisory finding)"
+          # The exit code is a bitset per check: advisories=1, bans=2,
+          # licenses=4, sources=8. Only the advisories bit is expected here, so
+          # any other bit is a tooling/configuration failure, not a finding.
+          if [ $((rc & ~1)) -ne 0 ]; then
+            echo "::error::cargo deny exited $rc, which is more than 'advisories found'; diagnostics:"
+            cat advisories/cargo-deny.diagnostics.json || true
             exit 1
           fi
-          cat advisories/cargo-deny.json
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          path = pathlib.Path("advisories/cargo-deny.json")
+          text = path.read_text(encoding="utf-8")
+          if not text.strip():
+              sys.exit(f"::error::{path} is empty: cargo-deny wrote no report to stdout")
+          try:
+              document = json.loads(text)
+          except json.JSONDecodeError as exc:
+              sys.exit(f"::error::{path} is not one complete JSON document: {exc}")
+          if not isinstance(document, dict) or not ({"advisories", "vulnerabilities"} & document.keys()):
+              keys = sorted(document) if isinstance(document, dict) else type(document).__name__
+              sys.exit(f"::error::{path} has no 'advisories'/'vulnerabilities' key (got {keys})")
+          PY
 
       - name: npm advisory reports
         run: |
@@ -345,6 +422,10 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
+        with:
+          # Pinned: cosign v3 removed `sign-blob --output-certificate`, so the
+          # flags below are written for v3 and must not float onto a v4.
+          cosign-release: v3.1.3
 
       # Same keyless scheme as the release signatures (docs/SIGSTORE.md): the
       # SBOM is only evidence if it is as verifiable as the binary it describes.
@@ -353,17 +434,55 @@ jobs:
           set -eu
           shopt -s nullglob
           mkdir -p dist/sbom
+          bundles=()
           for file in dist/sbom/*.cdx.json dist/sbom/sbom-index.json; do
             [ -f "$file" ] || continue
             name="$(basename "$file")"
-            cosign sign-blob --yes \
-              --bundle "dist/sbom/$name.sigstore.json" \
-              --output-certificate "dist/sbom/$name.pem" \
-              "$file"
+            bundle="dist/sbom/$name.sigstore.json"
+            # In cosign v3 the bundle is the only output: `--output-certificate`
+            # and `--output-signature` are gone, and `--rekor-url` no longer
+            # exists (the signing config selects the log).
+            cosign sign-blob --yes --bundle "$bundle" "$file"
+            [ -s "$bundle" ] || { echo "::error::$name: cosign wrote no bundle"; exit 1; }
             # A signature with no transparency-log entry is not the record this
             # gate promises to publish.
-            grep -q '"logIndex"' "dist/sbom/$name.sigstore.json" \
+            grep -q '"logIndex"' "$bundle" \
               || { echo "::error::$name was signed without a Rekor entry"; exit 1; }
+            bundles+=("$bundle")
+          done
+          if [ "${#bundles[@]}" -eq 0 ]; then
+            echo "::error::no SBOM or index was signed"
+            exit 1
+          fi
+          # The published `.pem` is derived from the bundle so the release still
+          # ships a plain certificate: verificationMaterial carries the leaf
+          # certificate as the first rawBytes (base64 DER). Fail if it is absent
+          # rather than publishing an empty or missing file.
+          python3 - "${bundles[@]}" <<'PY'
+          import base64, json, pathlib, sys
+
+          for raw in sys.argv[1:]:
+              bundle = pathlib.Path(raw)
+              document = json.loads(bundle.read_text(encoding="utf-8"))
+              try:
+                  der = base64.b64decode(
+                      document["verificationMaterial"]["certificate"]["rawBytes"]
+                  )
+              except (KeyError, TypeError, ValueError):
+                  sys.exit(f"::error::{bundle} carries no leaf certificate (rawBytes)")
+              body = base64.b64encode(der).decode("ascii")
+              pem = "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+              target = bundle.with_name(bundle.name.removesuffix(".sigstore.json") + ".pem")
+              target.write_text(
+                  "-----BEGIN CERTIFICATE-----\n" + pem + "\n-----END CERTIFICATE-----\n",
+                  encoding="ascii",
+              )
+              print(f"wrote {target}")
+          PY
+          for pem in dist/sbom/*.pem; do
+            [ -f "$pem" ] || continue
+            openssl x509 -in "$pem" -noout -subject \
+              || { echo "::error::$pem is not a readable certificate"; exit 1; }
           done
 
       - name: Verify the signatures before publishing them

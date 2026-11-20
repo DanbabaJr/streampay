@@ -226,6 +226,49 @@ class SbomVexGateTests(unittest.TestCase):
         code, output = self.run_gate("--advisories", f"cargo-deny={cargo}")
         self.assert_blocks(code, output, "RUSTSEC-2024-0436")
 
+    def test_cargo_deny_diagnostic_stream_is_normalised(self):
+        # `cargo deny --format json` is a stream of concatenated documents, one
+        # per finding, with the advisory id inside the human-readable message.
+        # Reading only the first document would drop the second finding.
+        cargo = self.dir / "cargo-deny.json"
+        cargo.write_text(
+            "\n".join(
+                json.dumps(document)
+                for document in (
+                    {
+                        "fields": {"code": "advisory", "graphs": ["dep"]},
+                        "message": "RUSTSEC-2024-0436 (unmaintained) in paste 1.0.15",
+                        "severity": "warning",
+                        "type": "diagnostic",
+                    },
+                    {
+                        "fields": {"code": "advisory"},
+                        "message": "RUSTSEC-2025-0009 in ring 0.17.8",
+                        "severity": "error",
+                        "type": "diagnostic",
+                    },
+                )
+            ),
+            encoding="utf-8",
+        )
+        code, output = self.run_gate("--advisories", f"cargo-deny={cargo}")
+        self.assert_blocks(code, output, "RUSTSEC-2024-0436")
+        self.assertIn("RUSTSEC-2025-0009", output)
+
+    def test_empty_advisory_report_blocks(self):
+        # An empty file is what a wrong redirect or a changed output stream
+        # leaves behind; it must never pass as "nothing found".
+        cargo = self.dir / "cargo-deny.json"
+        cargo.write_text("", encoding="utf-8")
+        code, output = self.run_gate("--advisories", f"cargo-deny={cargo}")
+        self.assert_blocks(code, output, "produced no report at all")
+
+    def test_truncated_advisory_report_blocks(self):
+        cargo = self.dir / "cargo-deny.json"
+        cargo.write_text('{"advisories": {"found": [', encoding="utf-8")
+        code, output = self.run_gate("--advisories", f"cargo-deny={cargo}")
+        self.assert_blocks(code, output, "not a complete JSON document stream")
+
     # ── VEX quality ─────────────────────────────────────────────────────────
     def test_expired_vex_blocks(self):
         self.write_vex([vex_entry("GHSA-aaaa-bbbb-cccc", expires="2026-01-01")])

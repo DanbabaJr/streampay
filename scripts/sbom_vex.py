@@ -79,6 +79,48 @@ def load_json(path: Path, gate: Gate, *, what: str) -> dict | list | None:
     return None
 
 
+def load_advisory_report(path: Path, gate: Gate, *, what: str) -> list[object] | None:
+    """Advisory reports arrive in more than one JSON *shape*.
+
+    `cargo deny --audit-compatible-output` writes one document, but the bare
+    `cargo deny --format json` shape is a stream of one document per finding,
+    and any tool that appends rather than rewrites produces a stream too. A
+    single `json.loads` rejects the stream, and the cheapest way out of that
+    error is to drop the report — which reads as "no advisories". So every
+    complete document in the file is accepted, and anything that is not a
+    complete stream (truncated, empty, half-written) is a loud failure.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        gate.fail(f"{what}: cannot read {path} ({exc})")
+        return None
+    if not text.strip():
+        gate.fail(f"{what}: {path} is empty; the tool produced no report at all")
+        return None
+    decoder = json.JSONDecoder()
+    documents: list[object] = []
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index] in " \t\r\n":
+            index += 1
+        if index >= len(text):
+            break
+        try:
+            document, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError as exc:
+            gate.fail(
+                f"{what}: {path} is not a complete JSON document stream "
+                f"(offset {index}: {exc.msg}); refusing to read it as 'no advisories'"
+            )
+            return None
+        documents.append(document)
+    if not documents:
+        gate.fail(f"{what}: {path} contains no JSON document")
+        return None
+    return documents
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -636,10 +678,18 @@ def run_gate(args: argparse.Namespace) -> int:
         if not path.is_file():
             gate.fail(f"advisories '{tool}': file not found: {path}")
             continue
-        document = load_json(path, gate, what=f"advisories '{tool}'")
-        if document is None:
+        documents = load_advisory_report(path, gate, what=f"advisories '{tool}'")
+        if documents is None:
             continue
-        reported.extend(parser(document, path.read_text(encoding="utf-8", errors="replace")))
+        before = len(reported)
+        for document in documents:
+            reported.extend(parser(document))
+        if len(reported) == before:
+            # No document matched the structured shapes. Scan the raw text for
+            # identifiers instead, so an unfamiliar-but-real report still names
+            # what it found rather than passing as clean.
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            reported.extend(parser(None, raw))
 
     seen: set[str] = set()
     for item in reported:
