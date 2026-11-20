@@ -495,6 +495,101 @@
       "code": 99,
       "name": "InvalidPauseTransition",
       "retired": false
+    },
+    {
+      "code": 100,
+      "name": "BatchAmendmentNotFound",
+      "retired": false
+    },
+    {
+      "code": 101,
+      "name": "BatchAmendmentExpired",
+      "retired": false
+    },
+    {
+      "code": 102,
+      "name": "BatchAmendmentThresholdNotMet",
+      "retired": false
+    },
+    {
+      "code": 103,
+      "name": "BatchAmendmentRecipientNotConsented",
+      "retired": false
+    },
+    {
+      "code": 104,
+      "name": "BatchAmendmentTooManyAmendments",
+      "retired": false
+    },
+    {
+      "code": 105,
+      "name": "BatchAmendmentInvalidTerms",
+      "retired": false
+    },
+    {
+      "code": 106,
+      "name": "BatchAmendmentStreamPaused",
+      "retired": false
+    },
+    {
+      "code": 107,
+      "name": "VotingPowerAlreadyVoted",
+      "retired": false
+    },
+    {
+      "code": 108,
+      "name": "VotingPowerInsufficient",
+      "retired": false
+    },
+    {
+      "code": 109,
+      "name": "VotingPowerProposalNotFound",
+      "retired": false
+    },
+    {
+      "code": 110,
+      "name": "InsurancePoolInsolvent",
+      "retired": false
+    },
+    {
+      "code": 111,
+      "name": "InsuranceClaimNotFound",
+      "retired": false
+    },
+    {
+      "code": 112,
+      "name": "InsuranceClaimNotApproved",
+      "retired": false
+    },
+    {
+      "code": 113,
+      "name": "InsuranceClaimTimelockNotElapsed",
+      "retired": false
+    },
+    {
+      "code": 114,
+      "name": "InsuranceCapExceeded",
+      "retired": false
+    },
+    {
+      "code": 115,
+      "name": "InsuranceInvalidLossProof",
+      "retired": false
+    },
+    {
+      "code": 116,
+      "name": "SenderPolicyViolated",
+      "retired": false
+    },
+    {
+      "code": 117,
+      "name": "SenderPolicyNotFound",
+      "retired": false
+    },
+    {
+      "code": 118,
+      "name": "SenderPolicyInvalidBounds",
+      "retired": false
     }
   ],
   "events": [
@@ -1678,7 +1773,7 @@
       "xdr_sample_hex": "000000000000000100000000000000000000000000000000000000000000000000000000000000020000000100000000000000020000000f0000000977697468647261776e0000000000000500000000000000010000001100000001000000030000000f00000006616d6f756e7400000000000a000000000000000000000000000001f40000000f00000009726563697069656e74000000000000120000000100000000000000000000000000000000000000000000000000000000000000040000000f0000000f77697468647261776e5f746f74616c000000000a000000000000000000000000000001f4"
     }
   ],
-  "fingerprint": "6faf312014a56643e24be7903fcb2fff48c86ce8bd473f3b0d20e0b54db541e8",
+  "fingerprint": "5899b9c57ccfa3e0c1519db97fbe43e3e04093447f307fac26d73aae77380cfc",
   "storage_keys": [
     {
       "enum": "DataKey",

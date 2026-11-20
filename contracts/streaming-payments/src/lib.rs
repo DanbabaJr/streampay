@@ -91,6 +91,8 @@ mod differential_harness;
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod extensions_test;
 
 mod dispute;
 mod errors;
@@ -98,6 +100,10 @@ mod errors;
 mod event_registry;
 mod events;
 mod governance;
+pub mod batch_amend;
+pub mod insurance;
+pub mod sender_policy;
+pub mod voting_power;
 #[cfg(test)]
 mod governance_test;
 mod oracle;
@@ -134,18 +140,30 @@ pub use dispute::{
 };
 pub use errors::StreamError;
 pub use events::{
-    BatchWithdrawSummary, BeneficiaryEnrolled, ContractFrozenStateChanged, ContractUpgraded,
+    BatchAmendmentApplied, BatchAmendmentProposed, BatchWithdrawSummary, BeneficiaryEnrolled,
+    ClaimFiled, ClaimPaid, ClaimRejected, ContractFrozenStateChanged, ContractUpgraded,
     DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
     GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
     GovernanceActionVetoed, GovernanceSignersSet, OperatorKeyRotated, OracleConfigUpdated,
     OracleStaleFallback, OracleTimeReported, OwnershipAccepted, OwnershipProposed,
     PolicyAssetExecuted, PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled,
-    PolicyHandoffProposed, PolicyInitialized, RateChangeAccepted, RateChangeProposed,
-    ScheduledIntentCancelled, ScheduledIntentExpired, ScheduledStreamExecuted,
-    SenderTransferExpired, SenderTransferProposed, SenderTransferred, SponsorActiveSet,
-    SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled, StreamCreated, StreamPaused,
-    StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged, StreamResumed,
-    StreamScheduled, StreamToppedUp, StreamsCreated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    PolicyHandoffProposed, PolicyInitialized, PolicyViolation, PowerAccrued, RateChangeAccepted,
+    RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired, ScheduledStreamExecuted,
+    SenderPolicyRevoked, SenderPolicySet, SenderTransferExpired, SenderTransferProposed,
+    SenderTransferred, SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated,
+    StreamCancelled, StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated,
+    StreamRefundTargetChanged, StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated,
+    UpgradeCancelled, UpgradeProposed, VoteCast, Withdrawn,
+};
+pub use batch_amend::{
+    AmendmentRecord, BatchAmendmentItem, BatchAmendmentProposal, MAX_AMENDMENTS,
+};
+pub use insurance::{
+    ClaimStatus, InsuranceClaim, InsuranceConfig, InsurancePool,
+};
+pub use sender_policy::SenderPolicy;
+pub use voting_power::{
+    ProposalTally, SettledStreamSummary, VotingPowerCaps,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -535,6 +553,24 @@ impl StreamingPayments {
         let stream_policy = policy::get_stream_policy(&env, Some(token.clone()));
         let duration = end_time - start_time;
         policy::validate_stream_args(stream_policy.as_ref(), deposit_amount, duration)?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let rate_per_second = if duration > 0 {
+                deposit_amount / (duration as i128)
+            } else {
+                deposit_amount
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &sender,
+                &recipient,
+                &token,
+                deposit_amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Protocol fee, computed at the deposit boundary only. The accrual
         // math (`deposit`, `streamed_at`, cancel splits) never sees it.
@@ -2084,6 +2120,25 @@ impl StreamingPayments {
 
         let stream_policy = policy::get_stream_policy(&env, Some(s.token.clone()));
         policy::validate_top_up_args(stream_policy.as_ref(), new_deposit, s.duration())?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let duration = s.duration();
+            let rate_per_second = if duration > 0 {
+                new_deposit / (duration as i128)
+            } else {
+                new_deposit
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &s.sender,
+                &s.recipient,
+                &s.token,
+                amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Interaction: pull the added funds from the sender. A token-side
         // failure maps to a distinct code; the effects below never run, and
@@ -5397,5 +5452,159 @@ impl StreamingPayments {
             .instance()
             .get(&governance::GovernanceDataKey::ProposalCount)
             .unwrap_or(0)
+    }
+
+    // ------------------------------------------------------- batch amendments
+    pub fn propose_batch_amendment(
+        env: Env,
+        caller: Address,
+        items: Vec<batch_amend::BatchAmendmentItem>,
+        threshold: u32,
+        expires_at: u64,
+    ) -> Result<u64, StreamError> {
+        Self::require_not_frozen(&env)?;
+        batch_amend::propose_batch(&env, &caller, &items, threshold, expires_at)
+    }
+
+    pub fn consent_batch_amendment(
+        env: Env,
+        caller: Address,
+        batch_id: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        batch_amend::consent_batch(&env, &caller, batch_id)
+    }
+
+    pub fn apply_batch_amendment(
+        env: Env,
+        caller: Address,
+        batch_id: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        batch_amend::apply_batch(&env, &caller, batch_id)
+    }
+
+    pub fn get_batch_amendment(
+        env: Env,
+        batch_id: u64,
+    ) -> Option<batch_amend::BatchAmendmentProposal> {
+        batch_amend::get_batch_proposal(&env, batch_id)
+    }
+
+    pub fn get_amendment_log(
+        env: Env,
+        stream_id: u64,
+    ) -> Vec<batch_amend::AmendmentRecord> {
+        batch_amend::get_amendment_log(&env, stream_id)
+    }
+
+    // ------------------------------------------------------- voting power
+    pub fn get_voting_power(env: Env, participant: Address) -> u128 {
+        voting_power::compute_voting_power(&env, &participant)
+    }
+
+    pub fn cast_community_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        support: bool,
+    ) -> Result<u128, StreamError> {
+        Self::require_not_frozen(&env)?;
+        voting_power::cast_vote(&env, &voter, proposal_id, support)
+    }
+
+    pub fn get_community_proposal_tally(
+        env: Env,
+        proposal_id: u64,
+    ) -> Option<voting_power::ProposalTally> {
+        voting_power::get_proposal_tally(&env, proposal_id)
+    }
+
+    // ------------------------------------------------------- insurance
+    pub fn file_insurance_claim(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<u64, StreamError> {
+        Self::require_not_frozen(&env)?;
+        insurance::file_claim(&env, &caller, stream_id, amount)
+    }
+
+    pub fn approve_insurance_claim(
+        env: Env,
+        caller: Address,
+        claim_id: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        insurance::approve_claim(&env, &caller, claim_id)
+    }
+
+    pub fn reject_insurance_claim(
+        env: Env,
+        caller: Address,
+        claim_id: u64,
+        reason: u32,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        insurance::reject_claim(&env, &caller, claim_id, reason)
+    }
+
+    pub fn payout_insurance_claim(
+        env: Env,
+        claim_id: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        insurance::payout_claim(&env, claim_id)
+    }
+
+    pub fn get_insurance_pool(
+        env: Env,
+        token: Address,
+    ) -> Option<insurance::InsurancePool> {
+        insurance::get_pool(&env, &token)
+    }
+
+    pub fn get_insurance_claim(
+        env: Env,
+        claim_id: u64,
+    ) -> Option<insurance::InsuranceClaim> {
+        insurance::get_claim(&env, claim_id)
+    }
+
+    pub fn set_insurance_config(
+        env: Env,
+        caller: Address,
+        config: insurance::InsuranceConfig,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        caller.require_auth();
+        insurance::set_config(&env, &config);
+        Ok(())
+    }
+
+    // ------------------------------------------------------- sender policy
+    pub fn set_sender_policy(
+        env: Env,
+        sender: Address,
+        policy: sender_policy::SenderPolicy,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        sender_policy::set_sender_policy(&env, &sender, policy)
+    }
+
+    pub fn revoke_sender_policy(
+        env: Env,
+        sender: Address,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        sender_policy::revoke_sender_policy(&env, &sender)
+    }
+
+    pub fn get_sender_policy(
+        env: Env,
+        sender: Address,
+    ) -> Option<sender_policy::SenderPolicy> {
+        sender_policy::get_sender_policy(&env, &sender)
     }
 }

@@ -1225,3 +1225,104 @@ pub struct StreamRefundTargetChanged {
     )]
     pub at_creation: bool,
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchAmendmentProposed {
+    #[topic]
+    pub batch_id: u64,
+    pub sender: Address,
+    pub stream_ids: Vec<u64>,
+    pub expires_at: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchAmendmentApplied {
+    #[topic]
+    pub batch_id: u64,
+    pub stream_ids: Vec<u64>,
+    pub effective_timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PowerAccrued {
+    #[topic]
+    pub participant: Address,
+    pub stream_id: u64,
+    pub power: u128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoteCast {
+    #[topic]
+    pub proposal_id: u64,
+    pub voter: Address,
+    pub power: u128,
+    pub support: bool,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PremiumAccrued {
+    #[topic]
+    pub token: Address,
+    pub amount: i128,
+    pub pool_balance: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimFiled {
+    #[topic]
+    pub claim_id: u64,
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimPaid {
+    #[topic]
+    pub claim_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+    pub remaining_balance: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimRejected {
+    #[topic]
+    pub claim_id: u64,
+    pub reason: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SenderPolicySet {
+    #[topic]
+    pub sender: Address,
+    pub version: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SenderPolicyRevoked {
+    #[topic]
+    pub sender: Address,
+    pub version: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyViolation {
+    #[topic]
+    pub sender: Address,
+    pub stream_id: u64,
+    pub violation_code: u32,
+}
+

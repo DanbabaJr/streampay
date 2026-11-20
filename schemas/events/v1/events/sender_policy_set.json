@@ -1,0 +1,41 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sender_policy_set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "",
+  "properties": {
+    "version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "SenderPolicySet",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sender_policy_set",
+    "fingerprint": "sha256:8d74d339202956d5afd9f19ed4b22769f4b89c7d25da0623d9fb3bba0e479dfa",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "sender",
+        "type": "Address"
+      }
+    ]
+  }
+}

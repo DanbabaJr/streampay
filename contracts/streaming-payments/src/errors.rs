@@ -759,6 +759,25 @@ pub enum StreamError {
         doc = " paused, or `resume_stream` on a stream that is not paused."
     )]
     InvalidPauseTransition = 99,
+    BatchAmendmentNotFound = 100,
+    BatchAmendmentExpired = 101,
+    BatchAmendmentThresholdNotMet = 102,
+    BatchAmendmentRecipientNotConsented = 103,
+    BatchAmendmentTooManyAmendments = 104,
+    BatchAmendmentInvalidTerms = 105,
+    BatchAmendmentStreamPaused = 106,
+    VotingPowerAlreadyVoted = 107,
+    VotingPowerInsufficient = 108,
+    VotingPowerProposalNotFound = 109,
+    InsurancePoolInsolvent = 110,
+    InsuranceClaimNotFound = 111,
+    InsuranceClaimNotApproved = 112,
+    InsuranceClaimTimelockNotElapsed = 113,
+    InsuranceCapExceeded = 114,
+    InsuranceInvalidLossProof = 115,
+    SenderPolicyViolated = 116,
+    SenderPolicyNotFound = 117,
+    SenderPolicyInvalidBounds = 118,
 }
 
 impl StreamError {
@@ -865,6 +884,25 @@ impl StreamError {
         StreamError::WithdrawBatchTooLarge,
         StreamError::WithdrawDuplicateStreamIds,
         StreamError::InvalidPauseTransition,
+        StreamError::BatchAmendmentNotFound,
+        StreamError::BatchAmendmentExpired,
+        StreamError::BatchAmendmentThresholdNotMet,
+        StreamError::BatchAmendmentRecipientNotConsented,
+        StreamError::BatchAmendmentTooManyAmendments,
+        StreamError::BatchAmendmentInvalidTerms,
+        StreamError::BatchAmendmentStreamPaused,
+        StreamError::VotingPowerAlreadyVoted,
+        StreamError::VotingPowerInsufficient,
+        StreamError::VotingPowerProposalNotFound,
+        StreamError::InsurancePoolInsolvent,
+        StreamError::InsuranceClaimNotFound,
+        StreamError::InsuranceClaimNotApproved,
+        StreamError::InsuranceClaimTimelockNotElapsed,
+        StreamError::InsuranceCapExceeded,
+        StreamError::InsuranceInvalidLossProof,
+        StreamError::SenderPolicyViolated,
+        StreamError::SenderPolicyNotFound,
+        StreamError::SenderPolicyInvalidBounds,
     ];
 
     /// The stable numeric value carried across the contract boundary

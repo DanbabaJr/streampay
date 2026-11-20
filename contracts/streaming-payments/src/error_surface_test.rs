@@ -1706,6 +1706,282 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .mock_all_auths()
                 .try_resume_stream(&f.sender, &id)))
         }
+        Branch::BatchAmendmentNotFound => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_consent_batch_amendment(&f.sender, &999)))
+        }
+        Branch::BatchAmendmentExpired => {
+            let f = Fixture::setup_quiet();
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: 1,
+                new_rate: 100,
+                new_end_time: f.env.ledger().timestamp() + DAY,
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_batch_amendment(&f.sender, &items, &1, &0)))
+        }
+        Branch::BatchAmendmentThresholdNotMet => {
+            let f = Fixture::setup_quiet();
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: 1,
+                new_rate: 100,
+                new_end_time: f.env.ledger().timestamp() + DAY,
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_batch_amendment(&f.sender, &items, &0, &(f.env.ledger().timestamp() + DAY))))
+        }
+        Branch::BatchAmendmentRecipientNotConsented => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            let now = f.env.ledger().timestamp();
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: id,
+                new_rate: 100,
+                new_end_time: now + 5 * DAY,
+            });
+            let batch_id = f
+                .client
+                .mock_all_auths()
+                .propose_batch_amendment(&f.sender, &items, &1, &(now + 2 * DAY));
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_apply_batch_amendment(&f.sender, &batch_id)))
+        }
+        Branch::BatchAmendmentTooManyAmendments => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let mut log = soroban_sdk::Vec::new(&f.env);
+            for _ in 0..20 {
+                log.push_back(crate::AmendmentRecord {
+                    old_rate: 10,
+                    new_rate: 20,
+                    old_end_time: 100,
+                    new_end_time: 200,
+                    effective_timestamp: 10,
+                });
+            }
+            f.env.as_contract(&f.client.address, || {
+                crate::batch_amend::put_amendment_log(&f.env, id, &log);
+            });
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            let now = f.env.ledger().timestamp();
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: id,
+                new_rate: 100,
+                new_end_time: now + 5 * DAY,
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_batch_amendment(&f.sender, &items, &1, &(now + DAY))))
+        }
+        Branch::BatchAmendmentInvalidTerms => {
+            let f = Fixture::setup_quiet();
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: 1,
+                new_rate: 0,
+                new_end_time: f.env.ledger().timestamp() + DAY,
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_batch_amendment(&f.sender, &items, &1, &(f.env.ledger().timestamp() + DAY))))
+        }
+        Branch::BatchAmendmentStreamPaused => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client.mock_all_auths().pause_stream(&f.sender, &id);
+            let mut items = soroban_sdk::Vec::new(&f.env);
+            let now = f.env.ledger().timestamp();
+            items.push_back(crate::BatchAmendmentItem {
+                stream_id: id,
+                new_rate: 100,
+                new_end_time: now + 5 * DAY,
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_propose_batch_amendment(&f.sender, &items, &1, &(now + DAY))))
+        }
+        Branch::VotingPowerAlreadyVoted => {
+            let f = Fixture::setup_quiet();
+            f.env.as_contract(&f.client.address, || {
+                crate::voting_power::record_stream_settlement(
+                    &f.env,
+                    &f.sender,
+                    1,
+                    DEPOSIT,
+                    10 * DAY,
+                    f.env.ledger().timestamp(),
+                );
+            });
+            f.client
+                .mock_all_auths()
+                .cast_community_vote(&f.sender, &1, &true);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_cast_community_vote(&f.sender, &1, &false)))
+        }
+        Branch::VotingPowerInsufficient => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_cast_community_vote(&f.sender, &1, &true)))
+        }
+        Branch::VotingPowerProposalNotFound => {
+            let f = Fixture::setup_quiet();
+            f.env.as_contract(&f.client.address, || {
+                crate::voting_power::record_stream_settlement(
+                    &f.env,
+                    &f.sender,
+                    1,
+                    DEPOSIT,
+                    10 * DAY,
+                    f.env.ledger().timestamp(),
+                );
+            });
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_cast_community_vote(&f.sender, &0, &true)))
+        }
+        Branch::InsurancePoolInsolvent => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            f.advance_time(2 * DAY);
+            let claim_id = f
+                .client
+                .mock_all_auths()
+                .file_insurance_claim(&f.recipient, &id, &100);
+            f.advance_time(3 * DAY);
+            f.client
+                .mock_all_auths()
+                .approve_insurance_claim(&f.governor, &claim_id);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_payout_insurance_claim(&claim_id)))
+        }
+        Branch::InsuranceClaimNotFound => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_approve_insurance_claim(&f.governor, &999)))
+        }
+        Branch::InsuranceClaimNotApproved => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            f.advance_time(2 * DAY);
+            let claim_id = f
+                .client
+                .mock_all_auths()
+                .file_insurance_claim(&f.recipient, &id, &100);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_payout_insurance_claim(&claim_id)))
+        }
+        Branch::InsuranceClaimTimelockNotElapsed => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            f.advance_time(2 * DAY);
+            let claim_id = f
+                .client
+                .mock_all_auths()
+                .file_insurance_claim(&f.recipient, &id, &100);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_approve_insurance_claim(&f.governor, &claim_id)))
+        }
+        Branch::InsuranceCapExceeded => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_file_insurance_claim(
+                &f.recipient,
+                &id,
+                &(crate::insurance::DEFAULT_MAX_PAYOUT_PER_INCIDENT + 1)
+            )))
+        }
+        Branch::InsuranceInvalidLossProof => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_file_insurance_claim(&f.recipient, &id, &100)))
+        }
+        Branch::SenderPolicyViolated => {
+            let f = Fixture::setup_quiet();
+            f.client.mock_all_auths().set_sender_policy(
+                &f.sender,
+                &crate::SenderPolicy {
+                    version: 1,
+                    allowed_tokens: None,
+                    max_deposit_per_stream: Some(100),
+                    max_rate_per_second: None,
+                    max_duration_seconds: None,
+                    max_outflow_per_epoch: None,
+                    epoch_duration_seconds: 0,
+                    current_epoch_outflow: 0,
+                    epoch_start_time: 0,
+                    recipient_whitelist: None,
+                    max_per_recipient_cap: None,
+                },
+            );
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_create_stream(
+                &f.sender,
+                &f.recipient,
+                &f.token,
+                &200,
+                &(now + DAY),
+                &(now + 2 * DAY),
+                &false
+            )))
+        }
+        Branch::SenderPolicyNotFound => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_revoke_sender_policy(&f.sender)))
+        }
+        Branch::SenderPolicyInvalidBounds => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f.client.mock_all_auths().try_set_sender_policy(
+                &f.sender,
+                &crate::SenderPolicy {
+                    version: 1,
+                    allowed_tokens: None,
+                    max_deposit_per_stream: Some(0),
+                    max_rate_per_second: None,
+                    max_duration_seconds: None,
+                    max_outflow_per_epoch: None,
+                    epoch_duration_seconds: 0,
+                    current_epoch_outflow: 0,
+                    epoch_start_time: 0,
+                    recipient_whitelist: None,
+                    max_per_recipient_cap: None,
+                }
+            )))
+        }
     }
 }
 
@@ -1914,7 +2190,26 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::RefundTargetUnchanged
             | StreamError::WithdrawBatchEmpty
             | StreamError::WithdrawBatchTooLarge
-            | StreamError::WithdrawDuplicateStreamIds => StreamError::ALL.contains(&e),
+            | StreamError::WithdrawDuplicateStreamIds
+            | StreamError::BatchAmendmentNotFound
+            | StreamError::BatchAmendmentExpired
+            | StreamError::BatchAmendmentThresholdNotMet
+            | StreamError::BatchAmendmentRecipientNotConsented
+            | StreamError::BatchAmendmentTooManyAmendments
+            | StreamError::BatchAmendmentInvalidTerms
+            | StreamError::BatchAmendmentStreamPaused
+            | StreamError::VotingPowerAlreadyVoted
+            | StreamError::VotingPowerInsufficient
+            | StreamError::VotingPowerProposalNotFound
+            | StreamError::InsurancePoolInsolvent
+            | StreamError::InsuranceClaimNotFound
+            | StreamError::InsuranceClaimNotApproved
+            | StreamError::InsuranceClaimTimelockNotElapsed
+            | StreamError::InsuranceCapExceeded
+            | StreamError::InsuranceInvalidLossProof
+            | StreamError::SenderPolicyViolated
+            | StreamError::SenderPolicyNotFound
+            | StreamError::SenderPolicyInvalidBounds => StreamError::ALL.contains(&e),
         }
     }
 

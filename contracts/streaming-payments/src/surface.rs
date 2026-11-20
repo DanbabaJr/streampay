@@ -332,13 +332,36 @@ pub enum Branch {
     PauseAlreadyPaused,
     /// `resume_stream`: the stream is not paused.
     ResumeNotPaused,
+    // ------------------------------------------------------- batch amendments
+    BatchAmendmentNotFound,
+    BatchAmendmentExpired,
+    BatchAmendmentThresholdNotMet,
+    BatchAmendmentRecipientNotConsented,
+    BatchAmendmentTooManyAmendments,
+    BatchAmendmentInvalidTerms,
+    BatchAmendmentStreamPaused,
+    // ------------------------------------------------------- voting power
+    VotingPowerAlreadyVoted,
+    VotingPowerInsufficient,
+    VotingPowerProposalNotFound,
+    // ------------------------------------------------------- insurance
+    InsurancePoolInsolvent,
+    InsuranceClaimNotFound,
+    InsuranceClaimNotApproved,
+    InsuranceClaimTimelockNotElapsed,
+    InsuranceCapExceeded,
+    InsuranceInvalidLossProof,
+    // ------------------------------------------------------- sender policy
+    SenderPolicyViolated,
+    SenderPolicyNotFound,
+    SenderPolicyInvalidBounds,
 }
 
 impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 133] = [
+    pub const ALL: [Branch; 152] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -472,6 +495,25 @@ impl Branch {
         Branch::PauseNotAuthorized,
         Branch::PauseAlreadyPaused,
         Branch::ResumeNotPaused,
+        Branch::BatchAmendmentNotFound,
+        Branch::BatchAmendmentExpired,
+        Branch::BatchAmendmentThresholdNotMet,
+        Branch::BatchAmendmentRecipientNotConsented,
+        Branch::BatchAmendmentTooManyAmendments,
+        Branch::BatchAmendmentInvalidTerms,
+        Branch::BatchAmendmentStreamPaused,
+        Branch::VotingPowerAlreadyVoted,
+        Branch::VotingPowerInsufficient,
+        Branch::VotingPowerProposalNotFound,
+        Branch::InsurancePoolInsolvent,
+        Branch::InsuranceClaimNotFound,
+        Branch::InsuranceClaimNotApproved,
+        Branch::InsuranceClaimTimelockNotElapsed,
+        Branch::InsuranceCapExceeded,
+        Branch::InsuranceInvalidLossProof,
+        Branch::SenderPolicyViolated,
+        Branch::SenderPolicyNotFound,
+        Branch::SenderPolicyInvalidBounds,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -761,6 +803,38 @@ impl Branch {
             Branch::PauseNotAuthorized => &["pause_stream", "resume_stream"],
             Branch::PauseAlreadyPaused => &["pause_stream"],
             Branch::ResumeNotPaused => &["resume_stream"],
+            Branch::BatchAmendmentNotFound
+            | Branch::BatchAmendmentExpired
+            | Branch::BatchAmendmentThresholdNotMet
+            | Branch::BatchAmendmentRecipientNotConsented
+            | Branch::BatchAmendmentTooManyAmendments
+            | Branch::BatchAmendmentInvalidTerms
+            | Branch::BatchAmendmentStreamPaused => &[
+                "propose_batch_amendment",
+                "consent_batch_amendment",
+                "apply_batch_amendment",
+            ],
+            Branch::VotingPowerAlreadyVoted
+            | Branch::VotingPowerInsufficient
+            | Branch::VotingPowerProposalNotFound => &["cast_community_vote"],
+            Branch::InsurancePoolInsolvent
+            | Branch::InsuranceClaimNotFound
+            | Branch::InsuranceClaimNotApproved
+            | Branch::InsuranceClaimTimelockNotElapsed
+            | Branch::InsuranceCapExceeded
+            | Branch::InsuranceInvalidLossProof => &[
+                "file_insurance_claim",
+                "approve_insurance_claim",
+                "reject_insurance_claim",
+                "payout_insurance_claim",
+            ],
+            Branch::SenderPolicyViolated
+            | Branch::SenderPolicyNotFound
+            | Branch::SenderPolicyInvalidBounds => &[
+                "set_sender_policy",
+                "revoke_sender_policy",
+                "create_stream",
+            ],
             Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
             Branch::RateCancelNotProposer => &["cancel_rate_change"],
             Branch::RateSegmentSumOverflow => &[
@@ -942,6 +1016,31 @@ impl Branch {
             Branch::WithdrawManyDuplicateIds => StreamError::WithdrawDuplicateStreamIds,
             Branch::WithdrawManyNotStreamRecipient => StreamError::NotAuthorized,
             Branch::WithdrawManyTotalOverflow => StreamError::MathOverflow,
+            Branch::BatchAmendmentNotFound => StreamError::BatchAmendmentNotFound,
+            Branch::BatchAmendmentExpired => StreamError::BatchAmendmentExpired,
+            Branch::BatchAmendmentThresholdNotMet => StreamError::BatchAmendmentThresholdNotMet,
+            Branch::BatchAmendmentRecipientNotConsented => {
+                StreamError::BatchAmendmentRecipientNotConsented
+            }
+            Branch::BatchAmendmentTooManyAmendments => {
+                StreamError::BatchAmendmentTooManyAmendments
+            }
+            Branch::BatchAmendmentInvalidTerms => StreamError::BatchAmendmentInvalidTerms,
+            Branch::BatchAmendmentStreamPaused => StreamError::BatchAmendmentStreamPaused,
+            Branch::VotingPowerAlreadyVoted => StreamError::VotingPowerAlreadyVoted,
+            Branch::VotingPowerInsufficient => StreamError::VotingPowerInsufficient,
+            Branch::VotingPowerProposalNotFound => StreamError::VotingPowerProposalNotFound,
+            Branch::InsurancePoolInsolvent => StreamError::InsurancePoolInsolvent,
+            Branch::InsuranceClaimNotFound => StreamError::InsuranceClaimNotFound,
+            Branch::InsuranceClaimNotApproved => StreamError::InsuranceClaimNotApproved,
+            Branch::InsuranceClaimTimelockNotElapsed => {
+                StreamError::InsuranceClaimTimelockNotElapsed
+            }
+            Branch::InsuranceCapExceeded => StreamError::InsuranceCapExceeded,
+            Branch::InsuranceInvalidLossProof => StreamError::InsuranceInvalidLossProof,
+            Branch::SenderPolicyViolated => StreamError::SenderPolicyViolated,
+            Branch::SenderPolicyNotFound => StreamError::SenderPolicyNotFound,
+            Branch::SenderPolicyInvalidBounds => StreamError::SenderPolicyInvalidBounds,
         }
     }
 
@@ -1228,6 +1327,25 @@ impl Branch {
             Branch::WithdrawManyTotalOverflow => {
                 "summing the batch's per-stream payouts into the summary total would overflow"
             }
+            Branch::BatchAmendmentNotFound => "batch amendment proposal does not exist",
+            Branch::BatchAmendmentExpired => "batch amendment proposal has expired or stream window elapsed",
+            Branch::BatchAmendmentThresholdNotMet => "sender multisig threshold not satisfied",
+            Branch::BatchAmendmentRecipientNotConsented => "one or more stream recipients have not consented",
+            Branch::BatchAmendmentTooManyAmendments => "stream has reached MAX_AMENDMENTS limit",
+            Branch::BatchAmendmentInvalidTerms => "amendment rate is non-positive or end time is in the past",
+            Branch::BatchAmendmentStreamPaused => "stream is paused and cannot be amended",
+            Branch::VotingPowerAlreadyVoted => "participant has already voted on this governance proposal",
+            Branch::VotingPowerInsufficient => "participant has zero accrued voting power",
+            Branch::VotingPowerProposalNotFound => "governance proposal not found for voting",
+            Branch::InsurancePoolInsolvent => "insurance pool liabilities exceed available assets",
+            Branch::InsuranceClaimNotFound => "insurance claim does not exist",
+            Branch::InsuranceClaimNotApproved => "insurance claim has not been approved by governance",
+            Branch::InsuranceClaimTimelockNotElapsed => "claim veto timelock window has not elapsed",
+            Branch::InsuranceCapExceeded => "claim amount exceeds per-incident or per-epoch insurance caps",
+            Branch::InsuranceInvalidLossProof => "stream has not defaulted or suffered verified loss",
+            Branch::SenderPolicyViolated => "operation violates smart-wallet sender spending policy",
+            Branch::SenderPolicyNotFound => "sender does not have an active spending policy",
+            Branch::SenderPolicyInvalidBounds => "sender policy bounds are non-positive or invalid",
         }
     }
 

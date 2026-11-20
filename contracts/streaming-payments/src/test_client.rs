@@ -309,4 +309,95 @@ pub trait StreamingPaymentsApi {
     fn governance_veto_window(env: Env) -> u64;
     fn governance_proposal(env: Env, proposal_id: u64) -> Option<Proposal>;
     fn governance_proposal_count(env: Env) -> u64;
+
+    // ------------------------------------------------------- batch amendments
+    fn propose_batch_amendment(
+        env: Env,
+        caller: Address,
+        items: Vec<crate::BatchAmendmentItem>,
+        threshold: u32,
+        expires_at: u64,
+    ) -> Result<u64, StreamError>;
+    fn consent_batch_amendment(
+        env: Env,
+        caller: Address,
+        batch_id: u64,
+    ) -> Result<(), StreamError>;
+    fn apply_batch_amendment(
+        env: Env,
+        caller: Address,
+        batch_id: u64,
+    ) -> Result<(), StreamError>;
+    fn get_batch_amendment(
+        env: Env,
+        batch_id: u64,
+    ) -> Option<crate::BatchAmendmentProposal>;
+    fn get_amendment_log(
+        env: Env,
+        stream_id: u64,
+    ) -> Vec<crate::AmendmentRecord>;
+
+    // ------------------------------------------------------- voting power
+    fn get_voting_power(env: Env, participant: Address) -> u128;
+    fn cast_community_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        support: bool,
+    ) -> Result<u128, StreamError>;
+    fn get_community_proposal_tally(
+        env: Env,
+        proposal_id: u64,
+    ) -> Option<crate::ProposalTally>;
+
+    // ------------------------------------------------------- insurance
+    fn file_insurance_claim(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<u64, StreamError>;
+    fn approve_insurance_claim(
+        env: Env,
+        caller: Address,
+        claim_id: u64,
+    ) -> Result<(), StreamError>;
+    fn reject_insurance_claim(
+        env: Env,
+        caller: Address,
+        claim_id: u64,
+        reason: u32,
+    ) -> Result<(), StreamError>;
+    fn payout_insurance_claim(
+        env: Env,
+        claim_id: u64,
+    ) -> Result<(), StreamError>;
+    fn get_insurance_pool(
+        env: Env,
+        token: Address,
+    ) -> Option<crate::InsurancePool>;
+    fn get_insurance_claim(
+        env: Env,
+        claim_id: u64,
+    ) -> Option<crate::InsuranceClaim>;
+    fn set_insurance_config(
+        env: Env,
+        caller: Address,
+        config: crate::InsuranceConfig,
+    ) -> Result<(), StreamError>;
+
+    // ------------------------------------------------------- sender policy
+    fn set_sender_policy(
+        env: Env,
+        sender: Address,
+        policy: crate::SenderPolicy,
+    ) -> Result<(), StreamError>;
+    fn revoke_sender_policy(
+        env: Env,
+        sender: Address,
+    ) -> Result<(), StreamError>;
+    fn get_sender_policy(
+        env: Env,
+        sender: Address,
+    ) -> Option<crate::SenderPolicy>;
 }
