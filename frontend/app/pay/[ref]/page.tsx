@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet-context";
 import WalletModal from "@/components/WalletModal";
+import PaymentShareActions from "@/components/PaymentShareActions";
 import {
   readPaymentLinkAction,
   PaymentLinkResolution,
@@ -472,6 +473,10 @@ export default function PaymentLinkPage({
             {t("pay.note")}
           </p>
         </div>
+      </div>
+
+      <div className="max-w-xl mx-auto w-full mt-6">
+        <PaymentShareActions refValue={ref} />
       </div>
 
       <footer className="max-w-2xl mx-auto w-full text-center py-6 text-xs text-neutral-500 border-t border-neutral-900 mt-8">

@@ -46,6 +46,8 @@ import { useWallet } from "@/lib/wallet-context";
 import { validateWithdrawal } from "@/lib/withdrawal";
 import { formatAmount } from "@/lib/format";
 import DiscoveryConsentModal from "@/components/DiscoveryConsentModal";
+import PaymentShareActions from "@/components/PaymentShareActions";
+import { encodePaymentLinkRef } from "@/lib/payment-link";
 import { StreamDetailSkeleton } from "@/components/skeletons/StreamDetailSkeleton";
 
 export default function StreamDetail() {
@@ -70,6 +72,7 @@ export default function StreamDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [discoveryModalOpen, setDiscoveryModalOpen] = useState<boolean>(false);
   const [refundTarget, setRefundTarget] = useState<string | null>(null);
+  const [shareRef, setShareRef] = useState<string | null>(null);
 
   // Separate, non-fatal read: the routing only annotates the cancel card.
   useEffect(() => {
@@ -196,6 +199,28 @@ export default function StreamDetail() {
   // Fee-aware claim scheduling is scoped to the connected wallet; the hook is
   // inert until an address is available.
   const scheduler = useClaimScheduler(address);
+
+  // One reference per stream view: the salt is random, so regenerating on
+  // every live-accrual tick would change the QR payload under the user.
+  const shareStreamId = stream?.id;
+  const shareRecipient = stream?.recipient;
+  useEffect(() => {
+    if (!shareStreamId || !shareRecipient) return;
+    let active = true;
+    void encodePaymentLinkRef({
+      streamId: shareStreamId,
+      recipient: shareRecipient,
+    })
+      .then((ref) => {
+        if (active) setShareRef(ref);
+      })
+      .catch(() => {
+        if (active) setShareRef(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [shareStreamId, shareRecipient]);
 
   if (loadError && !stream) {
     return (
@@ -669,27 +694,14 @@ export default function StreamDetail() {
       <section className="card">
         <h2>Shareable Payment Link</h2>
         <p className="muted">
-          Generate a deterministic, privacy-blinded claim URL for this stream. The recipient can claim without logging in first.
+          A deterministic, privacy-blinded claim URL for this stream. Scan the
+          QR code or copy the link; the reference never leaves your browser.
         </p>
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              const { encodePaymentLinkRef } = await import("@/lib/payment-link");
-              const ref = await encodePaymentLinkRef({
-                streamId: stream.id,
-                recipient: stream.recipient,
-              });
-              const url = `${window.location.origin}/pay/${ref}`;
-              await navigator.clipboard.writeText(url);
-              toast.success("Payment link copied to clipboard!");
-            } catch (err: unknown) {
-              toast.error(`Failed to copy payment link: ${String(err)}`);
-            }
-          }}
-        >
-          Copy Shareable Payment Link
-        </button>
+        {shareRef ? (
+          <PaymentShareActions refValue={shareRef} showHeading={false} />
+        ) : (
+          <p className="muted">Generating payment link…</p>
+        )}
       </section>
 
       <p style={{ display: "flex", gap: "16px" }}>
