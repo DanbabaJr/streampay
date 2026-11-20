@@ -180,3 +180,34 @@ groups:
           description: "Total outbox depth crossed the configured OUTBOX_MAX_DEPTH threshold; dispatch is paused to protect the downstream. Intents remain durable in pending state."
           runbook_url: "docs/RUNBOOK.md#indexeroutboxbackpressured"
           soak_justification: "Backpressure only engages when a downstream consumer is degraded faster than the ~2,900 intents/sec drain capacity; any activation is actionable."
+
+      - alert: OutboxWebhookDestinationSuccessLow
+        expr: |
+          (
+            sum by (destination) (rate(streampay_outbox_delivery_total{outcome="delivered"}[5m]))
+            /
+            clamp_min(sum by (destination) (rate(streampay_outbox_delivery_total{outcome=~"delivered|retry|dead|stale"}[5m])), 0.001)
+          ) < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          service: indexer
+          component: webhook
+        annotations:
+          summary: "Webhook delivery success below 95% for destination {{ $labels.destination }}"
+          description: "Destination '{{ $labels.destination }}' delivered only {{ $value | printf \"%.2f\" }}% of attempts in the last 5m sustained over 10m. Inspect that endpoint's health and its dead-letter backlog via GET /api/outbox/intents?state=dead."
+          runbook_url: "docs/WEBHOOKS.md#delivery-failures-and-retries"
+          soak_justification: "Healthy endpoints drain at ~2,900 intents/sec with a 100% success share; a destination pinned under 95% for 10m is a single consumer failing its retry budget, not a global dispatcher stall."
+
+      - alert: OutboxWebhookDestinationDeadLettering
+        expr: sum by (destination) (increase(streampay_outbox_delivery_total{outcome="dead"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: indexer
+          component: webhook
+        annotations:
+          summary: "Destination {{ $labels.destination }} is dead-lettering webhooks"
+          description: "{{ $value | printf \"%.0f\" }} deliveries to '{{ $labels.destination }}' dead-lettered in the last 15m. That endpoint exhausted its retry budget; replay from the DLQ via POST /api/webhooks/dlq/:id/retry."
+          runbook_url: "docs/WEBHOOKS.md#dead-letter-queue"
+          soak_justification: "Load/soak runs dead-letter zero intents for live endpoints; a sustained nonzero DLQ rate per destination is always a real consumer failure."

@@ -285,6 +285,13 @@ Significant architectural choices, invariants, or storage/tooling changes are do
   node scripts/check-adrs.mjs
   ```
 
+## Wave contributors
+
+Working on an issue labelled **Stellar Wave** (Drips Wave program)? Assignment is
+required before you start; [`docs/WAVE_CONTRIBUTORS.md`](./docs/WAVE_CONTRIBUTORS.md)
+explains the flow from claim to resolution and maps each CI job to its local
+command.
+
 ## Good first issues
 
 See [`docs/GOOD_FIRST_ISSUES.md`](./docs/GOOD_FIRST_ISSUES.md) — each ticket has

@@ -8,7 +8,7 @@ _streampay() {
   for ((i = 1; i < COMP_CWORD; i++)); do
     w="${COMP_WORDS[i]}"
     case "$w" in
-      --contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out) ((i++)); continue ;;
+      --contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--profile|--config|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out|--unset) ((i++)); continue ;;
       -*) continue ;;
     esac
     if [[ -z "$cmd" ]]; then cmd="$w"; elif [[ -z "$sub" ]]; then sub="$w"; fi
@@ -17,15 +17,15 @@ _streampay() {
   case "$prev" in
     --network) COMPREPLY=($(compgen -W "testnet mainnet" -- "$cur")); return 0 ;;
     --signer) COMPREPLY=($(compgen -W "env file ledger" -- "$cur")); return 0 ;;
-    --key-file|--signed-xdr|--out) COMPREPLY=($(compgen -f -- "$cur")); return 0 ;;
-    --contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval) return 0 ;;
+    --key-file|--signed-xdr|--config|--out) COMPREPLY=($(compgen -f -- "$cur")); return 0 ;;
+    --contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--profile|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--unset) return 0 ;;
   esac
 
-  opts="--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --json --help"
+  opts="--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --profile --config --json --help"
   case "$cmd" in
     "")
       if [[ "$cur" != -* ]]; then
-        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all status get key completion help" -- "$cur"))
+        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all status get key profile completion help" -- "$cur"))
         return 0
       fi
       ;;
@@ -43,6 +43,20 @@ _streampay() {
       fi
       case "$sub" in
         encrypt) opts="$opts --out --force" ;;
+      esac
+      ;;
+    profile)
+      if [[ -z "$sub" && "$cur" != -* ]]; then
+        COMPREPLY=($(compgen -W "list show set remove use resolve" -- "$cur"))
+        return 0
+      fi
+      case "$sub" in
+        list) opts="$opts " ;;
+        show) opts="$opts " ;;
+        set) opts="$opts --unset" ;;
+        remove) opts="$opts " ;;
+        use) opts="$opts " ;;
+        resolve) opts="$opts " ;;
       esac
       ;;
     completion)
