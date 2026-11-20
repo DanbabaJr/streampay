@@ -15,10 +15,30 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
+import { completionScript, isCompletionShell } from "./completion.ts";
+import {
+  COMPLETION_SHELLS,
+  NETWORKS,
+  READ_COMMANDS,
+  SIGNER_MODES,
+  TRANSACTION_COMMANDS,
+  booleanFlags as registryBooleanFlags,
+} from "./registry.ts";
+import {
+  decodeStreamState,
+  type NetworkLabel,
+  type StreamCommand,
+  type StreamState,
+} from "./state.ts";
+import {
+  DEFAULT_WATCH_INTERVAL_MS,
+  MIN_WATCH_INTERVAL_MS,
+  watchStream,
+} from "./watch.ts";
 import { durationSecondsFromDays } from "../../../scripts/lib/duration.ts";
 
 type OutputMode = "json" | "text";
-type SignerMode = "env" | "file" | "ledger";
+type SignerMode = (typeof SIGNER_MODES)[number];
 
 interface Options {
   command: string;
@@ -27,6 +47,7 @@ interface Options {
   flags: Set<string>;
   json: boolean;
   dryRun: boolean;
+  watch: boolean;
 }
 
 interface BalanceChange {
@@ -83,7 +104,9 @@ const MAX_CLAIM_OPERATIONS_PER_TX = 50;
 function usage(): string {
   return `Usage:
   streampay [global options] <create|withdraw|cancel|top-up|claim-all> [options]
+  streampay [global options] <status|get> --stream-id <n> [--watch] [options]
   streampay key encrypt --out <file> [--secret-env <name>] [--password-env <name>]
+  streampay completion <bash|zsh|fish>
 
 Global options:
   --contract <C...>       StreamPay contract id
@@ -102,6 +125,17 @@ Commands:
   cancel --stream-id <n>
   top-up --stream-id <n> --amount <units>
   claim-all
+  status, get             Read and print one decoded stream snapshot
+    --stream-id <n>       Stream id (required)
+    --watch               Poll and emit JSON Lines, one line per state change
+    --interval <ms>       Watch poll interval in milliseconds
+                          (default: ${DEFAULT_WATCH_INTERVAL_MS}; minimum: ${MIN_WATCH_INTERVAL_MS})
+
+Watch mode always emits JSON Lines, even without --json. It prints a baseline
+line on the first successful poll, nothing for unchanged polls, and a final
+summary line on SIGINT. The change key is the decoded stream state from
+get_stream (id, parties, token, amounts, window, cancelable, status); RPC
+metadata such as the latest ledger is ignored.
 
 The --signer ledger mode prints unsigned transaction XDR. Sign that exact XDR
 with a Stellar hardware wallet, then pass the signed XDR using --signed-xdr.`;
@@ -109,13 +143,13 @@ with a Stellar hardware wallet, then pass the signed XDR using --signed-xdr.`;
 
 function parseArgs(argv: string[]): Options {
   if (argv.length === 0) {
-    return { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false };
+    return { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false, watch: false };
   }
 
   const values = new Map<string, string>();
   const flags = new Set<string>();
   const positional: string[] = [];
-  const booleanFlags = new Set(["--json", "--dry-run", "--cancelable", "--force", "--help"]);
+  const booleanFlags = registryBooleanFlags();
   let wantsHelp = argv.includes("-h");
   for (let index = 0; index < argv.length; index += 1) {
     const part = argv[index];
@@ -137,7 +171,7 @@ function parseArgs(argv: string[]): Options {
     index += 1;
   }
   const command = wantsHelp ? "help" : positional[0] ?? "help";
-  const subcommand = command === "key" ? positional[1] : undefined;
+  const subcommand = command === "key" || command === "completion" ? positional[1] : undefined;
   return {
     command,
     subcommand,
@@ -145,6 +179,7 @@ function parseArgs(argv: string[]): Options {
     flags,
     json: flags.has("--json"),
     dryRun: flags.has("--dry-run"),
+    watch: flags.has("--watch"),
   };
 }
 
@@ -173,9 +208,22 @@ function parsePositiveInteger(value: string, label: string): bigint {
   return BigInt(value);
 }
 
+function parseInterval(options: Options): number {
+  const raw = getOption(options, "interval");
+  if (raw === undefined) return DEFAULT_WATCH_INTERVAL_MS;
+  if (!/^[0-9]+$/.test(raw) || Number(raw) < MIN_WATCH_INTERVAL_MS) {
+    throw new CliError(
+      `--interval must be an integer number of milliseconds >= ${MIN_WATCH_INTERVAL_MS}`,
+      "USAGE",
+      2
+    );
+  }
+  return Number(raw);
+}
+
 function networkConfig(options: Options): { passphrase: string; rpcUrl: string; label: string } {
   const network = getOption(options, "network") ?? "testnet";
-  if (network !== "testnet" && network !== "mainnet") {
+  if (!(NETWORKS as readonly string[]).includes(network)) {
     throw new CliError("--network must be testnet or mainnet", "USAGE", 2);
   }
   const passphrase = getOption(options, "passphrase") ??
@@ -389,6 +437,102 @@ async function readStream(
   return result as Record<string, unknown>;
 }
 
+function createServer(rpcUrl: string): rpc.Server {
+  // `allowHttp` is required by the SDK for local mock/dev RPC endpoints.
+  return new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+}
+
+async function readStreamState(
+  server: rpc.Server,
+  contractId: string,
+  passphrase: string,
+  streamId: string
+): Promise<StreamState> {
+  const native = await simulateRead(server, contractId, passphrase, "get_stream", [
+    scInteger(BigInt(streamId), "u64"),
+  ]);
+  try {
+    return decodeStreamState(native);
+  } catch (error) {
+    throw new CliError(`could not decode get_stream result: ${errorMessage(error)}`, "SIMULATION", 4);
+  }
+}
+
+function snapshotRecord(
+  command: StreamCommand,
+  network: NetworkLabel,
+  contract: string,
+  stream: StreamState
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    ok: true,
+    command,
+    network,
+    contract,
+    stream,
+  };
+}
+
+function printText(stream: StreamState): void {
+  console.log(`Stream #${stream.id}: ${stream.status}`);
+  console.log(`  sender:     ${stream.sender}`);
+  console.log(`  recipient:  ${stream.recipient}`);
+  console.log(`  token:      ${stream.token}`);
+  console.log(`  deposit:    ${stream.deposit}`);
+  console.log(`  withdrawn:  ${stream.withdrawn}`);
+  console.log(`  start:      ${stream.startTime}`);
+  console.log(`  end:        ${stream.endTime}`);
+  console.log(`  cancelable: ${stream.cancelable}`);
+}
+
+/** Resolves once buffered stdout writes have flushed (SIGINT path). */
+function flushStdout(): Promise<void> {
+  if (process.stdout.writableLength === 0) return Promise.resolve();
+  return new Promise((resolve) => process.stdout.write("", () => resolve()));
+}
+
+async function runReadCommand(
+  options: Options
+): Promise<{ value: Record<string, unknown>; exitCode: number }> {
+  const command = options.command as StreamCommand;
+  const contractId = parseAddress(required(options, "contract"), "contract");
+  const streamId = parsePositiveInteger(required(options, "stream-id"), "stream-id").toString();
+  const network = networkConfig(options);
+  const intervalMs = parseInterval(options);
+  const server = createServer(network.rpcUrl);
+  const read = () => readStreamState(server, contractId, network.passphrase, streamId);
+
+  if (options.watch) {
+    const controller = new AbortController();
+    const onSigint = () => controller.abort();
+    process.once("SIGINT", onSigint);
+    try {
+      await watchStream({
+        command,
+        network: network.label as NetworkLabel,
+        contract: contractId,
+        intervalMs,
+        readStream: read,
+        writeLine: (line) => console.log(JSON.stringify(line)),
+        signal: controller.signal,
+      });
+    } finally {
+      process.removeListener("SIGINT", onSigint);
+    }
+    // Flush the summary before exiting; a still-pending RPC socket must not
+    // keep the process alive after the operator pressed Ctrl-C.
+    await flushStdout();
+    process.exit(0);
+  }
+
+  const stream = await read();
+  return {
+    value: snapshotRecord(command, network.label as NetworkLabel, contractId, stream),
+    exitCode: 0,
+  };
+}
+
 async function prepareBatch(
   server: rpc.Server,
   passphrase: string,
@@ -551,6 +695,15 @@ async function resolveOptionsAndRun(options: Options): Promise<{ value: Record<s
   if (options.command === "help") {
     return { value: { schemaVersion: 1, ok: true, help: usage() }, exitCode: 0 };
   }
+  if (options.command === "completion") {
+    if (options.json) {
+      throw new CliError("completion prints a shell script; drop --json", "USAGE", 2);
+    }
+    if (!isCompletionShell(options.subcommand)) {
+      throw new CliError(`completion needs a shell: ${COMPLETION_SHELLS.join(", ")}`, "USAGE", 2);
+    }
+    return { value: { script: completionScript(options.subcommand) }, exitCode: 0 };
+  }
   if (options.command === "key" && options.subcommand === "encrypt") {
     const output = required(options, "out");
     const secretEnv = getOption(options, "secret-env") ?? "STREAMPAY_SECRET_KEY";
@@ -572,14 +725,17 @@ async function resolveOptionsAndRun(options: Options): Promise<{ value: Record<s
     }
     return { value: { schemaVersion: 1, ok: true, command: "key encrypt", keyFile: output }, exitCode: 0 };
   }
-  if (!["create", "withdraw", "cancel", "top-up", "claim-all"].includes(options.command)) {
+  if (READ_COMMANDS.includes(options.command)) {
+    return await runReadCommand(options);
+  }
+  if (!TRANSACTION_COMMANDS.includes(options.command)) {
     throw new CliError(`unknown command: ${options.command}`, "USAGE", 2);
   }
 
   const contractId = parseAddress(required(options, "contract"), "contract");
   const network = networkConfig(options);
   const signerMode = (getOption(options, "signer") ?? (options.dryRun ? "ledger" : "env")) as SignerMode;
-  if (!["env", "file", "ledger"].includes(signerMode)) {
+  if (!(SIGNER_MODES as readonly string[]).includes(signerMode)) {
     throw new CliError("--signer must be env, file, or ledger", "USAGE", 2);
   }
   const signer = readSecret(signerMode, options);
@@ -744,8 +900,16 @@ function printResult(value: Record<string, unknown>, mode: OutputMode): void {
     console.log(String(value.help));
     return;
   }
+  if (typeof value.script === "string") {
+    process.stdout.write(value.script);
+    return;
+  }
   if (value.command === "key encrypt") {
     console.log(`Encrypted signer key written to ${String(value.keyFile)}`);
+    return;
+  }
+  if (value.stream) {
+    printText(value.stream as StreamState);
     return;
   }
   console.log(`StreamPay ${String(value.command)}: ${String(value.status)}`);
@@ -767,7 +931,7 @@ function printResult(value: Record<string, unknown>, mode: OutputMode): void {
 }
 
 async function main(): Promise<void> {
-  let options: Options = { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false };
+  let options: Options = { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false, watch: false };
   try {
     options = parseArgs(process.argv.slice(2));
     const result = await resolveOptionsAndRun(options);
@@ -777,7 +941,7 @@ async function main(): Promise<void> {
     const failure = error instanceof CliError
       ? error
       : new CliError(errorMessage(error), "RPC", 1);
-    if (options.json || process.argv.includes("--json")) {
+    if (options.json || options.watch || process.argv.includes("--json")) {
       console.log(JSON.stringify({
         schemaVersion: 1,
         ok: false,
