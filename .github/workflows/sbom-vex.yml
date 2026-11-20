@@ -1,0 +1,395 @@
+name: SBOM + VEX
+
+# Issue #612. Dependency *audits* already exist (cargo-deny in ci.yml, `npm audit`
+# in the frontend/indexer jobs, the supply-chain job). What is missing is a
+# per-artifact bill of materials and a machine-readable statement of what we
+# decided about each advisory — so "we know about it" is recorded as
+# affected / not_affected / fixed with an owner and an expiry, instead of a
+# comment next to an ignore rule.
+#
+# Two jobs:
+#   gate    — generates a CycloneDX SBOM per published artifact, normalises the
+#             three advisory sources, and runs scripts/sbom_vex.py, which fails
+#             on an unreviewed critical/high advisory, on a drift between the
+#             SBOMs and the lockfiles, and on any VEX entry that is expired,
+#             unexplained or written for a different version.
+#   publish — on a release tag only: signs the SBOMs and the index keylessly and
+#             attaches them to the release, so the inventory behind a binary can
+#             be verified the same way the binary can.
+#
+# The gate's own self-tests run here too: tests/sbom_vex_test.py injects
+# advisories and drift and requires a block for each.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "contracts/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "deny.toml"
+      - "frontend/package-lock.json"
+      - "indexer/package-lock.json"
+      - "sdks/**"
+      - "tools/streampay-cli/**"
+      - "infra/docker/**"
+      - "security/vex/**"
+      - "scripts/sbom_vex.py"
+      - "tests/sbom_vex_test.py"
+      - ".github/workflows/sbom-vex.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "deny.toml"
+      - "frontend/package-lock.json"
+      - "indexer/package-lock.json"
+      - "sdks/**"
+      - "tools/streampay-cli/**"
+      - "infra/docker/**"
+      - "security/vex/**"
+      - "scripts/sbom_vex.py"
+      - "tests/sbom_vex_test.py"
+      - ".github/workflows/sbom-vex.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CYCLONEDX_SPEC: "1.5"
+
+jobs:
+  gate:
+    name: SBOM + VEX gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-sbom-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-sbom-
+
+      # Pin must stay in sync with ci.yml / release.yml / devcontainer.json: the
+      # artifact this gate binds SBOMs to is the one that build path produces.
+      - name: Install stellar-cli v28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo install stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Install cargo-cyclonedx
+        run: |
+          if ! command -v cargo-cyclonedx >/dev/null 2>&1; then
+            cargo install cargo-cyclonedx --locked
+          fi
+          cargo cyclonedx --version
+
+      - name: Build the contract Wasm (the artifact the SBOMs describe)
+        working-directory: contracts/streaming-payments
+        run: stellar contract build
+
+      # ── SBOMs, one per published artifact ────────────────────────────────
+      - name: Rust SBOM (contract crate, from Cargo.lock)
+        run: |
+          set -eu
+          mkdir -p sbom/rust
+          cargo cyclonedx --format json --spec-version "$CYCLONEDX_SPEC" \
+            --output-pattern package --all
+          wasm_sbom=contracts/streaming-payments/streampay-contract.cdx.json
+          [ -f "$wasm_sbom" ] || { echo "::error::cargo-cyclonedx produced no $wasm_sbom"; exit 1; }
+          mv "$wasm_sbom" sbom/rust/streampay-contract.cdx.json
+
+      # `--package-lock-only`: the SBOM is derived from the lockfile, so it
+      # describes what `npm ci` resolves without installing node_modules again.
+      - name: npm SBOMs (frontend, indexer, TypeScript SDK, CLI)
+        run: |
+          set -eu
+          mkdir -p sbom
+          npx --yes @cyclonedx/cyclonedx-npm --version
+          for pair in \
+            frontend=frontend/package-lock.json \
+            indexer=indexer/package-lock.json \
+            sdk=sdks/typescript/package-lock.json \
+            cli=tools/streampay-cli/package-lock.json; do
+            name="${pair%%=*}"
+            lock="${pair#*=}"
+            if [ ! -f "$lock" ]; then
+              echo "::warning::$lock is absent; no SBOM for '$name'"
+              continue
+            fi
+            npx --yes @cyclonedx/cyclonedx-npm \
+              --package-lock-only --output-format JSON \
+              --spec-version "$CYCLONEDX_SPEC" \
+              --output-file "sbom/$name.cdx.json" "$lock"
+          done
+          ls -l sbom
+
+      # The generator is pure Python standard library today (there is no
+      # requirements file in the tree). The SBOM still has to exist and be
+      # explicit about that: an empty inventory passes the gate only when it is
+      # declared, never when it is silent.
+      - name: Python generator SBOM
+        run: |
+          set -eu
+          mkdir -p sbom
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+
+          root = pathlib.Path(".")
+          requirements = sorted(root.glob("sdks/generator/requirements*.txt"))
+          if not requirements:
+              artifact = root / "sdks/generator/generate.py"
+              digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+              document = {
+                  "bomFormat": "CycloneDX",
+                  "specVersion": "1.5",
+                  "version": 1,
+                  "metadata": {
+                      "component": {
+                          "type": "application",
+                          "name": "streampay-sdk-generator",
+                          "version": subprocess.run(
+                              ["git", "describe", "--tags", "--always"],
+                              capture_output=True, text=True, check=False,
+                          ).stdout.strip() or "0.0.0",
+                          "hashes": [{"alg": "SHA-256", "content": digest}],
+                      },
+                      "properties": [
+                          {"name": "streampay:sbom:no-third-party-dependencies", "value": "true"},
+                          {"name": "streampay:sbom:artifact", "value": "sdks/generator/generate.py"},
+                      ],
+                  },
+                  "components": [],
+              }
+              pathlib.Path("sbom/python.cdx.json").write_text(json.dumps(document, indent=2) + "\n")
+              print("python generator: stdlib-only, recorded as a declared empty SBOM")
+          else:
+              subprocess.run(
+                  ["python3", "-m", "pip", "install", "--quiet", "cyclonedx-bom"],
+                  check=True,
+              )
+              print("python generator: cyclonedx-py from", requirements[0])
+          PY
+          if ls sdks/generator/requirements*.txt >/dev/null 2>&1; then
+            for req in sdks/generator/requirements*.txt; do
+              cyclonedx-py requirements "$req" \
+                --output-format JSON --spec-version "$CYCLONEDX_SPEC" \
+                --output-file sbom/python.cdx.json
+            done
+          fi
+
+      - name: Build the indexer image for its SBOM
+        run: |
+          set -eu
+          docker build -f infra/docker/Dockerfile.indexer -t streampay-indexer:${{ github.sha }} .
+
+      - name: Indexer image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: streampay-indexer:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom/indexer-image.cdx.json
+          artifact-name: sbom-indexer-image
+          upload-artifact: false
+
+      # ── advisory inputs, the same three ecosystems the audit jobs use ────
+      - name: cargo-deny advisory report
+        run: |
+          set +e
+          mkdir -p advisories
+          cargo deny --format json check advisories > advisories/cargo-deny.json
+          rc=$?
+          set -e
+          # Exit code 1 means "advisories found", which is the gate's input, not
+          # a CI failure of this step; a parse/tooling failure (>=2) still is.
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::cargo deny exited $rc (not an advisory finding)"
+            exit 1
+          fi
+          cat advisories/cargo-deny.json
+
+      - name: npm advisory reports
+        run: |
+          set +e
+          mkdir -p advisories
+          for dir in frontend indexer sdks/typescript tools/streampay-cli; do
+            [ -f "$dir/package.json" ] || continue
+            name="$(basename "$dir")"
+            ( cd "$dir" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 )
+            npm audit --json --omit=dev --prefix "$dir" > "advisories/npm-audit-$name.json"
+          done
+          set -e
+          ls -l advisories
+          echo "npm audit exit codes are advisory findings, not step failures; the gate judges them"
+
+      - name: pip-audit report (only when the generator has dependencies)
+        run: |
+          set +e
+          if ls sdks/generator/requirements*.txt >/dev/null 2>&1; then
+            python3 -m pip install --quiet pip-audit
+            pip-audit --format json --requirement sdks/generator/requirements.txt \
+              > advisories/pip-audit.json
+          else
+            echo "no requirements file: the generator has no third-party dependencies to audit"
+          fi
+          set -e
+
+      # ── the gate ─────────────────────────────────────────────────────────
+      - name: Gate self-tests (an injected advisory must block)
+        run: python3 tests/sbom_vex_test.py
+
+      - name: SBOM + VEX gate
+        run: |
+          set -eu
+          args=()
+          for pair in \
+            rust=sbom/rust/streampay-contract.cdx.json \
+            frontend=sbom/frontend.cdx.json \
+            indexer=sbom/indexer.cdx.json \
+            sdk=sbom/sdk.cdx.json \
+            cli=sbom/cli.cdx.json \
+            python=sbom/python.cdx.json \
+            indexer-image=sbom/indexer-image.cdx.json; do
+            [ -f "${pair#*=}" ] && args+=(--sbom "$pair")
+          done
+
+          # Published artifacts, each bound to the SBOM that describes it.
+          args+=(--artifact "contract-wasm=target/wasm32v1-none/release/streampay_contract.wasm")
+          args+=(--sbom-for contract-wasm=rust)
+
+          # Lockfile cross-check: the SBOM must describe what the build installs.
+          for pair in \
+            rust=Cargo.lock \
+            frontend=frontend/package-lock.json \
+            indexer=indexer/package-lock.json \
+            sdk=sdks/typescript/package-lock.json \
+            cli=tools/streampay-cli/package-lock.json; do
+            [ -f "${pair#*=}" ] && args+=(--lock "$pair")
+          done
+
+          # Advisory reports, normalised from the three ecosystems.
+          [ -f advisories/cargo-deny.json ] && args+=(--advisories "cargo-deny=advisories/cargo-deny.json")
+          for report in advisories/npm-audit-*.json; do
+            [ -s "$report" ] && args+=(--advisories "npm-audit=$report")
+          done
+          [ -f advisories/pip-audit.json ] && args+=(--advisories "pip-audit=advisories/pip-audit.json")
+
+          if [ -f security/sbom-baseline.json ]; then
+            args+=(--baseline security/sbom-baseline.json)
+          else
+            echo "::notice::no security/sbom-baseline.json yet: drift is enforced against the lockfiles only"
+          fi
+
+          args+=(--vex security/vex/vex.json --index-out sbom/sbom-index.json)
+          python3 scripts/sbom_vex.py "${args[@]}"
+
+      - name: Upload SBOMs, advisory reports and the index
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-vex-${{ github.sha }}
+          path: |
+            sbom/
+            advisories/
+          if-no-files-found: warn
+
+  publish:
+    name: Sign and publish SBOMs with the release
+    runs-on: ubuntu-latest
+    needs: gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the generated SBOMs
+        uses: actions/download-artifact@v7
+        with:
+          name: sbom-vex-${{ github.sha }}
+          path: dist
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Same keyless scheme as the release signatures (docs/SIGSTORE.md): the
+      # SBOM is only evidence if it is as verifiable as the binary it describes.
+      - name: Sign the SBOMs and the index keylessly
+        run: |
+          set -eu
+          shopt -s nullglob
+          mkdir -p dist/sbom
+          for file in dist/sbom/*.cdx.json dist/sbom/sbom-index.json; do
+            [ -f "$file" ] || continue
+            name="$(basename "$file")"
+            cosign sign-blob --yes \
+              --bundle "dist/sbom/$name.sigstore.json" \
+              --output-certificate "dist/sbom/$name.pem" \
+              "$file"
+            # A signature with no transparency-log entry is not the record this
+            # gate promises to publish.
+            grep -q '"logIndex"' "dist/sbom/$name.sigstore.json" \
+              || { echo "::error::$name was signed without a Rekor entry"; exit 1; }
+          done
+
+      - name: Verify the signatures before publishing them
+        run: |
+          set -eu
+          for file in dist/sbom/*.cdx.json dist/sbom/sbom-index.json; do
+            [ -f "$file" ] || continue
+            name="$(basename "$file")"
+            cosign verify-blob \
+              --bundle "dist/sbom/$name.sigstore.json" \
+              --certificate-identity \
+                "https://github.com/${{ github.repository }}/.github/workflows/sbom-vex.yml@${{ github.ref }}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$file"
+          done
+
+      - name: Attach SBOMs, signatures and the index to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="${GITHUB_REF_NAME}"
+          gh release upload "$tag" dist/sbom/*.cdx.json dist/sbom/*.sigstore.json \
+            dist/sbom/*.pem dist/sbom/sbom-index.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          echo "### SBOMs — $tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo 'CycloneDX SBOMs per artifact, the VEX document and a signed index are attached.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Advisory decisions: `security/vex/vex.json` (see `security/vex/README.md`).' >> "$GITHUB_STEP_SUMMARY"
