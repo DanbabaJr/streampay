@@ -6,15 +6,16 @@
 import type { Locale } from "../locales";
 import { en, type MessageKey } from "./en";
 import { de } from "./de";
+import { es } from "./es";
 
-export { en, de };
+export { en, de, es };
 export type { MessageKey };
 
 /**
  * Every supported locale must provide a full catalog: `Record<MessageKey, string>`
  * means an untranslated or renamed key is a type error, not a runtime fallback.
  */
-export const CATALOGS: Record<Locale, Record<MessageKey, string>> = { en, de };
+export const CATALOGS: Record<Locale, Record<MessageKey, string>> = { en, de, es };
 
 /** A brand no object literal can satisfy, so parameterless keys need no argument. */
 declare const noParameters: unique symbol;

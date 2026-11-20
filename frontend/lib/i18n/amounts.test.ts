@@ -31,9 +31,17 @@ describe("locale shapes read out of Intl", () => {
     assert.equal(shape.grouping, ".");
   });
 
+  it("es uses comma-decimal and dot-grouping, like de", () => {
+    const shape = localeShape("es");
+    assert.equal(shape.decimal, ",");
+    assert.equal(shape.grouping, ".");
+    assert.equal(shape.primaryGroup, 3);
+  });
+
   it("exposes the separator actually used, for input hints", () => {
     assert.equal(decimalSeparatorFor("en"), ".");
     assert.equal(decimalSeparatorFor("de"), ",");
+    assert.equal(decimalSeparatorFor("es"), ",");
   });
 });
 
@@ -42,6 +50,7 @@ describe("formatStroops keeps every digit", () => {
     assert.equal(formatStroops(1n, "en"), "0.0000001");
     assert.equal(formatStroops(12_345_678n, "en"), "1.2345678");
     assert.equal(formatStroops(12_345_678n, "de"), "1,2345678");
+    assert.equal(formatStroops(12_345_678n, "es"), "1,2345678");
   });
 
   it("matches the locale-free machine form exactly", () => {
@@ -64,6 +73,7 @@ describe("formatStroops keeps every digit", () => {
   it("groups with the locale's own separator and group size", () => {
     assert.equal(formatStroops(1_234_567_890_123n, "en"), "123,456.7890123");
     assert.equal(formatStroops(1_234_567_890_123n, "de"), "123.456,7890123");
+    assert.equal(formatStroops(1_234_567_890_123n, "es"), "123.456,7890123");
   });
 
   it("pads to a fixed fraction for currency-style display", () => {
@@ -100,6 +110,7 @@ describe("parseStroops: comma vs dot, both directions", () => {
   it("reads the locale's own decimal separator", () => {
     assert.equal(ok("1,2345678", "de"), 12_345_678n);
     assert.equal(ok("1.2345678", "en"), 12_345_678n);
+    assert.equal(ok("1,2345678", "es"), 12_345_678n);
   });
 
   it("reads the *other* separator as decimal when it cannot be grouping", () => {
@@ -116,6 +127,7 @@ describe("parseStroops: comma vs dot, both directions", () => {
     assert.equal(ok("1,000", "en"), 10_000_000_000n);
     assert.equal(ok("1.000.000", "de"), 10_000_000_000_000n);
     assert.equal(ok("1,000,000", "en"), 10_000_000_000_000n);
+    assert.equal(ok("1.000.000", "es"), 10_000_000_000_000n);
   });
 
   it("treats the locale's own decimal character as authoritative", () => {
@@ -124,6 +136,9 @@ describe("parseStroops: comma vs dot, both directions", () => {
     assert.equal(ok("1,500", "de"), 15_000_000n);
     // And in `en`, `.` is decimal even though `1.000` would group in `de`.
     assert.equal(ok("1.000", "en"), 10_000_000n);
+    // Spanish follows the same convention as German.
+    assert.equal(ok("1,000", "es"), 10_000_000n);
+    assert.equal(ok("1.000", "es"), 10_000_000_000n);
   });
 
   it("prefers the rightmost separator when both are present", () => {
@@ -131,6 +146,8 @@ describe("parseStroops: comma vs dot, both directions", () => {
     const expected = 12_345_678_900n;
     assert.equal(ok("1.234,56789", "de"), expected);
     assert.equal(ok("1,234.56789", "en"), expected);
+    assert.equal(ok("1.234,56789", "es"), expected);
+    assert.equal(ok("1,234.56789", "es"), expected);
     // Cross-typed: European style on an `en` locale, US style on `de`.
     assert.equal(ok("1.234,56789", "en"), expected);
     assert.equal(ok("1,234.56789", "de"), expected);
@@ -147,7 +164,7 @@ describe("parseStroops: comma vs dot, both directions", () => {
       0n, 1n, 7n, 999n, 10_000_000n, 12_345_678n, 999_999_999n,
       1_000_000_000_000n, 9_007_199_254_740_993n, 834_329_466_065_555_555n,
     ];
-    for (const locale of ["en", "de"]) {
+    for (const locale of ["en", "de", "es"]) {
       for (const value of values) {
         assert.equal(ok(formatStroops(value, locale), locale), value, `${value} in ${locale}`);
       }
@@ -165,6 +182,7 @@ describe("parseStroops refuses to guess", () => {
   it("never rounds away precision", () => {
     assert.equal(fail("1.12345678", "en"), "too-precise");
     assert.equal(fail("1,12345678", "de"), "too-precise");
+    assert.equal(fail("1,12345678", "es"), "too-precise");
     assert.equal(fail("0.00000001", "en"), "too-precise");
   });
 

@@ -10,7 +10,7 @@
  * catalog — see docs/I18N.md.
  */
 
-export const SUPPORTED_LOCALES = ["en", "de"] as const;
+export const SUPPORTED_LOCALES = ["en", "de", "es"] as const;
 
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -25,12 +25,14 @@ export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 export const LOCALE_DIR: Record<Locale, "ltr" | "rtl"> = {
   en: "ltr",
   de: "ltr",
+  es: "ltr",
 };
 
 /** Endonym — always shown in its own language, never translated. */
 export const LOCALE_LABEL: Record<Locale, string> = {
   en: "English",
   de: "Deutsch",
+  es: "Español",
 };
 
 export function isSupportedLocale(value: unknown): value is Locale {
