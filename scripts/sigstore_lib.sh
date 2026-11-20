@@ -115,3 +115,36 @@ sst_bundle_integrated_time() {
   [ -n "$text" ] || return 1
   sst_json_number "$text" integratedTime
 }
+
+# --- certificate ------------------------------------------------------------
+# The leaf (Fulcio) certificate carried by a cosign v3 bundle, as PEM.
+#
+# cosign v3 removed `sign-blob --output-certificate`: the bundle is the only
+# output, and it holds the certificate as verificationMaterial.certificate
+# .rawBytes (base64 DER). Deriving the published `.pem` from the bundle keeps
+# the two files describing the same signature by construction; deriving it also
+# fails closed, so a bundle without a certificate can never yield an empty one.
+#
+# With a second argument the PEM is written there; without one it goes to
+# stdout, which is what the verifier uses to compare against a published file.
+sst_bundle_certificate() {
+  local bundle="$1" target="${2:-}" text encoded
+  text="$(sst_bundle_text "$bundle")" || return 1
+  [ -n "$text" ] || return 1
+  encoded="$(printf '%s' "$text" |
+    sed -nE 's/.*"certificate"[[:space:]]*:[[:space:]]*\{[^}]*"rawBytes"[[:space:]]*:[[:space:]]*"([A-Za-z0-9+/=]+)".*/\1/p' |
+    head -n1)"
+  [ -n "$encoded" ] || return 1
+  if [ -n "$target" ]; then
+    {
+      printf -- '-----BEGIN CERTIFICATE-----\n'
+      printf '%s' "$encoded" | fold -w 64
+      printf -- '\n-----END CERTIFICATE-----\n'
+    } > "$target" || return 1
+    [ -s "$target" ] || return 1
+  else
+    printf -- '-----BEGIN CERTIFICATE-----\n'
+    printf '%s' "$encoded" | fold -w 64
+    printf -- '\n-----END CERTIFICATE-----\n'
+  fi
+}

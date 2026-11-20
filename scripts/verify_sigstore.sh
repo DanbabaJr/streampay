@@ -32,7 +32,10 @@
 #   --repo <owner/repo>    expected repository (default: $GITHUB_REPOSITORY)
 #   --workflow <file>      expected workflow (default: release-sign.yml)
 #   --issuer <url>         expected OIDC issuer (default: the Actions issuer)
-#   --rekor-url <url>      expected Rekor instance (default: rekor.sigstore.dev)
+#   --rekor-url <url>      expected Rekor instance (default: rekor.sigstore.dev).
+#                          Compared against what the manifest records; cosign v3
+#                          has no `--rekor-url` on verify-blob, the bundle's
+#                          inclusion proof is verified by `--bundle` itself.
 #   --require-attestation  refuse to verify a release with no attestation
 #   --print-identity       print the pinned identity and exit (for docs/tests)
 #
@@ -140,7 +143,7 @@ fi
 
 verify_blob() {
   local artifact="$1" digest entry entry_path bundle cert log_index integrated
-  local entry_log_index entry_integrated cert_identity
+  local entry_log_index entry_integrated cert_identity entry_rekor_url cert_name
 
   [ -f "$artifact" ] || die "artifact not found: $artifact"
   digest="$(att_sha256 "$artifact")"
@@ -175,6 +178,27 @@ verify_blob() {
   [ "$entry_integrated" = "$integrated" ] || die \
     "manifest publishes Rekor integratedTime $entry_integrated but the bundle's entry is $integrated"
 
+  # Which log the entry belongs to. cosign v3 has no `--rekor-url` to pass
+  # through, so the manifest's claim is checked here instead: a release being
+  # verified against the public log must not carry entries recorded elsewhere.
+  entry_rekor_url="$(sst_json_field "$entry" url)"
+  if [ -n "$entry_rekor_url" ] && [ "$entry_rekor_url" != "$rekor_url" ]; then
+    die "manifest records Rekor instance $entry_rekor_url but this verification expects $rekor_url
+  (pass --rekor-url for a private instance, or this release was signed against another log)"
+  fi
+
+  # The published `.pem` must be the bundle's own certificate: two files in one
+  # release that disagree mean at least one of them is not evidence.
+  cert_name="$(sst_json_field "$entry" certificate)"
+  cert="$(dirname "$manifest")/$cert_name"
+  if [ -n "$cert_name" ] && [ -f "$cert" ]; then
+    sst_bundle_certificate "$bundle" | cmp -s - "$cert" || die \
+      "$(basename "$cert") is not the certificate carried by $(basename "$bundle")
+  (the published certificate and the signature it describes disagree)"
+  elif [ -n "$cert_name" ]; then
+    warn "$(basename "$cert") is not next to the manifest; the bundle is the only proof"
+  fi
+
   cert_identity="$identity"
   # cosign verifies the certificate chain, the signature over this exact blob,
   # the Rekor inclusion proof and its signed entry timestamp. The identity flags
@@ -184,7 +208,6 @@ verify_blob() {
     --bundle "$bundle" \
     --certificate-identity "$cert_identity" \
     --certificate-oidc-issuer "$issuer" \
-    --rekor-url "$rekor_url" \
     "$artifact" >/dev/null \
     || die "cosign rejected the signature on $(basename "$artifact"): wrong identity, wrong issuer, tampered bytes, or no valid Rekor inclusion proof"
 

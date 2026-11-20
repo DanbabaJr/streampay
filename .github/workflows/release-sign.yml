@@ -109,6 +109,11 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
+        with:
+          # Pinned: cosign v3 dropped `sign-blob --output-certificate` and
+          # `--rekor-url`, and scripts/sigstore_sign.sh is written for v3. A
+          # floating major would silently change the flags underneath it.
+          cosign-release: v3.1.3
 
       - name: cosign version
         run: cosign version

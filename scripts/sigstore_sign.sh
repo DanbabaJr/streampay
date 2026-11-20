@@ -22,7 +22,12 @@
 #   SIGSTORE_ID_TOKEN    OIDC token override; otherwise fetched from the
 #                        ACTIONS_ID_TOKEN_REQUEST_URL workload-identity endpoint
 #   SIGSTORE_COSIGN      cosign binary (default: cosign)
-#   SIGSTORE_REKOR_URL   Rekor instance (default: https://rekor.sigstore.dev)
+#   SIGSTORE_REKOR_URL   Rekor instance recorded in the manifest (default:
+#                        https://rekor.sigstore.dev). cosign v3 has no
+#                        `--rekor-url` on sign-blob/sign — the endpoint comes
+#                        from the signing config (TUF), so this value is what the
+#                        release *claims*, and verify_sigstore.sh compares the
+#                        bundle's entry against it.
 #   SIGSTORE_OIDC_ISSUER expected issuer, recorded in the manifest
 #
 # Nothing here reads, writes or rotates a private key: cosign exchanges the
@@ -64,7 +69,8 @@ out="${out:-$REPO_ROOT/sigstore/$tag}"
 say "Keyless signing $tag"
 info "identity: $identity"
 info "issuer:   $issuer"
-info "rekor:    $rekor_url"
+# Recorded in the manifest, not passed to cosign: v3 has no --rekor-url.
+info "rekor:    $rekor_url (recorded; the signing config selects the log)"
 
 for a in "${artifacts[@]+"${artifacts[@]}"}"; do
   [ -f "$a" ] || die "artifact not found: $a"
@@ -91,17 +97,22 @@ sign_blob() {
   cert="$out/$name.pem"
 
   info "signing $name (sha256:$digest)"
+  # cosign v3: `--output-certificate`, `--output-signature` and `--rekor-url`
+  # are gone; the bundle is the single output and carries the certificate.
   if [ "$print_only" = "1" ]; then
-    printf 'cosign sign-blob --yes --bundle %s --output-certificate %s <artifact>\n' \
-      "$bundle" "$cert"
+    printf 'cosign sign-blob --yes --bundle %s <artifact>\n' "$bundle"
   else
     "$SST_COSIGN" sign-blob --yes \
       --bundle "$bundle" \
-      --output-certificate "$cert" \
       --identity-token "$token" \
-      --rekor-url "$rekor_url" \
       "$artifact" >/dev/null \
       || die "cosign sign-blob failed for $artifact"
+    # The `.pem` the release publishes is extracted from the bundle, so it can
+    # only ever describe the signature that was actually made. No certificate
+    # in the bundle means no certificate to publish: that is a failure, not an
+    # empty file.
+    sst_bundle_certificate "$bundle" "$cert" \
+      || die "bundle for $name carries no leaf certificate to publish as $(basename "$cert")"
   fi
 
   if [ "$print_only" = "1" ]; then
@@ -134,7 +145,7 @@ for img in "${images[@]+"${images[@]}"}"; do
   if [ "$print_only" = "1" ]; then
     printf 'cosign sign --yes %s\n' "$img"
   else
-    "$SST_COSIGN" sign --yes --identity-token "$token" --rekor-url "$rekor_url" "$img" >/dev/null \
+    "$SST_COSIGN" sign --yes --identity-token "$token" "$img" >/dev/null \
       || die "cosign sign failed for image $img"
   fi
   [ -n "$image_entries" ] && image_entries="$image_entries,"

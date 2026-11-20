@@ -88,15 +88,18 @@ cat > "$attestation" <<EOF
 }
 EOF
 
-# A sigstore bundle as cosign writes it: the tlog entry carries the log index
-# and integrated time as protojson int64 strings.
+# A sigstore bundle as cosign v3 writes it: `verificationMaterial.certificate
+# .rawBytes` holds the base64 DER leaf certificate and the tlog entry carries
+# the log index and integrated time as protojson int64 strings.
+fake_cert_b64="$(printf 'stub-certificate-der' | base64 | tr -d '\n')"
 write_bundle() { # path logIndex integratedTime [drop-entry]
   if [ "${4:-}" = "no-entry" ]; then
-    printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{}}\n' > "$1"
+    printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{"certificate":{"rawBytes":"%s"}}}\n' \
+      "$fake_cert_b64" > "$1"
     return 0
   fi
-  printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{"tlogEntries":[{"logIndex":"%s","integratedTime":"%s","logId":{"keyId":"c0ffee"}}]}}\n' \
-    "$2" "$3" > "$1"
+  printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{"certificate":{"rawBytes":"%s"},"tlogEntries":[{"logIndex":"%s","integratedTime":"%s","logId":{"keyId":"c0ffee"}}]}}\n' \
+    "$fake_cert_b64" "$2" "$3" > "$1"
 }
 write_bundle "$rel/streampay_contract.wasm.sigstore.json" 42 1700000000
 
@@ -130,21 +133,58 @@ manifest="$rel/sigstore-manifest.json"
 write_manifest "$manifest"
 
 # ── the cosign stub ─────────────────────────────────────────────────────────
+# The stub is deliberately strict about flags: it accepts exactly the flags
+# cosign v3.1.3 has and exits 2 on anything else, so re-adding
+# `--output-certificate` or `--rekor-url` fails here rather than at release time.
 cat > "$tmp/cosign" <<'STUB'
 #!/usr/bin/env bash
 set -uo pipefail
 printf '%s\n' "$*" >> "${COSIGN_ARGV_LOG:-/dev/null}"
 sub="${1:-}"
-if [ "$sub" = "verify" ]; then exit 0; fi
-[ "$sub" = "verify-blob" ] || { echo "stub: unsupported subcommand $sub" >&2; exit 2; }
-shift
+case "$sub" in
+  verify) exit 0 ;;
+  verify-blob|sign-blob) shift ;;
+  *) { echo "stub: unsupported subcommand $sub" >&2; exit 2; } ;;
+esac
+
+if [ "$sub" = "sign-blob" ]; then
+  artifact="" bundle=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bundle) bundle="${2:-}"; shift 2 || shift ;;
+      --identity-token)
+        [ -n "${2:-}" ] || { echo "stub: empty --identity-token" >&2; exit 2; }
+        shift 2 || shift ;;
+      --yes|--use-signing-config) shift ;;
+      -*) { echo "stub: cosign v3 sign-blob has no flag $1" >&2; exit 2; } ;;
+      *)
+        [ -z "$artifact" ] || { echo "stub: unexpected argument $1" >&2; exit 2; }
+        artifact="$1"; shift ;;
+    esac
+  done
+  [ -n "$artifact" ] && [ -f "$artifact" ] || { echo "stub: no artifact to sign" >&2; exit 2; }
+  [ -n "$bundle" ] || { echo "stub: sign-blob without --bundle" >&2; exit 2; }
+  # base64 of some DER-ish bytes: enough to prove the PEM is derived from the
+  # bundle rather than written from somewhere else.
+  cert_b64="$(printf 'stub-certificate-der' | base64 | tr -d '\n')"
+  if [ "${FIXTURE_NO_TLOG:-0}" = "1" ]; then
+    printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{"certificate":{"rawBytes":"%s"}}}\n' \
+      "$cert_b64" > "$bundle"
+  else
+    printf '{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3","verificationMaterial":{"certificate":{"rawBytes":"%s"},"tlogEntries":[{"logIndex":"42","integratedTime":"1700000000","logId":{"keyId":"c0ffee"}}]}}\n' \
+      "$cert_b64" > "$bundle"
+  fi
+  exit 0
+fi
+
 artifact="" identity="" issuer="" bundle=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --bundle) bundle="${2:-}"; shift 2 || shift ;;
     --certificate-identity) identity="${2:-}"; shift 2 || shift ;;
     --certificate-oidc-issuer) issuer="${2:-}"; shift 2 || shift ;;
-    --rekor-url) shift 2 || shift ;;
+    --trusted-root) shift 2 || shift ;;
+    -*) { echo "stub: cosign v3 verify-blob has no flag $1" >&2; exit 2; } ;;
     *) artifact="$1"; shift ;;
   esac
 done
@@ -263,6 +303,88 @@ printf '%s  target/wasm32v1-none/release/streampay_contract.wasm\n' \
 expect fail "a digest that disagrees with the published SHA256SUMS is rejected" \
   bash "$verify" --tag "$tag" --repo "$repo" --manifest "$manifest" \
     --artifact "$wasm" --attestation "$attestation" --sha256sums "$tmp/SHA256SUMS.drift"
+
+# 15. The signing side, against the same strict stub: cosign v3 sign-blob takes
+#     `--bundle` and `--identity-token`, the bundle is the only output, and the
+#     published certificate is derived from it.
+sign_out="$tmp/sign"
+sign_args=(bash "$repo_root/scripts/sigstore_sign.sh" --tag "$tag" --repo "$repo"
+  --workflow "$workflow" --out "$sign_out" --artifact "$wasm")
+expect ok "sigstore_sign.sh signs with cosign v3 flags only" \
+  env SIGSTORE_ID_TOKEN=stub-token "${sign_args[@]}"
+
+signed_bundle="$sign_out/streampay_contract.wasm.sigstore.json"
+signed_pem="$sign_out/streampay_contract.wasm.pem"
+check_signing_output() {
+  [ -f "$signed_bundle" ] || return 1
+  grep -q '"logIndex"' "$signed_bundle" || return 1
+  [ -f "$signed_pem" ] || return 1
+  [ "$(head -n1 "$signed_pem")" = "-----BEGIN CERTIFICATE-----" ] || return 1
+  [ "$(tail -n1 "$signed_pem")" = "-----END CERTIFICATE-----" ] || return 1
+  local body decoded
+  body="$(sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' "$signed_pem" |
+    grep -v -- '-----' | tr -d '\n')"
+  decoded="$(printf '%s' "$body" | base64 -d 2>/dev/null)" || return 1
+  [ "$decoded" = "stub-certificate-der" ] || return 1
+  grep -q '"logIndex":42' "$sign_out/sigstore-manifest.json" || return 1
+}
+if check_signing_output; then
+  printf 'ok    the published .pem is the certificate carried by the bundle\n'
+  passed=$((passed + 1))
+else
+  printf 'FAIL  signing did not produce a bundle-backed certificate and manifest\n'
+  sed -n '1,5p' "$signed_pem" 2>/dev/null
+  failed=$((failed + 1))
+fi
+
+# 16. A bundle with a signature but no log entry is a signing failure, not a
+#     signed artifact: the manifest would otherwise publish `logIndex: 0`.
+expect fail "signing refuses a bundle with no transparency-log entry" \
+  env SIGSTORE_ID_TOKEN=stub-token FIXTURE_NO_TLOG=1 \
+  bash "$repo_root/scripts/sigstore_sign.sh" --tag "$tag" --repo "$repo" \
+    --workflow "$workflow" --out "$tmp/sign-no-tlog" --artifact "$wasm"
+
+# 17. The printed commands are what a human copies onto a signing host, so they
+#     must not contain flags cosign v3 rejects.
+printed_sign="$(SIGSTORE_ID_TOKEN=stub-token bash "$repo_root/scripts/sigstore_sign.sh" \
+  --tag "$tag" --repo "$repo" --workflow "$workflow" --out "$tmp/sign-print" \
+  --artifact "$wasm" --print-only 2>&1)"
+case "$printed_sign" in
+  *--output-certificate*|*--rekor-url*)
+    printf 'FAIL  --print-only emits a cosign flag v3 does not have\n'
+    printf '      %s\n' "$printed_sign"
+    failed=$((failed + 1))
+    ;;
+  *"sign-blob --yes --bundle"*)
+    printf 'ok    --print-only emits only cosign v3 flags\n'
+    passed=$((passed + 1))
+    ;;
+  *)
+    printf 'FAIL  --print-only printed no sign-blob command\n'
+    failed=$((failed + 1))
+    ;;
+esac
+
+# 18. The published `.pem` and the bundle must carry the same certificate: two
+#     files in one release that disagree mean one of them is not evidence.
+write_bundle "$rel/streampay_contract.wasm.sigstore.json" 42 1700000000
+write_bundle "$rel/streampay_contract.wasm.sigstore.json" 42 1700000000
+printf -- '-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----\n' \
+  "$fake_cert_b64" > "$rel/streampay_contract.wasm.pem"
+expect ok "a published .pem that matches the bundle is accepted" \
+  "${base[@]}" --artifact "$wasm" --attestation "$attestation"
+printf -- '-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----\n' \
+  "$(printf 'other-certificate' | base64 | tr -d '\n')" > "$rel/streampay_contract.wasm.pem"
+expect fail "a published .pem from a different certificate is rejected" \
+  "${base[@]}" --artifact "$wasm" --attestation "$attestation"
+rm -f "$rel/streampay_contract.wasm.pem"
+
+# 19. The manifest records which Rekor instance the entry belongs to; a release
+#     claiming a different log is not this verification's release.
+expect fail "a manifest recorded against another Rekor instance is rejected" \
+  bash "$verify" --tag "$tag" --repo "$repo" --manifest "$manifest" \
+    --artifact "$wasm" --attestation "$attestation" \
+    --rekor-url "https://rekor.internal.example"
 
 echo
 echo "passed: $passed  failed: $failed"

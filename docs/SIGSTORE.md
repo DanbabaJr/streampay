@@ -60,6 +60,14 @@ and the log index and integrated time of the transparency-log entry. The
 manifest is written one artifact per line so a verifier without `jq` can read it
 with `grep`/`sed`; it is ordinary JSON for everything else.
 
+cosign v3 removed `sign-blob --output-certificate` (and `--rekor-url`): the
+bundle is the only output. The `.pem` published next to it is therefore derived
+from the bundle's `verificationMaterial.certificate.rawBytes`, and
+`verify_sigstore.sh` rejects a release whose `.pem` and bundle disagree. The
+manifest's `rekor_url` records the log the release claims; it is compared
+against `--rekor-url` instead of being passed to cosign, which selects the log
+from its signing config.
+
 ## Verify a release
 
 Using this repository's verifier (the same code the release gate runs):
