@@ -79,6 +79,10 @@ is a rollback trigger**.
 Additional watch items during the window (not automated):
 
 - the deployer/contract account has enough XLM for TTL extensions;
+- TTL-sentinel alerts that fire during the window: work
+  [RUNBOOK §7](./RUNBOOK.md#7-ttl-sentinel-expiry-alert-triage) before treating
+  one as rollback evidence — a stale RPC view or an extension by another writer
+  is not a canary failure (§4 lists the actual rollback triggers);
 - no unexpected `StreamError` codes in client logs;
 - the smoke stream's `available` growth matches `deposit / duration`.
 

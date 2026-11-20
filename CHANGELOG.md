@@ -10,9 +10,18 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+<<<<<<< HEAD
 - `docs/WAVE_CONTRIBUTORS.md`: contributor guide for Drips Wave issues (claim,
   branch/PR conventions, CI job to local command map, review and resolution),
   cross-linked from the README and CONTRIBUTING.
+=======
+- CLI shell completions (#518): `streampay completion <bash|zsh|fish>` prints a
+  static completion script generated from the CLI's command registry
+  (`tools/streampay-cli/src/registry.ts`), which the argument parser and
+  dispatch now read too, so completions cannot drift from real commands.
+  Snapshot and drift-guard tests; install steps in the CLI README. The `--json`
+  output contract is unchanged.
+>>>>>>> upstream/main
 - Stream pause / resume (#24): `pause_stream` and `resume_stream`, sender only.
   While a stream is paused its accrual is frozen at the pause point (on the
   stream's own clock, so oracle-time streams freeze at the oracle time);
