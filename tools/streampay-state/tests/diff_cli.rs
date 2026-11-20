@@ -11,7 +11,11 @@ fn fixture(name: &str) -> String {
     // Deliberately-unparseable fixtures are stored as `.txt`: the repo gate
     // that every tracked `.json` must parse cannot carry known-invalid JSON.
     let json = dir.join(format!("{name}.json"));
-    let path = if json.exists() { json } else { dir.join(format!("{name}.txt")) };
+    let path = if json.exists() {
+        json
+    } else {
+        dir.join(format!("{name}.txt"))
+    };
     path.to_string_lossy().into_owned()
 }
 
