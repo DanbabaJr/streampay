@@ -32,6 +32,8 @@ scripts/
                             and asserts hardening, reference resolution and the
                             no-plaintext policy.
   apply_and_check_drift.sh  apply, time it, then fail unless plan is empty.
+  plan_gate.sh              the read-only CI gate: fmt, validate, and a plan
+                            from fixtures/ with no credentials (see below).
 ```
 
 `modules/services` reads the Grafana dashboard and Prometheus rules from
@@ -50,6 +52,44 @@ That writes the bundle to `build/` and runs `install.sh` here. On a different
 machine, leave `apply_locally = false`, `scp -r build/ host:/tmp/`, and run
 `sh /tmp/build/install.sh` there. Re-running either form converges; it does not
 duplicate.
+
+## Plan-only CI gate
+
+`.github/workflows/infra.yml` runs `scripts/plan_gate.sh` on every pull request
+in a job that needs no secrets:
+
+```sh
+sh infra/terraform/scripts/plan_gate.sh              # fmt, validate, plan
+sh infra/terraform/scripts/plan_gate.sh --self-test  # an invalid fixture must fail
+```
+
+* `terraform fmt -check -recursive`, then `terraform init -backend=false` and
+  `terraform validate` for all three stacks.
+* `terraform plan -input=false -refresh=false` for `minimal-single-vm` and
+  `kubernetes`, from the fixtures in `stacks/*/fixtures/ci-plan.tfvars.json`.
+  Those two stacks render with the `local` and `null` providers only, so the
+  plan needs no cloud credentials and creates nothing.
+* `stacks/aws-ec2` is validate-only in this gate: its plan reads
+  `aws_caller_identity`, `aws_availability_zones`, `aws_subnet` and `aws_ami`,
+  which are live AWS API calls. That stack's own README and `versions.tf` say
+  it is the one path whose apply needs credentials.
+* No apply, no `-out`, and no remote backend: `plan_gate.sh` refuses a tree that
+declares one, so the gate is read-only by construction.
+* `--self-test` plans `stacks/minimal-single-vm/fixtures/ci-plan-invalid.tfvars.json`
+  and requires the variable validation blocks to reject it, naming
+  `extender_to_ledgers`, `grafana_host_port` and `install_dir`. A gate that
+  cannot fail is green forever.
+
+The Terraform CLI is pinned the way the other external tools in this repo are:
+`digests/terraform-1.9.8.sha256` holds the release archive digest (the same
+convention as `digests/stellar-cli-*.sha256`), `TF_VERSION` in
+`.github/workflows/infra.yml` names it, and the gate refuses to run under a
+different version. Bump the digest file, the workflow env and this paragraph in
+one change.
+
+`*.tfvars` stays untracked (the workflow's state check enforces it); the
+fixtures use the `.tfvars.json` form, which `terraform plan -var-file` accepts
+and which cannot be mistaken for an operator's real variable file.
 
 ## Checking your change before you push
 

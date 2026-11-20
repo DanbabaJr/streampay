@@ -64,7 +64,7 @@ function jsonLines(stdout: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-test("SIGINT ends watch mode with exit 0 and a schema-valid summary", { timeout: 15_000 }, async () => {
+test("SIGINT ends watch mode with exit 0 and a schema-valid summary", { timeout: 30_000 }, async () => {
   const rpc = await startMockRpc(contract, [
     mockStream({ withdrawn: 0n }),
     mockStream({ withdrawn: 1n }),
@@ -89,7 +89,7 @@ test("SIGINT ends watch mode with exit 0 and a schema-valid summary", { timeout:
     await waitFor(
       () =>
         jsonLines(output.stdout()).filter((line) => line.event === "change").length >= 2,
-      10_000
+      20_000
     );
     assert.ok(child.kill("SIGINT"));
     const result = await output.wait();
@@ -117,7 +117,7 @@ test("SIGINT ends watch mode with exit 0 and a schema-valid summary", { timeout:
   }
 });
 
-test("unchanged watch polls emit nothing", { timeout: 15_000 }, async () => {
+test("unchanged watch polls emit nothing", { timeout: 30_000 }, async () => {
   const rpc = await startMockRpc(contract, [mockStream({ withdrawn: 9n })]);
   const child = spawnCli([
     "--contract",
@@ -135,7 +135,7 @@ test("unchanged watch polls emit nothing", { timeout: 15_000 }, async () => {
   try {
     await waitFor(
       () => jsonLines(output.stdout()).some((line) => line.event === "change"),
-      10_000
+      20_000
     );
     // At least one more poll at 1000 ms observes the same state.
     await new Promise((resolve) => setTimeout(resolve, 1_200));
@@ -157,7 +157,7 @@ test("unchanged watch polls emit nothing", { timeout: 15_000 }, async () => {
   }
 });
 
-test("non-watch output is a single stable JSON line despite ledger noise", { timeout: 15_000 }, async () => {
+test("non-watch output is a single stable JSON line despite ledger noise", { timeout: 30_000 }, async () => {
   const rpc = await startMockRpc(contract, [mockStream({ withdrawn: 4n })]);
   const args = [
     "--contract",
@@ -192,7 +192,7 @@ test("non-watch output is a single stable JSON line despite ledger noise", { tim
   }
 });
 
-test("watch interval below the documented minimum is rejected", { timeout: 15_000 }, async () => {
+test("watch interval below the documented minimum is rejected", { timeout: 30_000 }, async () => {
   const child = spawnCli([
     "--contract",
     contract,

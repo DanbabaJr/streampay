@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SettingsNav from "@/components/SettingsNav";
 import { useState, useEffect, useCallback } from "react";
 import { isConnected, requestAccess, signMessage } from "@stellar/freighter-api";
 import { checkWalletNetwork } from "@/lib/network";
@@ -236,6 +237,7 @@ export default function NotificationsSettingsPage() {
           ← Back to StreamPay
         </Link>
       </div>
+      <SettingsNav />
 
       <header style={{ marginBottom: 24 }}>
         <h1>Notification Channels</h1>

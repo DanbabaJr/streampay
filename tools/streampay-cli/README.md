@@ -1,13 +1,5 @@
 # StreamPay CLI
 
-Headless TypeScript CLI for reading StreamPay contract state. It uses the
-repository's Stellar SDK dependency and invokes Soroban RPC
-`simulateTransaction` (never signing or submitting) for every snapshot.
-
-Requires Node.js 22.6 or newer.
-
-## Install
-
 Headless TypeScript CLI for StreamPay contract operations. It uses the
 repository's Stellar SDK dependency and invokes Soroban RPC `simulateTransaction`
 for every mutating transaction before signing or submission. Simulation output
@@ -24,65 +16,6 @@ npm install
 npm link
 ```
 
-## Commands
-
-`status` and `get` are aliases: both read `get_stream` and print one decoded
-stream snapshot.
-
-```bash
-streampay --contract <CONTRACT_ID> status --stream-id 12
-streampay --contract <CONTRACT_ID> --json get --stream-id 12
-streampay --network mainnet --contract <CONTRACT_ID> status --stream-id 12
-```
-
-Options:
-
-| Option | Meaning |
-|---|---|
-| `--contract <C...>` | StreamPay contract id (required) |
-| `--stream-id <n>` | Stream id (required) |
-| `--network <testnet\|mainnet>` | Network (default: `testnet`) |
-| `--rpc-url <url>` | Soroban RPC endpoint |
-| `--json` | Emit one JSON object matching schema v1 |
-| `--watch` | Poll and emit JSON Lines (see below) |
-| `--interval <ms>` | Watch poll interval (default: 5000; minimum: 1000) |
-| `-h`, `--help` | Usage |
-
-The snapshot contains the contract's full `Stream` state (`id`, parties,
-token, deposit, withdrawn, window, cancelable, status). Amounts are decimal
-strings in smallest token units; timestamps are Unix seconds.
-
-## Watch mode
-
-```bash
-streampay --contract <CONTRACT_ID> --watch --interval 5000 status --stream-id 12
-```
-
-Watch mode always emits JSON Lines on stdout, even without `--json`:
-
-- one `event: "change"` line on the first successful poll (the baseline), and
-  then exactly one line each time the **decoded** stream state changes;
-- nothing for polls that observe the same state;
-- one `event: "summary"` line when SIGINT stops the watch, then exit code 0.
-
-Change detection compares the decoded `Stream` projection (`id`, sender,
-recipient, token, deposit, withdrawn, start/end time, cancelable, status),
-not raw RPC bytes. RPC metadata such as `latestLedger`, simulation cost, and
-ledger timestamps therefore never counts as a change. `available` is not part
-of the projection: it accrues every second and is not stored contract state.
-
-### Interval floor
-
-`--interval` is in milliseconds. Values below **1000 ms** are rejected with
-exit code 2 so a forgotten flag cannot burn an RPC budget at sub-second
-cadence. The default is 5000 ms.
-
-## Scripting contract
-
-The stable schema is [`json-schema-v1.json`](./json-schema-v1.json),
-versioned by `schemaVersion: 1`. Non-watch output is a single JSON object;
-watch output is one object per line. Error objects use the same
-`schemaVersion`, with `ok: false` and a stable `error.code`.
 Set `STREAMPAY_SECRET_KEY` for the environment signer. Keep secret material out
 of command-line arguments and shell history.
 
@@ -111,6 +44,80 @@ contract to spend the deposit (and any configured protocol fee) on the token.
 streams with a positive on-chain `available` result, and simulates/submits
 batches of up to 50 `withdraw_max` operations.
 
+## Read-only snapshots: `status` / `get`
+
+`status` and `get` are aliases: both read `get_stream` and print one decoded
+stream snapshot. They never sign or submit anything.
+
+```bash
+streampay --contract <CONTRACT_ID> status --stream-id 12
+streampay --contract <CONTRACT_ID> --json get --stream-id 12
+streampay --network mainnet --contract <CONTRACT_ID> status --stream-id 12
+```
+
+The snapshot contains the contract's full `Stream` state (`id`, sender,
+recipient, token, deposit, withdrawn, start/end time, cancelable, status).
+Amounts are decimal strings in smallest token units; timestamps are Unix
+seconds.
+
+### Watch mode
+
+```bash
+streampay --contract <CONTRACT_ID> --watch --interval 5000 status --stream-id 12
+```
+
+Watch mode always emits JSON Lines on stdout, even without `--json`:
+
+- one `event: "change"` line on the first successful poll (the baseline), and
+  then exactly one line each time the **decoded** stream state changes;
+- nothing for polls that observe the same state;
+- one `event: "summary"` line when SIGINT stops the watch, then exit code 0.
+
+Change detection compares the decoded `Stream` projection (`id`, sender,
+recipient, token, deposit, withdrawn, start/end time, cancelable, status),
+not raw RPC bytes. RPC metadata such as `latestLedger`, simulation cost, and
+ledger timestamps therefore never counts as a change. `available` is not part
+of the projection: it accrues every second and is not stored contract state.
+
+`--interval` is in milliseconds. Values below **1000 ms** are rejected with
+exit code 2 so a forgotten flag cannot burn an RPC budget at sub-second
+cadence. The default is 5000 ms.
+
+## Shell completions
+
+`streampay completion <bash|zsh|fish>` prints a static completion script for
+every command, subcommand, and flag, including the `--network` and `--signer`
+values. The script is generated from the same command registry the CLI parses,
+and it never runs node while completing.
+
+Bash (needs the `bash-completion` package for the user directory):
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+streampay completion bash > ~/.local/share/bash-completion/completions/streampay
+# or, for the current shell only:
+source <(streampay completion bash)
+```
+
+Zsh:
+
+```zsh
+mkdir -p ~/.zfunc
+streampay completion zsh > ~/.zfunc/_streampay
+# in ~/.zshrc, before compinit:
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+Fish:
+
+```fish
+streampay completion fish > ~/.config/fish/completions/streampay.fish
+```
+
+Open a new shell afterwards. Regenerate the script after upgrading the CLI.
+`completion` prints a shell script, so it refuses `--json` with a `USAGE` error.
+
 ## Signers
 
 - `--signer env` reads `STREAMPAY_SECRET_KEY` (override with `--secret-env`).
@@ -132,7 +139,8 @@ batches of up to 50 `withdraw_max` operations.
 
 ## Scripting Contract
 
-`--json` emits one JSON object per invocation. The stable schema is
+`--json` emits one JSON object per invocation (watch mode emits one object per
+line). The stable schema is
 [`json-schema-v1.json`](./json-schema-v1.json), versioned by `schemaVersion: 1`.
 Amounts, fees, and deltas are decimal strings to preserve integer precision.
 Footprint entries and event payloads are base64 XDR from the successful RPC
@@ -144,15 +152,11 @@ Exit codes:
 
 | Code | Meaning |
 |---:|---|
-| 0 | Success, including a clean SIGINT shutdown of `--watch` |
-| 1 | RPC failure |
-| 2 | Invalid command or arguments (including a sub-minimum `--interval`) |
-| 4 | Soroban simulation rejected `get_stream` (e.g. stream not found) |
-| 0 | Success, simulation, preparation, or no eligible claims |
+| 0 | Success, simulation, preparation, no eligible claims, or a clean SIGINT shutdown of `--watch` |
 | 1 | RPC or on-chain submission failure |
-| 2 | Invalid command or arguments |
+| 2 | Invalid command or arguments (including a sub-minimum `--interval`) |
 | 3 | Signer or encrypted key failure |
-| 4 | Soroban simulation rejected the operation |
+| 4 | Soroban simulation rejected the operation (e.g. `get_stream` on a missing stream) |
 | 5 | Transaction inclusion timeout |
 
 The schema and exit codes are part of the CLI's v1 scripting API. Breaking
@@ -165,19 +169,17 @@ npm run typecheck
 npm test
 ```
 
-The tests use an in-process mocked Soroban RPC and cover: one line per state
-change, silence on unchanged polls, SIGINT summary/exit 0, schema validation
-of every emitted line, and byte-identical non-watch output across ledger
-noise.
-
-## PR description
-
-Closes #519
 The sandbox integration test exercises a real testnet Soroban simulation when
 `STREAMPAY_TEST_CONTRACT_ID`, `STREAMPAY_TEST_SOURCE`, and
 `STREAMPAY_TEST_STREAM_ID` identify a funded recipient stream with at least one
 smallest unit available. It skips when these variables are absent. Optional
 `STREAMPAY_TEST_RPC_URL` overrides the testnet endpoint.
+
+The `status`/`get` and watch tests use an in-process mocked Soroban RPC and
+cover: one line per decoded state change, silence for unchanged polls despite
+advancing ledger metadata, SIGINT summary flush with exit 0, snapshot
+stability across invocations, the `--interval` floor, and schema validation of
+every emitted line against `json-schema-v1.json`.
 
 ## PR description
 

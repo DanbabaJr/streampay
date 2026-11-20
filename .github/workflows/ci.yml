@@ -427,12 +427,6 @@ jobs:
         # High-severity prod advisories fail the build.
         run: npm audit --omit=dev --audit-level=high
 
-  cli:
-    name: CLI — typecheck / test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tools/streampay-cli
       - name: Explain a dependency-audit failure
         if: failure() && steps.audit.outcome == 'failure'
         # npm audit failures are frequently *not* the contributor's fault: a
@@ -462,7 +456,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: tools/streampay-cli/package-lock.json
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
