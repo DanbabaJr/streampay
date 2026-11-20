@@ -7,7 +7,7 @@ _streampay() {
   for ((i = 2; i < CURRENT; i++)); do
     w=${words[i]}
     case $w in
-      (--contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--out) ((i++)); continue ;;
+      (--contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out) ((i++)); continue ;;
       (-*) continue ;;
     esac
     if [[ -z $cmd ]]; then cmd=$w; elif [[ -z $sub ]]; then sub=$w; fi
@@ -17,14 +17,14 @@ _streampay() {
     (--network) compadd -- testnet mainnet; return ;;
     (--signer) compadd -- env file ledger; return ;;
     (--key-file|--signed-xdr|--out) _files; return ;;
-    (--contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount) return 1 ;;
+    (--contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval) return 1 ;;
   esac
 
   opts=(--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --json --help)
   case $cmd in
     ("")
       if [[ $cur != -* ]]; then
-        compadd -- create withdraw cancel top-up claim-all key completion help
+        compadd -- create withdraw cancel top-up claim-all status get key completion help
         return
       fi
       ;;
@@ -33,6 +33,8 @@ _streampay() {
     (cancel) opts+=(--stream-id) ;;
     (top-up) opts+=(--stream-id --amount) ;;
     (claim-all) ;;
+    (status) opts+=(--stream-id --watch --interval) ;;
+    (get) opts+=(--stream-id --watch --interval) ;;
     (key)
       if [[ -z $sub && $cur != -* ]]; then
         compadd -- encrypt

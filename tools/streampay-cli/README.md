@@ -44,6 +44,45 @@ contract to spend the deposit (and any configured protocol fee) on the token.
 streams with a positive on-chain `available` result, and simulates/submits
 batches of up to 50 `withdraw_max` operations.
 
+## Read-only snapshots: `status` / `get`
+
+`status` and `get` are aliases: both read `get_stream` and print one decoded
+stream snapshot. They never sign or submit anything.
+
+```bash
+streampay --contract <CONTRACT_ID> status --stream-id 12
+streampay --contract <CONTRACT_ID> --json get --stream-id 12
+streampay --network mainnet --contract <CONTRACT_ID> status --stream-id 12
+```
+
+The snapshot contains the contract's full `Stream` state (`id`, sender,
+recipient, token, deposit, withdrawn, start/end time, cancelable, status).
+Amounts are decimal strings in smallest token units; timestamps are Unix
+seconds.
+
+### Watch mode
+
+```bash
+streampay --contract <CONTRACT_ID> --watch --interval 5000 status --stream-id 12
+```
+
+Watch mode always emits JSON Lines on stdout, even without `--json`:
+
+- one `event: "change"` line on the first successful poll (the baseline), and
+  then exactly one line each time the **decoded** stream state changes;
+- nothing for polls that observe the same state;
+- one `event: "summary"` line when SIGINT stops the watch, then exit code 0.
+
+Change detection compares the decoded `Stream` projection (`id`, sender,
+recipient, token, deposit, withdrawn, start/end time, cancelable, status),
+not raw RPC bytes. RPC metadata such as `latestLedger`, simulation cost, and
+ledger timestamps therefore never counts as a change. `available` is not part
+of the projection: it accrues every second and is not stored contract state.
+
+`--interval` is in milliseconds. Values below **1000 ms** are rejected with
+exit code 2 so a forgotten flag cannot burn an RPC budget at sub-second
+cadence. The default is 5000 ms.
+
 ## Shell completions
 
 `streampay completion <bash|zsh|fish>` prints a static completion script for
@@ -100,7 +139,8 @@ Open a new shell afterwards. Regenerate the script after upgrading the CLI.
 
 ## Scripting Contract
 
-`--json` emits one JSON object per invocation. The stable schema is
+`--json` emits one JSON object per invocation (watch mode emits one object per
+line). The stable schema is
 [`json-schema-v1.json`](./json-schema-v1.json), versioned by `schemaVersion: 1`.
 Amounts, fees, and deltas are decimal strings to preserve integer precision.
 Footprint entries and event payloads are base64 XDR from the successful RPC
@@ -112,11 +152,11 @@ Exit codes:
 
 | Code | Meaning |
 |---:|---|
-| 0 | Success, simulation, preparation, or no eligible claims |
+| 0 | Success, simulation, preparation, no eligible claims, or a clean SIGINT shutdown of `--watch` |
 | 1 | RPC or on-chain submission failure |
-| 2 | Invalid command or arguments |
+| 2 | Invalid command or arguments (including a sub-minimum `--interval`) |
 | 3 | Signer or encrypted key failure |
-| 4 | Soroban simulation rejected the operation |
+| 4 | Soroban simulation rejected the operation (e.g. `get_stream` on a missing stream) |
 | 5 | Transaction inclusion timeout |
 
 The schema and exit codes are part of the CLI's v1 scripting API. Breaking
@@ -134,6 +174,12 @@ The sandbox integration test exercises a real testnet Soroban simulation when
 `STREAMPAY_TEST_STREAM_ID` identify a funded recipient stream with at least one
 smallest unit available. It skips when these variables are absent. Optional
 `STREAMPAY_TEST_RPC_URL` overrides the testnet endpoint.
+
+The `status`/`get` and watch tests use an in-process mocked Soroban RPC and
+cover: one line per decoded state change, silence for unchanged polls despite
+advancing ledger metadata, SIGINT summary flush with exit 0, snapshot
+stability across invocations, the `--interval` floor, and schema validation of
+every emitted line against `json-schema-v1.json`.
 
 ## PR description
 

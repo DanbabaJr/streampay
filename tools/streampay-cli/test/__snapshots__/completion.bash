@@ -8,7 +8,7 @@ _streampay() {
   for ((i = 1; i < COMP_CWORD; i++)); do
     w="${COMP_WORDS[i]}"
     case "$w" in
-      --contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--out) ((i++)); continue ;;
+      --contract|--network|--rpc-url|--passphrase|--signer|--source|--key-file|--secret-env|--password-env|--signed-xdr|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval|--out) ((i++)); continue ;;
       -*) continue ;;
     esac
     if [[ -z "$cmd" ]]; then cmd="$w"; elif [[ -z "$sub" ]]; then sub="$w"; fi
@@ -18,14 +18,14 @@ _streampay() {
     --network) COMPREPLY=($(compgen -W "testnet mainnet" -- "$cur")); return 0 ;;
     --signer) COMPREPLY=($(compgen -W "env file ledger" -- "$cur")); return 0 ;;
     --key-file|--signed-xdr|--out) COMPREPLY=($(compgen -f -- "$cur")); return 0 ;;
-    --contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount) return 0 ;;
+    --contract|--rpc-url|--passphrase|--source|--secret-env|--password-env|--token|--recipient|--deposit|--days|--stream-id|--amount|--interval) return 0 ;;
   esac
 
   opts="--contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --dry-run --signed-xdr --json --help"
   case "$cmd" in
     "")
       if [[ "$cur" != -* ]]; then
-        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all key completion help" -- "$cur"))
+        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all status get key completion help" -- "$cur"))
         return 0
       fi
       ;;
@@ -34,6 +34,8 @@ _streampay() {
     cancel) opts="$opts --stream-id" ;;
     top-up) opts="$opts --stream-id --amount" ;;
     claim-all) ;;
+    status) opts="$opts --stream-id --watch --interval" ;;
+    get) opts="$opts --stream-id --watch --interval" ;;
     key)
       if [[ -z "$sub" && "$cur" != -* ]]; then
         COMPREPLY=($(compgen -W "encrypt" -- "$cur"))

@@ -47,6 +47,8 @@ export const GLOBAL_OPTIONS: readonly OptionSpec[] = [
 
 const STREAM_ID: OptionSpec = { name: "stream-id", kind: "value", description: "Stream id" };
 const AMOUNT: OptionSpec = { name: "amount", kind: "value", description: "Amount in smallest token units" };
+const WATCH: OptionSpec = { name: "watch", kind: "flag", description: "Poll and emit JSON Lines, one line per state change" };
+const INTERVAL: OptionSpec = { name: "interval", kind: "value", description: "Watch poll interval in milliseconds (default 5000, minimum 1000)" };
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
@@ -64,6 +66,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "cancel", description: "Cancel a stream", options: [STREAM_ID] },
   { name: "top-up", description: "Top up a stream", options: [STREAM_ID, AMOUNT] },
   { name: "claim-all", description: "Withdraw every claimable recipient stream", options: [] },
+  { name: "status", description: "Read and print one decoded stream snapshot", options: [STREAM_ID, WATCH, INTERVAL] },
+  { name: "get", description: "Alias for status", options: [STREAM_ID, WATCH, INTERVAL] },
   {
     name: "key",
     description: "Manage encrypted signer keys",
@@ -92,6 +96,9 @@ export const COMMANDS: readonly CommandSpec[] = [
 
 /** Commands that run a StreamPay contract transaction. */
 export const TRANSACTION_COMMANDS: readonly string[] = ["create", "withdraw", "cancel", "top-up", "claim-all"];
+
+/** Read-only commands: one decoded `get_stream` snapshot, optionally watched. */
+export const READ_COMMANDS: readonly string[] = ["status", "get"];
 
 function allCommandSpecs(commands: readonly CommandSpec[] = COMMANDS): CommandSpec[] {
   return commands.flatMap((command) => [command, ...allCommandSpecs(command.subcommands ?? [])]);

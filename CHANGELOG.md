@@ -16,6 +16,10 @@ interface: they are only ever appended to, never renumbered or reused.
   dispatch now read too, so completions cannot drift from real commands.
   Snapshot and drift-guard tests; install steps in the CLI README. The `--json`
   output contract is unchanged.
+- `tools/streampay-cli` read-only `status` / `get` commands and a `--watch`
+  JSON-lines mode: polls `get_stream`, emits one line per decoded state
+  change, and flushes a summary line on SIGINT. `--interval` has a 1000 ms
+  floor; changes in RPC ledger metadata never count as state changes.
 - Stream pause / resume (#24): `pause_stream` and `resume_stream`, sender only.
   While a stream is paused its accrual is frozen at the pause point (on the
   stream's own clock, so oracle-time streams freeze at the oracle time);

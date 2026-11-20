@@ -9,7 +9,7 @@ function __streampay_positionals
             continue
         end
         switch $t
-            case --contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --signed-xdr --token --recipient --deposit --days --stream-id --amount --out
+            case --contract --network --rpc-url --passphrase --signer --source --key-file --secret-env --password-env --signed-xdr --token --recipient --deposit --days --stream-id --amount --interval --out
                 set skip 1
             case '-*'
             case '*'
@@ -52,6 +52,8 @@ complete -c streampay -n '__streampay_depth 0' -f -a withdraw -d 'Withdraw from 
 complete -c streampay -n '__streampay_depth 0' -f -a cancel -d 'Cancel a stream'
 complete -c streampay -n '__streampay_depth 0' -f -a top-up -d 'Top up a stream'
 complete -c streampay -n '__streampay_depth 0' -f -a claim-all -d 'Withdraw every claimable recipient stream'
+complete -c streampay -n '__streampay_depth 0' -f -a status -d 'Read and print one decoded stream snapshot'
+complete -c streampay -n '__streampay_depth 0' -f -a get -d 'Alias for status'
 complete -c streampay -n '__streampay_depth 0' -f -a key -d 'Manage encrypted signer keys'
 complete -c streampay -n '__streampay_depth 0' -f -a completion -d 'Print a shell completion script'
 complete -c streampay -n '__streampay_depth 0' -f -a help -d 'Show usage'
@@ -73,6 +75,16 @@ complete -c streampay -n '__streampay_is cancel' -l stream-id -x -d 'Stream id'
 # top-up
 complete -c streampay -n '__streampay_is top-up' -l stream-id -x -d 'Stream id'
 complete -c streampay -n '__streampay_is top-up' -l amount -x -d 'Amount in smallest token units'
+
+# status
+complete -c streampay -n '__streampay_is status' -l stream-id -x -d 'Stream id'
+complete -c streampay -n '__streampay_is status' -l watch -d 'Poll and emit JSON Lines, one line per state change'
+complete -c streampay -n '__streampay_is status' -l interval -x -d 'Watch poll interval in milliseconds (default 5000, minimum 1000)'
+
+# get
+complete -c streampay -n '__streampay_is get' -l stream-id -x -d 'Stream id'
+complete -c streampay -n '__streampay_is get' -l watch -d 'Poll and emit JSON Lines, one line per state change'
+complete -c streampay -n '__streampay_is get' -l interval -x -d 'Watch poll interval in milliseconds (default 5000, minimum 1000)'
 
 # key
 complete -c streampay -n '__streampay_is key; and __streampay_depth 1' -f -a encrypt -d 'Write an encrypted signer key file'
