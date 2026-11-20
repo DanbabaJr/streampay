@@ -15,10 +15,18 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
+import { completionScript, isCompletionShell } from "./completion.ts";
+import {
+  COMPLETION_SHELLS,
+  NETWORKS,
+  SIGNER_MODES,
+  TRANSACTION_COMMANDS,
+  booleanFlags as registryBooleanFlags,
+} from "./registry.ts";
 import { durationSecondsFromDays } from "../../../scripts/lib/duration.ts";
 
 type OutputMode = "json" | "text";
-type SignerMode = "env" | "file" | "ledger";
+type SignerMode = (typeof SIGNER_MODES)[number];
 
 interface Options {
   command: string;
@@ -84,6 +92,7 @@ function usage(): string {
   return `Usage:
   streampay [global options] <create|withdraw|cancel|top-up|claim-all> [options]
   streampay key encrypt --out <file> [--secret-env <name>] [--password-env <name>]
+  streampay completion <bash|zsh|fish>
 
 Global options:
   --contract <C...>       StreamPay contract id
@@ -115,7 +124,7 @@ function parseArgs(argv: string[]): Options {
   const values = new Map<string, string>();
   const flags = new Set<string>();
   const positional: string[] = [];
-  const booleanFlags = new Set(["--json", "--dry-run", "--cancelable", "--force", "--help"]);
+  const booleanFlags = registryBooleanFlags();
   let wantsHelp = argv.includes("-h");
   for (let index = 0; index < argv.length; index += 1) {
     const part = argv[index];
@@ -137,7 +146,7 @@ function parseArgs(argv: string[]): Options {
     index += 1;
   }
   const command = wantsHelp ? "help" : positional[0] ?? "help";
-  const subcommand = command === "key" ? positional[1] : undefined;
+  const subcommand = command === "key" || command === "completion" ? positional[1] : undefined;
   return {
     command,
     subcommand,
@@ -175,7 +184,7 @@ function parsePositiveInteger(value: string, label: string): bigint {
 
 function networkConfig(options: Options): { passphrase: string; rpcUrl: string; label: string } {
   const network = getOption(options, "network") ?? "testnet";
-  if (network !== "testnet" && network !== "mainnet") {
+  if (!(NETWORKS as readonly string[]).includes(network)) {
     throw new CliError("--network must be testnet or mainnet", "USAGE", 2);
   }
   const passphrase = getOption(options, "passphrase") ??
@@ -551,6 +560,15 @@ async function resolveOptionsAndRun(options: Options): Promise<{ value: Record<s
   if (options.command === "help") {
     return { value: { schemaVersion: 1, ok: true, help: usage() }, exitCode: 0 };
   }
+  if (options.command === "completion") {
+    if (options.json) {
+      throw new CliError("completion prints a shell script; drop --json", "USAGE", 2);
+    }
+    if (!isCompletionShell(options.subcommand)) {
+      throw new CliError(`completion needs a shell: ${COMPLETION_SHELLS.join(", ")}`, "USAGE", 2);
+    }
+    return { value: { script: completionScript(options.subcommand) }, exitCode: 0 };
+  }
   if (options.command === "key" && options.subcommand === "encrypt") {
     const output = required(options, "out");
     const secretEnv = getOption(options, "secret-env") ?? "STREAMPAY_SECRET_KEY";
@@ -572,14 +590,14 @@ async function resolveOptionsAndRun(options: Options): Promise<{ value: Record<s
     }
     return { value: { schemaVersion: 1, ok: true, command: "key encrypt", keyFile: output }, exitCode: 0 };
   }
-  if (!["create", "withdraw", "cancel", "top-up", "claim-all"].includes(options.command)) {
+  if (!TRANSACTION_COMMANDS.includes(options.command)) {
     throw new CliError(`unknown command: ${options.command}`, "USAGE", 2);
   }
 
   const contractId = parseAddress(required(options, "contract"), "contract");
   const network = networkConfig(options);
   const signerMode = (getOption(options, "signer") ?? (options.dryRun ? "ledger" : "env")) as SignerMode;
-  if (!["env", "file", "ledger"].includes(signerMode)) {
+  if (!(SIGNER_MODES as readonly string[]).includes(signerMode)) {
     throw new CliError("--signer must be env, file, or ledger", "USAGE", 2);
   }
   const signer = readSecret(signerMode, options);
@@ -742,6 +760,10 @@ function printResult(value: Record<string, unknown>, mode: OutputMode): void {
   }
   if (value.help) {
     console.log(String(value.help));
+    return;
+  }
+  if (typeof value.script === "string") {
+    process.stdout.write(value.script);
     return;
   }
   if (value.command === "key encrypt") {

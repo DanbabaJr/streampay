@@ -46,6 +46,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { validateWithdrawal } from "@/lib/withdrawal";
 import { formatAmount } from "@/lib/format";
 import DiscoveryConsentModal from "@/components/DiscoveryConsentModal";
+import { StreamDetailSkeleton } from "@/components/skeletons/StreamDetailSkeleton";
 
 export default function StreamDetail() {
   const toast = useToast();
@@ -206,12 +207,7 @@ export default function StreamDetail() {
     );
   }
   if (!stream) {
-    return (
-      <main className="wrap">
-        <h1>Stream #{id}</h1>
-        <p className="muted">Loading…</p>
-      </main>
-    );
+    return <StreamDetailSkeleton streamId={id} />;
   }
 
   const deposit = BigInt(stream.deposit);

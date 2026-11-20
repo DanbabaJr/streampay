@@ -279,6 +279,22 @@ export class OutboxStore {
     return "scheduled";
   }
 
+  /**
+   * Graceful-shutdown release: hand one claim this process still holds back to
+   * `pending` without burning an attempt. Guarded by the claim token, so it can
+   * never steal an intent another dispatcher process has claimed or finished.
+   */
+  releaseClaim(intentId: number, claimToken: string): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE outbox_intents
+         SET state = 'pending', claimed_at = NULL, claim_token = NULL
+         WHERE id = ? AND state = 'in_flight' AND claim_token = ?`
+      )
+      .run(intentId, claimToken);
+    return res.changes === 1;
+  }
+
   /** Crash recovery: return in_flight intents whose claim timed out to pending. */
   reclaimStale(claimTimeoutMs: number, nowMs: number): number {
     const res = this.db
@@ -292,16 +308,26 @@ export class OutboxStore {
     return res.changes;
   }
 
-  /** Manual dead-letter replay: reset to pending for immediate re-dispatch. */
-  replayIntent(intentId: number): boolean {
+  /**
+   * Manual dead-letter replay: reset to pending for immediate re-dispatch.
+   * Guarded on `state = 'dead'`, so replaying an intent that is already
+   * pending, in flight or delivered is a no-op (returns false).
+   *
+   * By default `attempts` is preserved (the HTTP replay endpoint's historical
+   * behaviour). Pass `resetAttempts` to give the intent a fresh retry budget,
+   * which the operator replay tool uses so one transient failure right after
+   * recovery does not immediately dead-letter the intent again.
+   */
+  replayIntent(intentId: number, opts: { resetAttempts?: boolean } = {}): boolean {
     const res = this.db
       .prepare(
         `UPDATE outbox_intents
          SET state = 'pending', next_retry_at = 0, dead_reason = NULL, last_error = NULL,
-             claimed_at = NULL, claim_token = NULL
+             claimed_at = NULL, claim_token = NULL,
+             attempts = CASE WHEN ? = 1 THEN 0 ELSE attempts END
          WHERE id = ? AND state = 'dead'`
       )
-      .run(intentId);
+      .run(opts.resetAttempts ? 1 : 0, intentId);
     return res.changes === 1;
   }
 

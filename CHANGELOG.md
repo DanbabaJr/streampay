@@ -16,6 +16,12 @@ interface: they are only ever appended to, never renumbered or reused.
   a field reference in `tools/streampay-state/README.md`. The default text
   output and exit codes are unchanged. Tests validate every report emitted for
   the new snapshot fixtures against the schema. `jsonschema` is a dev-dependency.
+- CLI shell completions (#518): `streampay completion <bash|zsh|fish>` prints a
+  static completion script generated from the CLI's command registry
+  (`tools/streampay-cli/src/registry.ts`), which the argument parser and
+  dispatch now read too, so completions cannot drift from real commands.
+  Snapshot and drift-guard tests; install steps in the CLI README. The `--json`
+  output contract is unchanged.
 - Stream pause / resume (#24): `pause_stream` and `resume_stream`, sender only.
   While a stream is paused its accrual is frozen at the pause point (on the
   stream's own clock, so oracle-time streams freeze at the oracle time);

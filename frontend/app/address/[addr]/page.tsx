@@ -2,12 +2,10 @@ import type { Metadata } from "next";
 import {
   fetchAddressStreamsPage,
   fetchStreamsFor,
-  type StreamRoleFilter,
-  type StreamStatusFilter,
-  type PaginationDirection,
   type StreamView,
 } from "@/lib/stellar";
 import AddressExplorerClient, { type AddressStats } from "./AddressExplorerClient";
+import { parseAddressExplorerUrlState } from "@/lib/address-explorer-url";
 
 interface AddressPageProps {
   params: Promise<{ addr: string }>;
@@ -56,28 +54,15 @@ export default async function AddressPage({
   const { addr } = await params;
   const sp = await searchParams;
 
-  const rawTab = typeof sp.tab === "string" ? sp.tab : "all";
-  const tab: StreamRoleFilter =
-    rawTab === "incoming" || rawTab === "outgoing" ? rawTab : "all";
-
-  const rawStatus = typeof sp.status === "string" ? sp.status : "all";
-  const status: StreamStatusFilter =
-    rawStatus === "active" || rawStatus === "ended" ? rawStatus : "all";
-
-  const cursor = typeof sp.cursor === "string" ? sp.cursor : null;
-  const dir: PaginationDirection =
-    sp.dir === "backward" ? "backward" : "forward";
-
-  const limitParam = typeof sp.limit === "string" ? parseInt(sp.limit, 10) : 10;
-  const limit = isNaN(limitParam) ? 10 : Math.max(1, Math.min(limitParam, 50));
+  const state = parseAddressExplorerUrlState(sp);
 
   // Fetch paginated page for display
   const pageResult = await fetchAddressStreamsPage(addr, {
-    cursor,
-    direction: dir,
-    limit,
-    role: tab,
-    status,
+    cursor: state.cursor,
+    direction: state.direction,
+    limit: state.limit,
+    role: state.tab,
+    status: state.status,
   });
 
   // Calculate full account overview stats across both roles
@@ -114,8 +99,11 @@ export default async function AddressPage({
       address={addr}
       streams={pageResult.streams}
       asOfTimestamp={pageResult.asOfTimestamp}
-      tab={tab}
-      status={status}
+      tab={state.tab}
+      status={state.status}
+      page={state.page}
+      sort={state.sort}
+      limit={state.limit}
       nextCursor={pageResult.nextCursor}
       prevCursor={pageResult.prevCursor}
       hasMore={pageResult.hasMore}
