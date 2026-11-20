@@ -14,6 +14,7 @@ import { OutboxMetrics } from "./outbox/metrics.js";
 import { httpPushTransport } from "./outbox/http-transport.js";
 import { traceCorrelationRegistry } from "./telemetry.js";
 import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
+import { GrpcIndexerServer } from "./grpc/server.js";
 import { loadRotationConfig, rpcAuthHeaders } from "./secrets/config.js";
 import { WebhookKeyRotation } from "./secrets/rotation.js";
 import { registerGraphQLRoutes, type GraphQLHandlerOptions } from "./graphql/index.js";
@@ -594,6 +595,21 @@ export async function run(): Promise<void> {
   }
 
   const server = app.listen(port, () => console.log(`StreamPay indexer listening on http://localhost:${port}`));
+
+  // gRPC streaming transport (issue #579): server-streaming Subscribe on
+  // node:http2, alongside REST/SSE. Disabled with GRPC_PORT=0.
+  const grpcPort = Number(process.env.GRPC_PORT ?? 8788);
+  let grpcServer: GrpcIndexerServer | undefined;
+  if (grpcPort > 0) {
+    grpcServer = new GrpcIndexerServer(store, {
+      port: grpcPort,
+      maxSubscriptionsPerTenant: envInt("GRPC_MAX_SUBSCRIPTIONS_PER_TENANT", 5),
+      maxEventsPerSecondPerTenant: envInt("GRPC_MAX_EVENTS_PER_SECOND_PER_TENANT", 100),
+      maxQueuePerSubscription: envInt("GRPC_MAX_QUEUE_PER_SUBSCRIPTION", 100),
+    });
+    const actualGrpcPort = await grpcServer.listen(grpcPort);
+    console.log(`StreamPay indexer gRPC listening on http://localhost:${actualGrpcPort} (streampay.indexer.v1.StreamPayIndexer/Subscribe)`);
+  }
   let inFlightPoll: Promise<void> | null = null;
   let shuttingDown = false;
 
@@ -626,6 +642,7 @@ export async function run(): Promise<void> {
       server.close();
       // SSE streams never end on their own; without this `close()` would wait forever.
       server.closeAllConnections();
+      void grpcServer?.close();
     },
     pipeline,
     inFlightIngest: () => inFlightPoll,

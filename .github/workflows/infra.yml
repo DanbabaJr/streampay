@@ -196,3 +196,89 @@ jobs:
       # invalid fixture and requires variable validation to reject it.
       - name: Self-test — invalid fixture must fail the gate
         run: sh scripts/plan_gate.sh --self-test
+  # --------------------------------------------------------------------------
+  # Indexer image (issue #543): multi-arch build + size budget.
+  #
+  # These jobs only run for changes that can move the image: the Dockerfile,
+  # the indexer's dependency manifests, the budget/baseline and this workflow.
+  # --------------------------------------------------------------------------
+  docker-changes:
+    name: Infra — detect container changes
+    runs-on: ubuntu-latest
+    outputs:
+      indexer: ${{ steps.filter.outputs.indexer }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The diff needs the PR base commit, not a depth-1 checkout.
+          fetch-depth: 0
+
+      - id: filter
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "indexer=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base...HEAD" | grep -Eq '^(infra/docker/|indexer/package(-lock)?\.json$|perf/baselines/docker\.json$|perf/harness/check_image_budget\.mjs$|perf/test/image_budget\.test\.mjs$|\.github/workflows/infra\.yml$)'; then
+            echo "indexer=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "indexer=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  indexer-image:
+    name: Indexer image — multi-arch build + size budget
+    needs: docker-changes
+    if: needs.docker-changes.outputs.indexer == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Size-gate unit tests
+        run: node --test perf/test/image_budget.test.mjs
+
+      # QEMU supplies the arm64 instruction set on an amd64 runner; buildx is
+      # the builder that can target more than one platform.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build linux/amd64 image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f infra/docker/Dockerfile.indexer \
+            -t streampay/indexer:ci \
+            .
+
+      - name: Enforce image size budget (amd64)
+        run: node perf/harness/check_image_budget.mjs --image streampay/indexer:ci --key indexer
+
+      # No registry login: both stages use a pinned public base-image digest.
+      - name: Build linux/arm64 image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --load \
+            -f infra/docker/Dockerfile.indexer \
+            -t streampay/indexer:ci-arm64 \
+            .
+
+      - name: Enforce image size budget (arm64)
+        run: node perf/harness/check_image_budget.mjs --image streampay/indexer:ci-arm64 --key indexer
+
+      # A gate that cannot fail is not a gate. The fixture adds a 256 MiB
+      # layer and MUST exceed the budget.
+      - name: Self-test — bloated fixture must fail the budget
+        run: node perf/harness/check_image_budget.mjs --self-test --key indexer
+
+      # One build for both platforms, discarded instead of pushed. This proves
+      # the multi-arch manifest can be produced without credentials.
+      - name: Multi-arch manifest build (no push)
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --output type=cacheonly \
+            -f infra/docker/Dockerfile.indexer \
+            .
