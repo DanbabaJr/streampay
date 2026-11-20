@@ -20,7 +20,10 @@ pub use math::{
     ModelRateSegment,
 };
 pub use model::{ModelMutations, StreamPayModel};
-pub use seeds::all_seeded_scenarios;
+pub use seeds::{
+    all_seeded_scenarios, generate_sequence, generate_sequence_with_rng, SeedExpander,
+    GENERATED_SEQUENCE_LEN, SEED_EXPANSION_VERSION,
+};
 pub use types::{
     ModelFeeScan, ModelStream, ModelStreamStatus, ModelTreasury, ModelTreasuryStatus,
     BPS_DENOMINATOR, MAX_DURATION_SECONDS, MAX_FEE_BPS, MAX_PAGE_SIZE,

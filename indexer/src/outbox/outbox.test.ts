@@ -240,6 +240,31 @@ describe("outbox dispatcher: delivery, retry, dead-letter", () => {
     }
   });
 
+  it("breaks dispatch outcomes down by destination host (additive, non-breaking)", async () => {
+    const store = new StreamStore(":memory:");
+    try {
+      const delivered: string[] = [];
+      store.outbox.createConsumer({ id: "push-a", kind: "push", url: "https://Hooks.Example.COM/v1/notify" });
+      store.ingestPage([decodedEvent("ev-1", 10), decodedEvent("ev-2", 11)], "c", 12);
+      const metrics = new OutboxMetrics();
+      const dispatcher = new OutboxDispatcher(store.outbox, recordingTransport(delivered), metrics, {
+        tickMs: 1000,
+        batchSize: 50,
+      });
+      await dispatcher.drainAll();
+      const body = metrics.render(store.outbox.stats());
+      // New per-destination counter, host lowercased from the URL.
+      assert.equal(
+        body.includes('streampay_outbox_delivery_total{destination="hooks.example.com",outcome="delivered"} 2'),
+        true
+      );
+      // The pre-existing unlabelled aggregate is untouched.
+      assert.equal(body.includes('streampay_outbox_dispatch_total{outcome="delivered"} 2'), true);
+    } finally {
+      store.close();
+    }
+  });
+
   it("retries with backoff+jitter then dead-letters after max attempts", async () => {
     const store = new StreamStore(":memory:");
     try {

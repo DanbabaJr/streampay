@@ -19,8 +19,16 @@ type AssetChoice = "native" | "contract";
 
 export default function StreamForm({
   onCreate,
+  submitting = false,
 }: {
   onCreate: (args: StreamArgs) => Promise<void>;
+  /**
+   * Render the in-flight (submitting) state directly instead of only reaching it
+   * by interaction. The internal `busy` flag is seeded from this prop, so the
+   * disabled/pending UI is reachable from props — which a static visual capture
+   * and unit tests depend on. Normal callers omit it and drive `busy` via submit.
+   */
+  submitting?: boolean;
 }) {
   const [asset, setAsset] = useState<AssetChoice>("native");
   const [contractMeta, setContractMeta] = useState<AssetMeta | null>(null);
@@ -31,7 +39,7 @@ export default function StreamForm({
     days: "30",
     cancelable: true,
   });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(submitting);
   const [policy, setPolicy] = useState<StreamPolicyView | null>(null);
   const [policyError, setPolicyError] = useState<string | null>(null);
 
@@ -218,6 +226,7 @@ export default function StreamForm({
             id={assetId}
             value={asset}
             onChange={(e) => setAsset(e.target.value as AssetChoice)}
+            disabled={busy}
             required
           >
             <option value="native">{t("form.assetNative")}</option>
@@ -240,6 +249,7 @@ export default function StreamForm({
               onChange={set("token")}
               aria-describedby={tokenHintId}
               autoComplete="off"
+              disabled={busy}
             />
             <span id={tokenHintId} className="sr-only">
               {t("form.tokenHint")}
@@ -261,6 +271,7 @@ export default function StreamForm({
             onChange={set("recipient")}
             aria-describedby={recipientHintId}
             autoComplete="off"
+            disabled={busy}
           />
           <span id={recipientHintId} className="sr-only">
             {t("form.recipientHint")}
@@ -289,6 +300,7 @@ export default function StreamForm({
             onChange={set("deposit")}
             aria-describedby={`${depositHintId} ${depositErrorId}`}
             aria-invalid={depositParse.ok ? undefined : true}
+            disabled={busy}
           />
           <span id={depositHintId} className="sr-only">
             {t("form.depositHint")}
@@ -318,6 +330,7 @@ export default function StreamForm({
             required
             value={args.days}
             onChange={set("days")}
+            disabled={busy}
           />
         </div>
 
@@ -327,6 +340,7 @@ export default function StreamForm({
             id={cancelableId}
             value={args.cancelable ? "yes" : "no"}
             onChange={set("cancelable")}
+            disabled={busy}
           >
             <option value="yes">{t("form.yes")}</option>
             <option value="no">{t("form.no")}</option>
@@ -437,7 +451,12 @@ export default function StreamForm({
         </div>
       )}
 
-      <button type="submit" disabled={busy}>
+      <button type="submit" disabled={busy} aria-busy={busy || undefined}>
+        {busy && (
+          <span className="spinner" aria-hidden="true" style={{ marginRight: "0.5rem" }}>
+            {"◌"}
+          </span>
+        )}
         {busy ? t("form.submitting") : t("form.submit")}
       </button>
     </form>

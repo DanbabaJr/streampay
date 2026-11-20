@@ -1,0 +1,54 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/template_approved.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when governance approves a new stream template or version.",
+  "properties": {
+    "duration": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "token": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "version",
+    "token",
+    "duration"
+  ],
+  "title": "TemplateApproved",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "template_approved",
+    "fingerprint": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u32"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "template_id",
+        "type": "u32"
+      }
+    ]
+  }
+}

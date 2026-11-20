@@ -356,6 +356,16 @@ pub(crate) fn kind_for_key(env: &Env, key_sc: &xdr::ScVal) -> Option<String> {
             DataKey::SenderHistory(_) => "sender_history",
             DataKey::RefundTarget(_) => "refund_target",
             DataKey::StreamPause(_) => "stream_pause",
+            DataKey::ReceivablesConfig => "receivables_config",
+            DataKey::Advance(_) => "advance",
+            DataKey::NextConditionId => "next_condition_id",
+            DataKey::StreamCondition(_) => "stream_condition",
+            DataKey::ConditionAttestation(_, _) => "condition_attestation",
+            DataKey::Template(_, _) => "template",
+            DataKey::LatestTemplateVersion(_) => "latest_template_version",
+            DataKey::StreamTemplateLineage(_) => "stream_template_lineage",
+            DataKey::StreamHook(_, _) => "stream_hook",
+            DataKey::StreamReentrancyLock(_) => "stream_reentrancy_lock",
         }));
     }
     if let Ok(pk) = PolicyDataKey::try_from_val(env, key_sc) {
