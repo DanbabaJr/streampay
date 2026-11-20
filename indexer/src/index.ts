@@ -15,6 +15,8 @@ import { httpPushTransport } from "./outbox/http-transport.js";
 import { traceCorrelationRegistry } from "./telemetry.js";
 import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
 import { GrpcIndexerServer } from "./grpc/server.js";
+import { loadRotationConfig, rpcAuthHeaders } from "./secrets/config.js";
+import { WebhookKeyRotation } from "./secrets/rotation.js";
 import { registerGraphQLRoutes, type GraphQLHandlerOptions } from "./graphql/index.js";
 import type { DecodedEvent, Stream } from "./types.js";
 
@@ -478,10 +480,14 @@ export async function run(): Promise<void> {
 
   // ── RPC manager: shared across the indexer, replaces the ad-hoc fetch helper.
   // Additional endpoints can be added via RPC_URL_FALLBACK_1, RPC_URL_FALLBACK_2 env vars.
-  const rpcEndpoints = [{ url: rpcUrl }];
+  //
+  // Credentials travel as per-request headers (issue #615), so a rotation swaps
+  // them between requests instead of tearing down client connections.
+  const rpcHeaders = rpcAuthHeaders(process.env);
+  const rpcEndpoints = [{ url: rpcUrl, headers: rpcHeaders }];
   for (let i = 1; i <= 5; i++) {
     const extra = process.env[`RPC_URL_FALLBACK_${i}`];
-    if (extra) rpcEndpoints.push({ url: extra });
+    if (extra) rpcEndpoints.push({ url: extra, headers: rpcHeaders });
   }
   const manager = getGlobalRpcManager({
     endpoints: rpcEndpoints,
@@ -495,6 +501,18 @@ export async function run(): Promise<void> {
 
   const dispatcher = new WebhookDispatcher(store.webhooks);
   dispatcher.start();
+
+  // ── Webhook signing-key rotation (issue #615): the sweep retires a previous
+  // key once its overlap window has elapsed. Verification already refuses an
+  // expired previous key, so a paused or delayed sweep can only keep a key for
+  // its full window — never longer.
+  const rotationConfig = loadRotationConfig(process.env);
+  const webhookRotation = new WebhookKeyRotation(store.webhooks, { policy: rotationConfig.policy });
+  const webhookSweep = setInterval(
+    () => webhookRotation.sweep(),
+    rotationConfig.webhookSweepIntervalMs
+  );
+  webhookSweep.unref();
 
   const outboxMetrics = new OutboxMetrics({
     alarmWindow: envInt("OUTBOX_ALARM_WINDOW", 8),
