@@ -1,8 +1,11 @@
 # 🛡️ StreamPay External Audit Scope & Hand-in Package
 
-- **Target Version**: `v1.0.0-rc` (Audit Preparation)
+- **Target Version**: `v1.0.0-rc` (Audit Preparation - Refreshed Scope)
 - **Target Network**: Stellar Mainnet (Soroban Protocol 22 / Protocol 23 / Protocol 24+)
-- **Primary Contract Crate**: `contracts/streaming-payments/` (`streampay-contract`)
+- **In-Scope Contract Crates**:
+  - `contracts/streaming-payments/` (`streampay-contract`) — Core escrow engine & gas sponsorship
+  - `contracts/passkey-signer/` (`streampay-passkey-signer`) — On-chain WebAuthn assertion verification
+  - `contracts/stream-nft/` (`streampay-stream-nft`) — Companion single-unit SEP-41 stream NFT
 - **Pinned Rust Toolchain**: `1.99.1` (`rust-toolchain.toml`)
 - **Pinned Stellar CLI**: `28.1.0` (`.github/workflows/ci.yml`, `docs/REPRODUCING.md`)
 - **Associated Roadmap Milestone**: [README Roadmap v1.0](../README.md#roadmap)
@@ -13,11 +16,11 @@
 
 This hand-in package provides external security auditors with everything required to begin an audit of the StreamPay smart contract protocol immediately and efficiently.
 
-StreamPay is a high-assurance, continuous payment streaming engine implemented for the Stellar network's Soroban smart contract platform. It provides second-by-second linear release of deposited escrowed tokens from a sender to a designated recipient. Core use cases include automated payroll, continuous token vesting schedules, and pay-as-you-go subscriptions.
+StreamPay is a high-assurance, continuous payment streaming engine implemented for the Stellar network's Soroban smart contract platform. It provides second-by-second linear release of deposited escrowed tokens from a sender to a designated recipient. Core use cases include automated payroll, continuous token vesting schedules, and pay-as-you-go subscriptions. The protocol also includes an on-chain WebAuthn assertion verifier for passkey claim gating (`contracts/passkey-signer/`), a companion SEP-41 non-fungible token mapping stream recipient rights to an NFT (`contracts/stream-nft/`), and inner-authorization gas sponsorship (`contracts/streaming-payments/src/sponsor.rs`).
 
 ### Quick Orientation Links
 - **Architecture & Math Specification**: [`docs/ARCHITECTURE.md`](./ARCHITECTURE.md)
-- **Threat Model & Adversary Matrix**: [`docs/THREAT_MODEL.md`](./THREAT_MODEL.md)
+- **Threat Model & Adversary Matrix**: [`docs/THREAT_MODEL.md`](./THREAT_MODEL.md) (Refreshed 10-adversary matrix covering core streaming, passkey verification, companion stream NFTs, and sponsorship)
 - **Formal Verification Study & Invariant Proofs**: [`docs/VERIFICATION.md`](./VERIFICATION.md)
 - **Reproducible Build Verification**: [`docs/REPRODUCING.md`](./REPRODUCING.md)
 - **Conservation Property Fuzzing**: [`docs/CONSERVATION_FUZZ.md`](./CONSERVATION_FUZZ.md)
@@ -27,7 +30,7 @@ StreamPay is a high-assurance, continuous payment streaming engine implemented f
 
 ## 2. In-Scope Entrypoint Catalog
 
-The audit scope comprises the core smart contract in [`contracts/streaming-payments/`](../contracts/streaming-payments/). All mutating entrypoints enforce explicit authentication (`require_auth`), follow strict Checks-Effects-Interactions (CEI) sequencing, manage persistent storage TTLs, and emit strongly typed contract events.
+The audit scope comprises the core smart contract in [`contracts/streaming-payments/`](../contracts/streaming-payments/) and its companion contracts in [`contracts/passkey-signer/`](../contracts/passkey-signer/) and [`contracts/stream-nft/`](../contracts/stream-nft/). All mutating entrypoints enforce explicit authentication (`require_auth`), follow strict Checks-Effects-Interactions (CEI) sequencing, manage persistent storage TTLs, and emit strongly typed contract events.
 
 ### 2.1 Core Streaming Lifecycle (Deposit, Accrual & Payouts)
 
@@ -52,6 +55,8 @@ The audit scope comprises the core smart contract in [`contracts/streaming-payme
 | `reclaim_expired` | Anyone (permissionless) | Sets status to `Expired` | Refunds remaining unexecuted escrow to intent `sender` | `ScheduledIntentExpired` | `IntentNotFound` (18), `IntentNotPending` (19), `IntentNotExpired` (25), `SenderRefundFailed` (29) |
 
 ### 2.3 Gas Sponsorship & Delegated Claims
+
+> Cross-link: Threat model analysis, adversary matrix row, and formal invariants are detailed in [`docs/THREAT_MODEL.md` (§6.2 Row 10)](./THREAT_MODEL.md#row-10-sponsor-allowance-drainer--griefing-relayer-sponsorrs) and [`docs/THREAT_MODEL.md` (§12)](./THREAT_MODEL.md#12-gas-sponsorship-issue-57-adversary-matrix-and-mitigations).
 
 | Entrypoint | Authorized Caller | State Mutation | Token Movement | Emitted Events | Primary Error Codes |
 |---|---|---|---|---|---|
@@ -92,6 +97,44 @@ The audit scope comprises the core smart contract in [`contracts/streaming-payme
 | `is_frozen` | Current contract freeze state | None | `bool` |
 | `pending_upgrade` | Current pending upgrade proposal and timelock unlock timestamp | None | `Option<PendingUpgrade>` |
 | `schema_version` | Current contract storage schema version | None | `u32` |
+
+### 2.6 Passkey Signer Companion Contract (`contracts/passkey-signer/`)
+
+The passkey signer contract implements on-chain WebAuthn Level 3 assertion verification for Soroban smart accounts. It enables non-custodial stream recipients without a browser-extension wallet to claim funds from a mobile device or security key using device-bound passkeys.
+
+> Cross-link: Threat model analysis, adversary matrix row, and residual risks are detailed in [`docs/THREAT_MODEL.md` (§6.2 Row 8)](./THREAT_MODEL.md#row-8-passkey-compromiser--phisher-webauthn-credential-theft-replay--challenge-phishing).
+
+| Entrypoint | Authorized Caller (`require_auth`) | State Mutation | Token Movement | Emitted Events | Primary Error Codes |
+|---|---|---|---|---|---|
+| `register` | `owner` | Binds P-256 public key `(x, y)`, `rp_id_hash`, and `flags` to `owner` | None | None | None |
+| `deregister` | `owner` | Removes bound `Credential` persistent storage entry | None | None | `CredentialNotFound` (1) |
+| `verify_and_record` | Anyone (relayer / recipient) | Validates assertion and records challenge bytes in `registry::record_challenge` | None | None | `CredentialNotFound` (1), `AuthDataTooShort` (3), `RpIdHashMismatch` (4), `UserPresenceNotSet` (5), `UserVerificationNotSet` (6), `ClientDataJsonInvalid` (7), `ClientDataTypeMismatch` (8), `ChallengeMismatch` (9), `SignatureInvalid` (10), `ChallengeAlreadyUsed` (11) |
+| `get_credential` (query) | Anyone | Reads stored `Credential` | None | None | `CredentialNotFound` (1) |
+| `is_nonce_used` (query) | Anyone | Checks whether challenge nonce has been consumed | None | None | None |
+
+### 2.7 Stream NFT Companion Contract (`contracts/stream-nft/`)
+
+The Stream NFT contract implements a companion non-fungible token per stream via the Soroban SEP-41 token interface for a single unit (balance of 1, 0 decimals). Stream recipient rights map directly to companion NFT token ownership, enabling transferable payment streams and delegated claims.
+
+> Cross-link: Threat model analysis, adversary matrix row, and residual risks are detailed in [`docs/THREAT_MODEL.md` (§6.2 Row 9)](./THREAT_MODEL.md#row-9-nft-manipulator-ownership-confusion-unauthorized-transfer--metadata-spoofing).
+
+| Entrypoint | Authorized Caller (`require_auth`) | State Mutation | Token Movement | Emitted Events | Primary Error Codes |
+|---|---|---|---|---|---|
+| `initialize` | Anyone (deployer) | Initializes `CoreContract`, `Admin`, `StreamId`, `Burned` instance storage | None | None | `AlreadyInitialized` (1) |
+| `mint` | `Admin` | Binds 1-unit NFT to initial stream recipient; verifies core stream is `Active` and matches `recipient` | None | `NftMinted` | `AlreadyMinted` (4), `TokenBurned` (6), `StreamNotActive` (9), `NotAuthorized` (3), `NotInitialized` (2) |
+| `transfer` | `from` (current owner) | Updates `NftDataKey::Owner` to `to` | None | `NftTransferred` | `NotAuthorized` (3), `InvalidAmount` (7), `TokenBurned` (6) |
+| `transfer_from` | `spender` | Consumes operator allowance and transfers ownership to `to` | None | `NftTransferred` | `InsufficientAllowance` (8), `InvalidAmount` (7), `TokenBurned` (6) |
+| `approve` | `from` (current owner) | Sets `Allowance` record for `spender` with `live_until_ledger` | None | None | `NotAuthorized` (3), `InvalidAmount` (7), `TokenBurned` (6) |
+| `withdraw` | `Owner` or authorized operator | Invokes `CoreStreamPayClient::withdraw`; burns NFT if stream reaches `Depleted` | Transfers funds via core contract to recipient | None (core emits `Withdrawn`) | `NotAuthorized` (3), `StreamNotActive` (9), `TokenBurned` (6) |
+| `withdraw_max` | `Owner` or authorized operator | Invokes `CoreStreamPayClient::withdraw_max`; burns NFT if stream reaches `Depleted` | Transfers funds via core contract to recipient | None (core emits `Withdrawn`) | `NotAuthorized` (3), `StreamNotActive` (9), `TokenBurned` (6) |
+| `burn` | `from` (current owner) | Sets `Burned = true`; removes `Owner` | None | `NftBurned` | `NotAuthorized` (3), `InvalidAmount` (7), `TokenBurned` (6) |
+| `burn_from` | `spender` | Consumes operator allowance and burns token | None | `NftBurned` | `InsufficientAllowance` (8), `InvalidAmount` (7), `TokenBurned` (6) |
+| `finalize_and_burn` | Anyone | Verifies core stream is `Depleted` or `Cancelled`, then burns token | None | `NftBurned` | `StreamNotFinalized` (10), `StreamNotActive` (9), `TokenBurned` (6) |
+| `owner` (query) | Anyone | Reads current NFT owner address | None | None | `NotMinted` (5), `TokenBurned` (6) |
+| `balance` (query) | Anyone | Returns 1 if `id == owner`, else 0 | None | None | None |
+| `allowance` (query) | Anyone | Reads active allowance for operator | None | None | None |
+| `stream_id` (query) | Anyone | Returns bound core stream ID | None | None | `NotInitialized` (2) |
+| `core_contract` (query) | Anyone | Returns core stream contract address | None | None | `NotInitialized` (2) |
 
 ---
 

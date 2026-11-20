@@ -3,6 +3,7 @@
   "network": "Stellar / Soroban",
   "version": "v0.4.0",
   "measured_at": "2026-10-27",
+  "cpu_recut": "withdraw/withdraw_max/cancel_stream/top_up cpu_instructions re-measured 2026-11-20 by the CI harness (deterministic host metering) after #620's withdraw-intercept, condition-gate and hook legs; memory/event/fee fields carry the 2026-10-27 capture.",
   "storage": {
     "stream_struct_bytes": 444,
     "stream_key_bytes": 40,
@@ -31,28 +32,28 @@
       "estimated_fee_xlm": 0.00035
     },
     "withdraw": {
-      "cpu_instructions": 384170,
+      "cpu_instructions": 455405,
       "memory_bytes": 153255,
       "event_bytes": 236,
       "estimated_fee_stroops": 2450,
       "estimated_fee_xlm": 0.000245
     },
     "withdraw_max": {
-      "cpu_instructions": 399417,
+      "cpu_instructions": 537367,
       "memory_bytes": 154039,
       "event_bytes": 236,
       "estimated_fee_stroops": 2410,
       "estimated_fee_xlm": 0.000241
     },
     "cancel_stream": {
-      "cpu_instructions": 591737,
+      "cpu_instructions": 660721,
       "memory_bytes": 197100,
       "event_bytes": 248,
       "estimated_fee_stroops": 3200,
       "estimated_fee_xlm": 0.00032
     },
     "top_up": {
-      "cpu_instructions": 495406,
+      "cpu_instructions": 499793,
       "memory_bytes": 183484,
       "event_bytes": 76
     },

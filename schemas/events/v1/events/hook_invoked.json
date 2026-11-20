@@ -1,0 +1,46 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/hook_invoked.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an integrator callback hook is invoked successfully.",
+  "properties": {
+    "callback_contract": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "event_class": {
+      "description": "Soroban symbol (a short upper-/lower-case tag, not free text).",
+      "type": "string",
+      "x-soroban-type": "Symbol"
+    }
+  },
+  "required": [
+    "event_class",
+    "callback_contract"
+  ],
+  "title": "HookInvoked",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "hook_invoked",
+    "fingerprint": "sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

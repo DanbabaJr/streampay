@@ -1,0 +1,65 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/template_instantiated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a stream is instantiated from an approved template.",
+  "properties": {
+    "deposit": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "stream_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "version",
+    "stream_id",
+    "sender",
+    "recipient",
+    "deposit"
+  ],
+  "title": "TemplateInstantiated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "template_instantiated",
+    "fingerprint": "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u32"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "template_id",
+        "type": "u32"
+      }
+    ]
+  }
+}
