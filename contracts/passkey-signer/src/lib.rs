@@ -236,8 +236,8 @@ impl PasskeySigner {
 /// feature is active so they never reach the deployed Wasm.
 #[cfg(feature = "testutils")]
 pub mod fuzz_helpers {
-    use soroban_sdk::{Bytes, BytesN, Env};
     use crate::errors::PasskeyError;
+    use soroban_sdk::{Bytes, BytesN, Env};
 
     pub fn verify_auth_data(
         env: &Env,
