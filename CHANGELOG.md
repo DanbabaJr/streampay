@@ -10,6 +10,16 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- CLI network profiles (#520): `streampay profile set|list|show|remove|use|resolve`
+  and `--profile` / `--config`. Named profiles (built-in `testnet` and `mainnet`
+  plus your own, e.g. a sandbox RPC) store network, RPC, contract and signer
+  settings in a config file (`$XDG_CONFIG_HOME/streampay/config.json`, or
+  `%APPDATA%\streampay\config.json` on Windows). Precedence is flag > profile >
+  default; `profile resolve` shows where each setting comes from. Secret material
+  is never stored: only environment-variable names and key-file paths are
+  accepted, and anything that looks like a key is rejected on save and on load.
+  Invalid, unknown or contract-less profiles fail with exit code 2 before any RPC
+  call. Existing invocations are unchanged.
 - CLI shell completions (#518): `streampay completion <bash|zsh|fish>` prints a
   static completion script generated from the CLI's command registry
   (`tools/streampay-cli/src/registry.ts`), which the argument parser and
