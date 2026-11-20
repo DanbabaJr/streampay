@@ -1,5 +1,10 @@
 # StreamPay Event Indexer
 
+> **Running this against testnet or mainnet?** The development notes below are
+> not an operations runbook. Configuration (every env var), initial backfill from
+> a chosen ledger, catch-up after downtime, outbox replay and shutdown semantics
+> are in [docs/INDEXER_OPERATIONS.md](../docs/INDEXER_OPERATIONS.md).
+
 The StreamPay Event Indexer is a standalone TypeScript Node.js service that polls Soroban RPC `getEvents` for StreamPay smart contract events, decodes the contract's typed XDR event payloads using `@stellar/stellar-sdk`, persists stream metadata and an append-only event log in SQLite, maintains cursor persistence, and serves a lightweight HTTP query API.
 
 The service indexes the contract's emitted event topics: `stream_created`, `withdrawn`, `stream_cancelled`, and `stream_topped_up` (the Rust event types are `StreamCreated`, `Withdrawn`, `StreamCancelled`, and `StreamToppedUp`). It also recognizes `stream_paused` and `stream_resumed` for forward-compatible status updates. Unknown topics are filtered out at RPC.
@@ -26,6 +31,8 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
 | `OUTBOX_MAX_DEPTH` | off | Global backpressure threshold for pending+in-flight intents |
 | `SHUTDOWN_DRAIN_MS` | `10000` | On SIGTERM/SIGINT, how long in-flight ingest and outbox dispatch may finish before the process exits (exit code `0` if drained, `1` if the window expired). Keep it below your orchestrator's kill grace period |
+
+This table is the short version. [docs/INDEXER_OPERATIONS.md §1](../docs/INDEXER_OPERATIONS.md#1-configuration) explains each variable's behaviour, its validation, the ingest/RPC knobs read by the config code (`INGEST_*`, `RPC_MAX_RPS`, `RPC_URL_FALLBACK_n`), and deployment profiles.
 
 ---
 
