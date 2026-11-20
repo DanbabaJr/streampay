@@ -56,3 +56,23 @@ If a new architectural requirement legitimately increases RPC calls or indexer p
 For emergency hotfixes where performance audit must be deferred:
 - Pass environment variable `PERF_BYPASS=1` or attach the `perf-bypass` PR label.
 - The gate emits a high-priority warning to the PR log and health surface, allowing CI to pass while recording the violation in `perf/trend.json`.
+
+---
+
+## Container Image Size Budgets
+
+Service images are budgets too: bloat slows deploys and widens the attack surface.
+
+- Baseline and budget: `perf/baselines/docker.json` (`budget`, `baseline`, `unit`, `tolerance_percent`, per image key).
+- Gate: `perf/harness/check_image_budget.mjs`. It reads the uncompressed size from `docker image inspect .Size` and compares it with `budget * (1 + tolerance_percent/100)`, printing the measured and allowed size:
+
+```bash
+node perf/harness/check_image_budget.mjs --image streampay/indexer:ci --key indexer
+```
+
+- Unit tests: `node --test perf/test/image_budget.test.mjs`.
+- Self-test: `--self-test` builds `infra/docker/fixtures/Dockerfile.bloated-indexer` and requires the gate to reject it, so the gate cannot silently become a no-op.
+
+The `indexer-image` job in `.github/workflows/infra.yml` runs for PRs that touch `infra/docker/`, the indexer dependency manifests, the budget or the workflow. It builds `linux/amd64` and `linux/arm64` with buildx (QEMU on the amd64 runner), enforces the budget on both, runs the self-test and finally produces the multi-arch manifest with `--output type=cacheonly` (no push, no registry credentials). Base images are pinned by digest, so public pulls are reproducible.
+
+Raising an image budget follows the same governance as any other bound: justify it in the PR, get maintainer approval, and update `perf/baselines/docker.json` referencing the issue/PR.
