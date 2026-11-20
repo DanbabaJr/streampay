@@ -207,4 +207,33 @@ export const de: Record<MessageKey, string> = {
   "form.amountTooPrecise":
     "Dieses Token hat höchstens {decimals, number} Nachkommastellen — der eingegebene Betrag müsste gerundet werden.",
   "form.amountInvalid": "Das ist kein lesbarer Betrag.",
+
+  "notFound.notFound": "Nicht gefunden",
+  "notFound.badRequest": "Anfrageproblem",
+  "notFound.stream.title": "Stream nicht gefunden",
+  "notFound.stream.lookedFor": "Wir haben nach der Stream-ID in dieser URL gesucht.",
+  "notFound.stream.why":
+    "Auf diesem Netzwerk gibt es keinen Stream mit dieser ID. Er wurde möglicherweise nie erstellt, oder der Link ist unvollständig.",
+  "notFound.stream.next":
+    "Prüfe die Stream-ID oder kehre zur Übersicht zurück und öffne den Stream aus deiner Liste.",
+  "notFound.stream.malformedTitle": "Ungültige Stream-ID",
+  "notFound.stream.malformedBody":
+    "„{id}“ ist keine gültige Stream-ID. Stream-IDs sind ganze Zahlen.",
+  "notFound.address.title": "Adresse nicht gefunden",
+  "notFound.address.lookedFor": "Wir haben nach der Stellar-Adresse in dieser URL gesucht.",
+  "notFound.address.why":
+    "Diese Adresse hat auf diesem Netzwerk noch keine Zahlungs-Streams erstellt oder empfangen.",
+  "notFound.address.next":
+    "Prüfe die Adresse auf Tippfehler oder beginne in der Übersicht mit deinen eigenen Streams.",
+  "notFound.address.malformedTitle": "Ungültige Adresse",
+  "notFound.address.malformedBody":
+    "„{address}“ ist keine gültige Stellar-Adresse. Sie muss ein 56-stelliger öffentlicher Schlüssel sein, der mit G beginnt.",
+  "notFound.pay.title": "Zahlungslink nicht gefunden",
+  "notFound.pay.lookedFor": "Wir haben nach der Zahlungsreferenz in diesem Link gesucht.",
+  "notFound.pay.why":
+    "Dieser Link ist unbekannt. Möglicherweise wurde er falsch eingegeben oder abgeschnitten.",
+  "notFound.pay.next":
+    "Bitte den Zahler, den Link erneut zu senden, oder öffne die Übersicht.",
+  "notFound.pay.malformedTitle": "Ungültiger Zahlungslink",
+  "notFound.pay.malformedBody": "Dieser Zahlungslink ist fehlerhaft oder beschädigt.",
 };
