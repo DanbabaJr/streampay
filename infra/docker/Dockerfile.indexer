@@ -1,5 +1,10 @@
 # docker build -f infra/docker/Dockerfile.indexer -t streampay/indexer:local .   (build context = repo root)
-FROM node:22-alpine AS build
+#
+# Multi-arch: the same Dockerfile builds linux/amd64 and linux/arm64 in CI
+# (buildx + qemu). The base image is pinned to its multi-arch manifest-list
+# digest so both platforms resolve reproducibly from a public image; no
+# registry credentials are needed to build, only to publish.
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 WORKDIR /app
 # better-sqlite3 is a native module; compile it here so the toolchain never reaches the release image
 RUN apk add --no-cache python3 make g++
@@ -10,7 +15,7 @@ RUN npm run build
 # drop dev deps, keeping production modules with the compiled native binary
 RUN npm prune --omit=dev
 
-FROM node:22-alpine AS release
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS release
 ENV NODE_ENV=production
 WORKDIR /app
 # carry the prebuilt native deps from the builder instead of recompiling on alpine (no compiler here)

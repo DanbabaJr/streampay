@@ -26,6 +26,10 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `PORT` | `8787` | HTTP listen port |
 | `DATABASE_PATH` | `./data/streampay.sqlite` | SQLite database file |
 | `START_LEDGER` | Latest RPC ledger | Initial ledger sequence if starting fresh without a saved cursor |
+| `GRPC_PORT` | `8788` | gRPC (HTTP/2) listen port; `0` disables the gRPC transport |
+| `GRPC_MAX_SUBSCRIPTIONS_PER_TENANT` | `5` | Max concurrent gRPC subscriptions per tenant |
+| `GRPC_MAX_EVENTS_PER_SECOND_PER_TENANT` | `100` | Per-tenant gRPC rate budget (token bucket, events/second) |
+| `GRPC_MAX_QUEUE_PER_SUBSCRIPTION` | `100` | Bounded per-subscription gRPC queue (events) |
 | `OUTBOX_TICK_MS` | `1000` | Transactional-outbox dispatcher poll interval |
 | `OUTBOX_BATCH_SIZE` | `200` | Max intent claims per consumer per tick (cap 1000) |
 | `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
@@ -180,6 +184,112 @@ Returns streams where the address is sender or recipient:
   "count": 1,
   "streams": [...]
 }
+```
+
+---
+
+### gRPC Streaming Transport (issue #579)
+
+A binary, multiplexed alternative to REST polling / SSE, on HTTP/2
+(`node:http2`, no new dependency). Proto definitions live in
+[`src/grpc/events.proto`](src/grpc/events.proto); the hand-written
+protobuf codec is [`src/grpc/codec.ts`](src/grpc/codec.ts) and the server
+is [`src/grpc/server.ts`](src/grpc/server.ts).
+
+- **Endpoint:** `POST /streampay.indexer.v1.StreamPayIndexer/Subscribe`
+  on `GRPC_PORT` (default `8788`, cleartext h2c), plus the unary
+  `POST /streampay.indexer.v1.StreamPayIndexer/Ack`.
+  `Subscribe` is server-streaming: one request message, then a stream of
+  `StreamEvent` messages (`seq`, `event_id`, `stream_id`, `name`,
+  `ledger`, `ledger_closed_at`, `payload_json`, `idempotency_key`,
+  `cursor`, `redacted`). `payload_json` is the same JSON the REST
+  endpoints return for the same event, so a gRPC payload decodes to the
+  same record as `GET /streams/:id/events` and `GET /streams/:id/history`
+  (see `src/grpc.test.ts`).
+- **Replay / resume:** a subscription replays the transactional outbox
+  from `SubscribeRequest.cursor` (an outbox `seq`; `0` = from the start
+  for that stream), then streams live events as they are ingested.
+  Delivery is at-least-once. Ack seqs with the `Ack` RPC
+  (`subscription_id` comes back in the `x-subscription-id` response
+  metadata, or ack by `tenant` + `stream_id`); on reconnect, send the
+  last acked seq as `cursor` and the server replays from `seq > cursor`.
+  Unacked events are redelivered — dedup client-side by `seq` (or
+  `event_id`), which is unique per event.
+- **Flow control / backpressure:** three layers — HTTP/2 flow control
+  (the server pauses when the stream's `write()` returns false and
+  resumes on `drain`), application-level credit (`initial_credit`,
+  topped up by `Ack` messages; default 100), and a bounded
+  per-subscription queue (default 100 events). A slow consumer pauses
+  only its own subscription: its undelivered seq stays un-advanced, so
+  the next drain replays the same outbox rows, and ingestion and other
+  subscribers are never blocked.
+- **Limits:** at most `GRPC_MAX_SUBSCRIPTIONS_PER_TENANT` (default 5)
+  concurrent subscriptions per tenant (excess gets
+  `RESOURCE_EXHAUSTED` / grpc-status `8`), and a per-tenant token-bucket
+  rate budget of `GRPC_MAX_EVENTS_PER_SECOND_PER_TENANT` (default 100
+  events/second). A throttled subscription is delayed, never dropped.
+  The tenant comes from `SubscribeRequest.tenant` or the `x-tenant-id`
+  metadata (default `"default"`).
+- **Privacy redaction:** with `redact_addresses: true`, Stellar
+  addresses in `payload_json` are truncated to their 8-character prefix
+  via the shared helper in `src/redaction.ts` (`sanitizeAddress`), and
+  `redacted` is set on the message. With it off the payload is
+  byte-identical to REST.
+- **Freshness gate:** the `EventName` enum in `events.proto` mirrors the
+  canonical registry (`schemas/events/registry.json`, #213) and
+  `src/generated/events.ts` exactly. `src/grpc.test.ts` parses the proto
+  and fails on any drift between the proto, the registry and the
+  generated table — when the registry gains an event, add its enum value
+  here (alphabetical order) and regenerate the table.
+
+### GraphQL Read API (persisted queries only)
+`POST /graphql` — body `{ "queryId": "<id>", "variables": { ... }, "tenant": "<tenant>" }`.
+Only allowlisted persisted queries run; ad-hoc `query` text, unknown
+`queryId`s and `GET /graphql` are rejected with `400`. Responses are
+GraphQL-shaped `{ "data": { ... } }` (or `{ "data": null, "errors": [...] }`).
+
+`GET /graphql/schema` — returns the schema SDL as plain text.
+
+Available persisted queries (`indexer/src/graphql/persisted.ts`):
+
+| queryId | What it returns |
+|---|---|
+| `GetStream` | One stream by id (all scalar fields) |
+| `GetStreamWithForecast` | Stream + `forecast(at)` |
+| `GetStreamWithRelations` | Stream + sender/recipient `Address` nodes + first 10 events |
+| `GetStreamHistory` | `streamHistory` event connection (offset cursor) |
+| `GetStreamEvents` | `streamEvents` outbox connection (reuses the outbox `seq` cursor from `GET /streams/:id/events`) |
+| `GetStreamsByRecipient` | Streams for a recipient (cursor connection) |
+| `GetAddressStreams` | `Address` node with its streams |
+| `GetForecast` | `Forecast` for one stream at a time |
+| `ListWebhookSubscriptions` | Webhook endpoints (never includes the secret) |
+
+Types: `Stream` (with `senderAddress`/`recipientAddress` relations, `events`,
+`forecast`), `Address`, `Event`, `Forecast` (linear streamed accrual:
+`accrued = deposit * elapsed / duration`, floored — the same math as
+`frontend/lib/analytics.ts`), `WebhookSubscription`, and cursor connections
+(`edges { node cursor }`, `pageInfo { hasNextPage nextCursor }`).
+
+Limits: query depth ≤ 5, complexity ≤ 80 (checked at boot — an allowlisted
+query that exceeds them fails startup), per-tenant token-bucket rate budget
+(default 600 complexity units/minute; exhaustion returns `429` with
+`retryAfter`). Privacy redaction (#487) is shared with REST via
+`src/redaction.ts`: set `GRAPHQL_REDACT_ADDRESSES=1` (or pass
+`redactAddresses: true` to `createApp`) and Stellar addresses are truncated
+to their 8-character prefix on the GraphQL path exactly as the helper does
+for REST rows; webhook URLs are masked and secrets are never exposed.
+
+To add a persisted query: add an entry to `PERSISTED_QUERIES` in
+`src/graphql/persisted.ts`, keep it inside the depth/complexity limits, and
+add a contract test in `src/graphql.test.ts` asserting it matches the REST
+response for the same fixture. The freshness-gate test asserts every
+`Stream` field in the SDL exists on the `Stream` projection, so schema
+drift fails CI.
+
+```bash
+curl -X POST localhost:8787/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"queryId":"GetStream","variables":{"id":"1"}}'
 ```
 
 ---
