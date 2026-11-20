@@ -10,6 +10,9 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- `docs/WAVE_CONTRIBUTORS.md`: contributor guide for Drips Wave issues (claim,
+  branch/PR conventions, CI job to local command map, review and resolution),
+  cross-linked from the README and CONTRIBUTING.
 - CLI network profiles (#520): `streampay profile set|list|show|remove|use|resolve`
   and `--profile` / `--config`. Named profiles (built-in `testnet` and `mainnet`
   plus your own, e.g. a sandbox RPC) store network, RPC, contract and signer

@@ -496,7 +496,7 @@ Incident drill tooling and results are documented in [`docs/INCIDENT_RUNBOOK.md`
 
 ## Contributing
 
-PRs welcome! Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) — it covers conventions, branch/PR process, and how to run the tests locally. Every PR runs the full test suite, fmt, clippy (`-D warnings`), and the frontend build in CI.
+PRs welcome! Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) — it covers conventions, branch/PR process, and how to run the tests locally. Every PR runs the full test suite, fmt, clippy (`-D warnings`), and the frontend build in CI. Arriving through the Drips Wave program? [`docs/WAVE_CONTRIBUTORS.md`](./docs/WAVE_CONTRIBUTORS.md) walks through claiming an issue, the PR conventions, the CI gates and what "resolved" means.
 
 ## Funding & sustainability
 

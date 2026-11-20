@@ -184,6 +184,58 @@ Returns streams where the address is sender or recipient:
 
 ---
 
+### GraphQL Read API (persisted queries only)
+`POST /graphql` — body `{ "queryId": "<id>", "variables": { ... }, "tenant": "<tenant>" }`.
+Only allowlisted persisted queries run; ad-hoc `query` text, unknown
+`queryId`s and `GET /graphql` are rejected with `400`. Responses are
+GraphQL-shaped `{ "data": { ... } }` (or `{ "data": null, "errors": [...] }`).
+
+`GET /graphql/schema` — returns the schema SDL as plain text.
+
+Available persisted queries (`indexer/src/graphql/persisted.ts`):
+
+| queryId | What it returns |
+|---|---|
+| `GetStream` | One stream by id (all scalar fields) |
+| `GetStreamWithForecast` | Stream + `forecast(at)` |
+| `GetStreamWithRelations` | Stream + sender/recipient `Address` nodes + first 10 events |
+| `GetStreamHistory` | `streamHistory` event connection (offset cursor) |
+| `GetStreamEvents` | `streamEvents` outbox connection (reuses the outbox `seq` cursor from `GET /streams/:id/events`) |
+| `GetStreamsByRecipient` | Streams for a recipient (cursor connection) |
+| `GetAddressStreams` | `Address` node with its streams |
+| `GetForecast` | `Forecast` for one stream at a time |
+| `ListWebhookSubscriptions` | Webhook endpoints (never includes the secret) |
+
+Types: `Stream` (with `senderAddress`/`recipientAddress` relations, `events`,
+`forecast`), `Address`, `Event`, `Forecast` (linear streamed accrual:
+`accrued = deposit * elapsed / duration`, floored — the same math as
+`frontend/lib/analytics.ts`), `WebhookSubscription`, and cursor connections
+(`edges { node cursor }`, `pageInfo { hasNextPage nextCursor }`).
+
+Limits: query depth ≤ 5, complexity ≤ 80 (checked at boot — an allowlisted
+query that exceeds them fails startup), per-tenant token-bucket rate budget
+(default 600 complexity units/minute; exhaustion returns `429` with
+`retryAfter`). Privacy redaction (#487) is shared with REST via
+`src/redaction.ts`: set `GRAPHQL_REDACT_ADDRESSES=1` (or pass
+`redactAddresses: true` to `createApp`) and Stellar addresses are truncated
+to their 8-character prefix on the GraphQL path exactly as the helper does
+for REST rows; webhook URLs are masked and secrets are never exposed.
+
+To add a persisted query: add an entry to `PERSISTED_QUERIES` in
+`src/graphql/persisted.ts`, keep it inside the depth/complexity limits, and
+add a contract test in `src/graphql.test.ts` asserting it matches the REST
+response for the same fixture. The freshness-gate test asserts every
+`Stream` field in the SDL exists on the `Stream` projection, so schema
+drift fails CI.
+
+```bash
+curl -X POST localhost:8787/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"queryId":"GetStream","variables":{"id":"1"}}'
+```
+
+---
+
 ### Transactional Outbox
 
 Every ingested event is journalled with a monotonic `seq` and per-consumer
