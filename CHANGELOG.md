@@ -16,6 +16,9 @@ interface: they are only ever appended to, never renumbered or reused.
   a field reference in `tools/streampay-state/README.md`. The default text
   output and exit codes are unchanged. Tests validate every report emitted for
   the new snapshot fixtures against the schema. `jsonschema` is a dev-dependency.
+- `docs/WAVE_CONTRIBUTORS.md`: contributor guide for Drips Wave issues (claim,
+  branch/PR conventions, CI job to local command map, review and resolution),
+  cross-linked from the README and CONTRIBUTING.
 - CLI network profiles (#520): `streampay profile set|list|show|remove|use|resolve`
   and `--profile` / `--config`. Named profiles (built-in `testnet` and `mainnet`
   plus your own, e.g. a sandbox RPC) store network, RPC, contract and signer
