@@ -128,6 +128,26 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Result of a `profile` subcommand; each subcommand returns the fields listed for it in README.md.",
+      "required": ["schemaVersion", "ok", "command", "configPath"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": {
+          "enum": ["profile list", "profile show", "profile set", "profile remove", "profile use", "profile resolve"]
+        },
+        "configPath": { "type": "string" },
+        "defaultProfile": { "type": ["string", "null"] },
+        "profiles": { "type": "array", "items": { "type": "object" } },
+        "profile": { "type": ["object", "string", "null"] },
+        "settings": { "type": "object" },
+        "name": { "type": "string" },
+        "revertedToBuiltin": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   ],
   "$defs": {
