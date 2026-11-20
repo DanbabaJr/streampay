@@ -4,7 +4,7 @@
 //!
 //! ```
 //! streampay-state export   --rpc <url> --contract <C...> --out <file.json>
-//! streampay-state verify   --snapshot <file.json>
+//! streampay-state verify   --snapshot <file.json> [--format text|json]
 //! streampay-state diff     --a <file.json> --b <file.json> [--format text|json]
 //! streampay-state replay   --snapshot <file.json> --rpc <url> --contract <C...>
 //! ```
@@ -49,6 +49,10 @@ enum Commands {
         /// Path to the JSON snapshot file.
         #[arg(long)]
         snapshot: String,
+        /// Output format. `json` prints the versioned report documented in
+        /// README.md (schema: json-schema-v1.json) to stdout.
+        #[arg(long, value_enum, default_value_t = verify::Format::Text)]
+        format: verify::Format,
     },
     /// Compare two snapshots. Exit code 0 = identical, 1 = differences,
     /// 2 = error (unreadable or invalid input).
@@ -108,7 +112,7 @@ fn main() {
             out,
             network,
         } => export::run(&rpc, &contract, &out, &network),
-        Commands::Verify { snapshot } => verify::run(&snapshot),
+        Commands::Verify { snapshot, format } => verify::run(&snapshot, format),
         Commands::Replay {
             snapshot,
             rpc,
@@ -129,7 +133,7 @@ mod replay_cmd {
 
     pub fn run(snapshot_path: &str, rpc_url: &str, contract_id: &str) -> anyhow::Result<()> {
         // 1. Verify snapshot consistency before replay.
-        verify::run(snapshot_path)?;
+        verify::run(snapshot_path, verify::Format::Text)?;
 
         // 2. Load snapshot.
         let raw = std::fs::read_to_string(snapshot_path)?;
