@@ -14,6 +14,7 @@ import { OutboxMetrics } from "./outbox/metrics.js";
 import { httpPushTransport } from "./outbox/http-transport.js";
 import { traceCorrelationRegistry } from "./telemetry.js";
 import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
+import { registerGraphQLRoutes, type GraphQLHandlerOptions } from "./graphql/index.js";
 import type { DecodedEvent, Stream } from "./types.js";
 
 function parseCursor(raw: unknown): number {
@@ -77,10 +78,15 @@ export function createApp(
   outboxMetrics?: OutboxMetrics,
   rpcHealth?: () => EndpointHealth[],
   ingestStats?: () => IngestStats,
-  proofConfig?: ProofConfig
+  proofConfig?: ProofConfig,
+  graphqlOptions?: GraphQLHandlerOptions
 ): express.Express {
   const app = express();
   app.use(express.json());
+
+  // GraphQL read API over the same projections (#576). REST routes below
+  // are unchanged; GraphQL is an additional read surface only.
+  registerGraphQLRoutes(app, store, graphqlOptions);
 
   app.get("/health", (_req, res) => {
     res.json({
