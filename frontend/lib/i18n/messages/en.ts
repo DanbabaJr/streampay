@@ -215,6 +215,35 @@ export const en = {
     "This token has at most {decimals, number} decimal places — the amount you typed would have to be rounded.",
   "form.amountInvalid": "That is not a readable amount.",
 
+  "notFound.notFound": "Not found",
+  "notFound.badRequest": "Request problem",
+  "notFound.stream.title": "Stream not found",
+  "notFound.stream.lookedFor": "We looked for the stream id in this URL.",
+  "notFound.stream.why":
+    "No stream with that id exists on this network. It may never have been created, or the link may be incomplete.",
+  "notFound.stream.next":
+    "Check the stream id, or head back to the dashboard and open it from your stream list.",
+  "notFound.stream.malformedTitle": "Invalid stream id",
+  "notFound.stream.malformedBody":
+    "“{id}” is not a valid stream id. Stream ids are whole numbers.",
+  "notFound.address.title": "Address not found",
+  "notFound.address.lookedFor": "We looked for the Stellar address in this URL.",
+  "notFound.address.why":
+    "This address has not created or received any payment streams on this network.",
+  "notFound.address.next":
+    "Check the address for typos, or start from the dashboard and open your own streams.",
+  "notFound.address.malformedTitle": "Invalid address",
+  "notFound.address.malformedBody":
+    "“{address}” is not a valid Stellar address. It must be a 56-character public key starting with G.",
+  "notFound.pay.title": "Payment link not found",
+  "notFound.pay.lookedFor": "We looked for the payment reference in this link.",
+  "notFound.pay.why":
+    "This link is unknown. It may have been mistyped or truncated.",
+  "notFound.pay.next":
+    "Ask the payer to send the link again, or open the dashboard.",
+  "notFound.pay.malformedTitle": "Invalid payment link",
+  "notFound.pay.malformedBody": "This payment link is malformed or corrupted.",
+
   "share.heading": "Share this payment link",
   "share.body":
     "Scan the QR code or copy the link. The reference is generated in your browser and never sent to a third party.",

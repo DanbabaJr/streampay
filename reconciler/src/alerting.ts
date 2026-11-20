@@ -1,6 +1,7 @@
 //! Structured logging and webhook dispatch for the dual-read reconciliation service.
 
 import { createHttpAgent } from "./http.js";
+import type { DivergenceRecord, WebhookPayload } from "./types.js";
 
 export interface AlertingConfig {
   webhookUrl?: string;
@@ -78,13 +79,21 @@ export class AlertingService {
         streamId: d.streamId,
       });
 
+      let responseMessage: string | undefined;
+      if (typeof response.data === "object" && response.data !== null && "message" in response.data) {
+        const msg = (response.data as { message: unknown }).message;
+        if (typeof msg === "string") {
+          responseMessage = msg;
+        }
+      }
+
       return {
         success,
         status: response.status,
-        message: response.data?.message || response.statusText,
+        message: responseMessage,
         durationMs: Date.now() - start,
       };
-    } catch (err) {
+    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.log("WARN", `Webhook dispatch failed: ${message}`, {
         durationMs: Date.now() - start,
@@ -128,6 +137,3 @@ export class AlertingService {
     return order[level] >= order[this.config.logLevel];
   }
 }
-
-// Lazy import to avoid circular dependency issues
-import type { DivergenceRecord } from "./types.js";

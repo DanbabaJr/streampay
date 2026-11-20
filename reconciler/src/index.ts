@@ -5,12 +5,11 @@ import { ReconciliationEngine } from "./engine/diff.js";
 import { HorizonReader } from "./readers/horizon.js";
 import { SorobanRpcReader } from "./readers/soroban.js";
 import { AlertingService } from "./alerting.js";
-import type { StreamState } from "./types.js";
+import type { StreamState, ReconciliationResult } from "./types.js";
 
 const SERVICE_NAME = "streampay-reconciler";
 
-// Parse configuration from environment
-function loadConfig(): {
+export interface ReconcilerServiceConfig {
   horizonUrl: string;
   sorobanRpcUrl: string;
   webhookUrl?: string;
@@ -20,7 +19,18 @@ function loadConfig(): {
   contractId?: string;
   environment: string;
   reconcilerId: string;
-} {
+}
+
+export interface ReconcilerService {
+  horizonReader: HorizonReader;
+  sorobanReader: SorobanRpcReader;
+  engine: ReconciliationEngine;
+  alerting: AlertingService;
+  config: ReconcilerServiceConfig;
+}
+
+// Parse configuration from environment
+function loadConfig(): ReconcilerServiceConfig {
   const logLevel = (process.env.LOG_LEVEL || "INFO") as "DEBUG" | "INFO" | "WARN" | "ERROR";
   const consistencyWindowMs = parseInt(process.env.CONSISTENCY_WINDOW_MS || "30000", 10);
   const pollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || "5000", 10);
@@ -50,7 +60,7 @@ function getMonitoredStreamIds(): string[] {
   return ids.split(",").map(id => id.trim()).filter(Boolean);
 }
 
-export async function createReconcilerService() {
+export async function createReconcilerService(): Promise<ReconcilerService> {
   const config = loadConfig();
 
   // Validate required config
@@ -127,7 +137,7 @@ export async function runCycle(
   engine: ReconciliationEngine,
   alerting: AlertingService,
   streamIds: string[]
-): Promise<void> {
+): Promise<ReconciliationResult> {
   const [horizonStates, sorobanStates] = await Promise.all([
     horizonReader.pollStreams(streamIds),
     sorobanReader.pollStreams(streamIds),
@@ -148,13 +158,13 @@ export async function runCycle(
 }
 
 // Entrypoint when run directly
-if (process.argv[1]?.endsWith("index.js")) {
+if (process.argv[1]?.endsWith("index.js") || process.argv[1]?.endsWith("index.ts")) {
   (async () => {
     try {
       const service = await createReconcilerService();
       const streamIds = getMonitoredStreamIds();
 
-      alerting: service.alerting.log("INFO", "Reconciler service ready", {
+      service.alerting.log("INFO", "Reconciler service ready", {
         monitoredStreams: streamIds.length,
       });
 
@@ -168,11 +178,11 @@ if (process.argv[1]?.endsWith("index.js")) {
           healthCheckIntervalMs: 30000,
         }
       );
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[streampay-reconciler] Fatal error:", err);
       process.exit(1);
     }
   })();
 }
 
-export type { StreamState };
+export type { StreamState, ReconciliationResult };

@@ -9,7 +9,8 @@ is derived from the contract's own sources.
 | Generator driver | [`generator/generate.py`](./generator/generate.py) | this change |
 | Conformance vectors | [`vectors/`](./vectors) | this change |
 | TypeScript client | [`typescript/`](./typescript) (workspace / `npm pack` only, not on npm) | this change |
-| Rust, Python clients | — | later, one PR per language |
+| Rust client (read-only) | [`rust/`](./rust) | this change |
+| Python client | — | later |
 
 Language packages land separately so each one is reviewed against the shared
 spec on its own. This directory holds only what every language shares.
@@ -28,6 +29,8 @@ sdks/
   vectors/builder/                deterministic fixture builder (Node, stellar-sdk)
   generator/emit_typescript.py    IR -> typescript/src/generated.ts + methods.ts
   typescript/                     generated bindings + runtime + tests
+  generator/emit_rust.py          IR -> rust/src/generated.rs (read operations only)
+  rust/                           generated read-only crate + conformance test
   Makefile                        spec / check / vectors
 ```
 
@@ -81,17 +84,30 @@ change touches no error code and no `surface.rs` branch.
 
 `generate.py` loads the spec and the error catalog and runs each
 `generator/emit_<language>.py` whose package directory exists. Today that is
-`emit_typescript.py`, which writes `typescript/src/generated.ts` and
-`typescript/src/methods.ts`; the `--check` gate fails when either differs from
-the generator output. Generated files carry the spec fingerprint in their
-header; add behaviour in `client.ts` / `events.ts`, not in generated files.
+`emit_typescript.py` (writing `typescript/src/generated.ts` and
+`typescript/src/methods.ts`) and `emit_rust.py` (writing
+`rust/src/generated.rs`); the `--check` gate fails when any output differs from
+the generator. Generated files carry the spec fingerprint in their header; add
+behaviour in `client.ts` / `events.ts` / `lib.rs`, not in generated files.
 
 ```bash
 make -C sdks spec          # re-derive the spec + fingerprint
 make -C sdks generate      # rewrite generated.ts + methods.ts
 make -C sdks check         # guard + tests + "regeneration is a no-op"
 make -C sdks test          # TypeScript typecheck + tests, incl. every vector
+make -C sdks test-rust     # Rust conformance vectors + doctests
 ```
+
+## Rust client (read-only)
+
+`sdks/rust` is a generated read-only client: it emits only operations the spec
+marks non-mutating, the typed result decoders and the contract error enum. It
+has no signing, submission or write path and is `#![forbid(unsafe_code)]`.
+`ReadClient<T>` works over any `ReadTransport` implementation, so the crate
+makes no network calls itself. `cargo test` decodes the shared read vectors
+(`get-stream-active`, `get-stream-cancelled`, `error-not-active`) and checks the
+`get_stream` argument builder against the signed envelope. See
+[`rust/README.md`](./rust/README.md).
 
 ## Conformance vectors
 

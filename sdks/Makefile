@@ -1,8 +1,9 @@
 PYTHON ?= python3
 VECTORS_BUILDER := vectors/builder
 TS_DIR := typescript
+RUST_DIR := rust
 
-.PHONY: help spec generate check check-spec vectors test publish-dry-run clean
+.PHONY: help spec generate check check-spec vectors test test-rust publish-dry-run clean
 
 help:
 	@echo "spec              re-derive spec/streampay.spec.json + FINGERPRINT from the contract"
@@ -11,6 +12,7 @@ help:
 	@echo "check-spec        schema guard + tests only"
 	@echo "vectors           rebuild conformance vectors (deterministic)"
 	@echo "test              TypeScript SDK: typecheck, build, tests (incl. vectors)"
+	@echo "test-rust         Rust SDK: conformance vectors + doctests"
 	@echo "publish-dry-run   npm pack --dry-run for the TypeScript SDK (no upload)"
 
 spec:
@@ -31,6 +33,9 @@ vectors:
 
 test:
 	cd $(TS_DIR) && npm ci && npm run typecheck && npm test
+
+test-rust:
+	cd $(RUST_DIR) && cargo test
 
 publish-dry-run:
 	cd $(TS_DIR) && npm pack --dry-run
