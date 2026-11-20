@@ -7,11 +7,12 @@ use std::process::{Command, Output};
 use serde_json::Value;
 
 fn fixture(name: &str) -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/diff")
-        .join(format!("{name}.json"))
-        .to_string_lossy()
-        .into_owned()
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/diff");
+    // Deliberately-unparseable fixtures are stored as `.txt`: the repo gate
+    // that every tracked `.json` must parse cannot carry known-invalid JSON.
+    let json = dir.join(format!("{name}.json"));
+    let path = if json.exists() { json } else { dir.join(format!("{name}.txt")) };
+    path.to_string_lossy().into_owned()
 }
 
 fn run(args: &[&str]) -> Output {
