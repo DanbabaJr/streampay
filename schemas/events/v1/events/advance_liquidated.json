@@ -1,0 +1,56 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/advance_liquidated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an advance is liquidated upon stream cancellation.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "lender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "remaining_unpaid": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "recipient",
+    "lender",
+    "amount",
+    "remaining_unpaid"
+  ],
+  "title": "AdvanceLiquidated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "advance_liquidated",
+    "fingerprint": "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

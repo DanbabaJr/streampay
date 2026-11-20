@@ -123,254 +123,322 @@ for (const ref of [MATRIX_TEST, REGISTRY, 'contracts/streaming-payments/src/erro
 // Curated authoritative remediations, client mappings and tests for StreamPay errors
 const ERROR_METADATA = {
   1: {
-    remediation: 'Verify the stream ID from your transaction history or recipient dashboard before retrying.',
+    remediation: 'Verify the stream ID exists in your transaction history or recipient dashboard before calling any stream entrypoint.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_get_stream(&999));',
   },
   2: {
-    remediation: 'This role check is retired on-chain. Ensure caller owns or is authorized on the stream.',
+    remediation: 'This role check is retired on-chain. Ensure the caller owns or is authorized on the stream via NotAuthorized (#12) checks.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
   },
   3: {
-    remediation: 'This role check is retired on-chain. Ensure caller is the registered stream recipient.',
+    remediation: 'This role check is retired on-chain. Ensure the caller is the registered stream recipient via NotAuthorized (#12) checks.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
   },
   4: {
-    remediation: 'This stream was created without cancelable permissions; funds stream until duration ends.',
+    remediation: 'Check the stream cancelable flag before calling cancel_stream; non-cancelable streams run until their duration ends.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);\nrejected!(f.client.mock_all_auths().try_cancel_stream(&f.recipient, &id));',
   },
   5: {
-    remediation: 'The stream has already completed or been cancelled. No further mutations can be performed.',
+    remediation: 'Query the stream status before mutating it; completed or cancelled streams cannot be withdrawn from, topped up, or cancelled again.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);\nf.client.mock_all_auths().cancel_stream(&f.sender, &id);\nrejected!(f.client.mock_all_auths().try_withdraw(&id, &1));',
   },
   6: {
-    remediation: 'Choose a start timestamp at or after the current ledger close time.',
+    remediation: 'Read the current ledger close time and set start_time at or after that value.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.advance_time(DAY);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &now, &(now + 2 * DAY), &false,\n));',
   },
   7: {
-    remediation: 'Ensure end time is strictly greater than start time by at least 1 second.',
+    remediation: 'Ensure end_time is strictly greater than start_time by at least 1 second before calling create_stream.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + DAY), &false,\n));',
   },
   8: {
-    remediation: 'Stream duration exceeds protocol maximum (10 years). Decrease stream duration.',
+    remediation: 'Reduce the stream duration to at most MAX_DURATION_SECONDS (10 years).',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &now, &(now + MAX_DURATION_SECONDS + 1), &false,\n));',
   },
   9: {
-    remediation: 'Amount must be greater than zero. Enter a positive token amount.',
+    remediation: 'Pass a deposit amount greater than zero to create_stream, withdraw, or top_up.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &0,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
   },
   10: {
-    remediation: 'Requested withdrawal exceeds available accrued balance. Check accrued amount or use withdraw max.',
+    remediation: 'Query get_stream to read the current accrued amount, then request at most that value or call withdraw_max.',
     toastClass: 'warning',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);\nf.advance_time(2 * DAY);\nrejected!(f.client.mock_all_auths().try_withdraw(&id, &(DEPOSIT / 10 + 1)));',
   },
   11: {
-    remediation: 'Calculation overflowed arithmetic bounds. Reduce deposit amount or duration scale.',
+    remediation: 'Reduce the deposit amount or the stream duration so that deposit * duration fits within u128 arithmetic bounds.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &i128::MAX,\n    &now, &(now + 2 * 365 * DAY), &false,\n));',
   },
   12: {
-    remediation: 'Sign transaction with the sender, recipient, or designated governor account required for this call.',
+    remediation: 'Sign the transaction with the sender, recipient, or designated governor account required for this call.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, true);\nlet stranger = Address::generate(&f.env);\nrejected!(f.client.mock_all_auths().try_cancel_stream(&stranger, &id));',
   },
   13: {
-    remediation: 'Zero unwithdrawn accrued funds available at current ledger timestamp. Wait for more funds to accrue.',
+    remediation: 'Wait until the stream has started and funds have accrued, then retry withdraw or withdraw_max after the ledger timestamp advances.',
     toastClass: 'info',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);\nrejected!(f.client.mock_all_auths().try_withdraw_max(&id));',
   },
   14: {
-    remediation: 'Protocol fee rate exceeds MAX_FEE_BPS (1,000 bps = 10%). Provide rate at or below cap.',
+    remediation: 'Set the fee rate to at most MAX_FEE_BPS (1,000 bps = 10%) when calling set_fee_bps.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_set_fee_bps(&f.governor, &(MAX_FEE_BPS + 1)));',
   },
   15: {
-    remediation: 'Caller is not the active treasury governor. Switch to authorized governor wallet.',
+    remediation: 'Switch to the authorized governor wallet before calling treasury or governance entrypoints.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet stranger = Address::generate(&f.env);\nrejected!(f.client.mock_all_auths().try_set_fee_bps(&stranger, &0));',
   },
   16: {
-    remediation: 'No governor nomination is pending. Request current governor to nominate address first.',
+    remediation: 'Ask the current governor to call nominate_governor with the target address before calling accept_governor.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_accept_governor(&f.sender));',
   },
   17: {
-    remediation: 'Treasury withdrawal amount exceeds collected protocol fees for this asset token.',
+    remediation: 'Query the collected fee balance for the token before calling withdraw_treasury; request at most the available amount.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_withdraw_treasury(&f.governor, &f.token, &f.recipient, &1));',
   },
   18: {
-    remediation: 'Intent ID not found. Verify scheduled intent reference before retrying.',
+    remediation: 'Verify the scheduled intent ID from your scheduling transaction receipt before calling execute_scheduled or cancel_scheduled.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.try_get_intent(&999));',
   },
   19: {
-    remediation: 'Scheduled intent is already executed, cancelled, or expired.',
+    remediation: 'Check the intent status before calling execute_scheduled; already executed, cancelled, or expired intents cannot be re-executed.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet id = schedule_intent(&f, now, now + DAY);\nf.client.mock_all_auths().execute_scheduled(&id, &f.recipient);\nrejected!(f.client.mock_all_auths().try_execute_scheduled(&id, &f.recipient));',
   },
   20: {
-    remediation: 'Current ledger timestamp has not reached execute_after time. Wait for scheduled window.',
+    remediation: 'Wait until the current ledger timestamp reaches the intent execute_after time before calling execute_scheduled.',
     toastClass: 'info',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet id = schedule_intent(&f, now + DAY, now + 3 * DAY);\nrejected!(f.client.mock_all_auths().try_execute_scheduled(&id, &f.recipient));',
   },
   21: {
-    remediation: 'Intent has passed expires_at deadline. Reclaim deposited funds via reclaim_expired.',
+    remediation: 'The intent has expired. Call reclaim_expired to recover deposited funds, then schedule a new intent if needed.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet id = schedule_intent(&f, now, now + DAY);\nf.advance_time(DAY);\nrejected!(f.client.mock_all_auths().try_execute_scheduled(&id, &f.recipient));',
   },
   22: {
-    remediation: 'Execution window has already opened; scheduled intent can no longer be cancelled.',
+    remediation: 'Cancel the scheduled intent before its execute_after timestamp; once the execution window opens, cancellation is no longer allowed.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet id = schedule_intent(&f, now, now + DAY);\nrejected!(f.client.mock_all_auths().try_cancel_scheduled(&f.sender, &id));',
   },
   23: {
-    remediation: 'Check occurrence count, interval spacing, and expiration ordering in schedule parameters.',
+    remediation: 'Validate occurrence_count > 0, interval > 0, and expires_at > execute_after before calling schedule_stream.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_schedule_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + 2 * DAY), &(now + 3 * DAY), &false,\n    &0, &0, &0, &now, &(now + DAY),\n));',
   },
   24: {
-    remediation: 'Stored intent parameters do not match initial hash commitment. Contact security oncall.',
+    remediation: 'This is a security invariant failure. Stored intent parameters were tampered with. Report the incident to the protocol security oncall immediately.',
     toastClass: 'error',
     retryable: false,
+    reproduction: '// Tamper with stored intent to break hash commitment:\nf.env.as_contract(&contract, || {\n    let mut intent = storage.get(&DataKey::Intent(id)).unwrap();\n    intent.deposit += 1;\n    storage.set(&DataKey::Intent(id), &intent);\n});\nrejected!(f.client.mock_all_auths().try_execute_scheduled(&id, &f.recipient));',
   },
   25: {
-    remediation: 'Cannot reclaim intent funds before expires_at timestamp has passed.',
+    remediation: 'Wait until the current ledger timestamp is past the intent expires_at before calling reclaim_expired.',
     toastClass: 'warning',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet id = schedule_intent(&f, now, now + DAY);\nrejected!(f.client.try_reclaim_expired(&id));',
   },
   26: {
-    remediation: 'Token pull failed on stream creation. Check account balance and token allowance for deposit + fee.',
+    remediation: 'Check the sender token balance and allowance cover deposit_amount + fee before calling create_stream.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = RefusingFixture::setup_quiet();\nf.refuse(false, true);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &now, &(now + 2 * DAY), &false,\n));',
   },
   27: {
-    remediation: 'Token pull failed during top-up. Ensure sufficient token balance and trustline authorization.',
+    remediation: 'Ensure the caller has sufficient token balance and an active trustline authorization before calling top_up.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = RefusingFixture::setup_quiet();\nlet id = f.create(DEPOSIT, 0, 10 * DAY);\nf.refuse(false, true);\nrejected!(f.client.mock_all_auths().try_top_up(&id, &DEPOSIT));',
   },
   28: {
-    remediation: 'Recipient token payout failed. Verify recipient address has a valid trustline and is authorized.',
+    remediation: 'Verify the recipient address has a valid trustline for the stream asset token and is authorized to receive transfers.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = RefusingFixture::setup_quiet();\nlet id = f.create(DEPOSIT, 0, 10 * DAY);\nf.advance_time(DAY);\nf.refuse(true, false);\nrejected!(f.client.mock_all_auths().try_withdraw(&id, &(DEPOSIT / 10)));',
   },
   29: {
-    remediation: 'Sender refund payout failed during cancellation. Check sender token account status.',
+    remediation: 'Check the sender token account status and trustline before cancelling; the refund transfer must be receivable.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = RefusingFixture::setup_quiet();\nlet id = f.create(DEPOSIT, DAY, 10 * DAY);\nf.refuse(true, false);\nrejected!(f.client.mock_all_auths().try_cancel_stream(&f.sender, &id));',
   },
   30: {
-    remediation: 'Treasury payout transfer failed. Ensure destination treasury account accepts this token.',
+    remediation: 'Ensure the destination treasury account has an active trustline for the token and can receive transfers.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = RefusingFixture::setup_quiet();\nf.client.mock_all_auths().set_fee_bps(&f.governor, &100);\nlet _id = f.create(DEPOSIT, 0, 10 * DAY);\nf.refuse(true, false);\nrejected!(f.client.mock_all_auths().try_withdraw_treasury(\n    &f.governor, &f.token, &f.recipient, &1,\n));',
   },
   31: {
-    remediation: 'Token asset is not on the governance policy allowlist. Propose asset addition via governor.',
+    remediation: 'Check the governance policy allowlist for the asset token before creating a stream; propose adding the asset via the governor.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet admin = Address::generate(&f.env);\nf.client.mock_all_auths().policy_init(&admin);\nf.client.mock_all_auths().policy_set_timelock_delay(&0);\nf.client.mock_all_auths().policy_propose_asset(&f.token, &false);\nf.client.mock_all_auths().policy_execute_asset(&f.token);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
   },
   32: {
-    remediation: 'Policy change timelock has not elapsed. Wait until queued timelock expiry before applying.',
+    remediation: 'Wait until the queued policy change timelock delay has elapsed before calling policy_execute_asset.',
     toastClass: 'info',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet admin = Address::generate(&f.env);\nf.client.mock_all_auths().policy_init(&admin);\nf.client.mock_all_auths().policy_propose_asset(&f.token, &false);\nrejected!(f.client.mock_all_auths().try_policy_execute_asset(&f.token));',
   },
   33: {
-    remediation: 'No queued policy change found for this asset. Queue change proposal first.',
+    remediation: 'Call policy_propose_asset to queue a change before calling policy_execute_asset.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet admin = Address::generate(&f.env);\nf.client.mock_all_auths().policy_init(&admin);\nrejected!(f.client.mock_all_auths().try_policy_execute_asset(&f.token));',
   },
   34: {
-    remediation: 'Policy module is uninitialized. Call initialize_policy with initial governor and parameters.',
+    remediation: 'Call policy_init with the initial governor and parameters before using any policy entrypoint.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_policy_execute_asset(&f.token));',
   },
   35: {
-    remediation: 'No admin handoff proposal is pending. Request current admin to nominate successor.',
+    remediation: 'Ask the current policy admin to call policy_propose_handoff before calling policy_accept_handoff.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet admin = Address::generate(&f.env);\nf.client.mock_all_auths().policy_init(&admin);\nrejected!(f.client.mock_all_auths().try_policy_accept_handoff());',
   },
   36: {
-    remediation: 'Contract is currently frozen for maintenance. Operations resume once unfrozen.',
+    remediation: 'The contract is frozen for maintenance. Wait for the governor to call set_frozen(false) before retrying operations.',
     toastClass: 'warning',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nf.client.mock_all_auths().set_frozen(&f.governor, &true);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
   },
   37: {
-    remediation: 'This operation requires the contract to be frozen first.',
+    remediation: 'Call set_frozen(true) before invoking migrate_storage; migration requires the contract to be frozen first.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_migrate_storage(&f.governor, &0, &50));',
   },
   38: {
-    remediation: 'No upgrade proposal is currently pending.',
+    remediation: 'Call propose_upgrade before calling execute_upgrade or cancel_upgrade.',
     toastClass: 'warning',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nrejected!(f.client.mock_all_auths().try_execute_upgrade(&f.governor));',
   },
   39: {
-    remediation: 'Upgrade timelock delay has not expired. Wait for delay to complete.',
+    remediation: 'Wait until the upgrade timelock delay has fully elapsed before calling execute_upgrade.',
     toastClass: 'info',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet wasm = BytesN::from_array(&f.env, &[0x42; 32]);\nf.client.mock_all_auths().propose_upgrade(&f.governor, &wasm, &MIN_UPGRADE_DELAY_SECONDS);\nrejected!(f.client.mock_all_auths().try_execute_upgrade(&f.governor));',
   },
   40: {
-    remediation: 'Proposed upgrade delay is shorter than minimum timelock. Increase proposed delay.',
+    remediation: 'Set the upgrade delay to at least MIN_UPGRADE_DELAY_SECONDS when calling propose_upgrade.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet wasm = BytesN::from_array(&f.env, &[0x42; 32]);\nrejected!(f.client.mock_all_auths().try_propose_upgrade(&f.governor, &wasm, &0));',
   },
   41: {
-    remediation: 'Storage migration has already been executed on this contract instance.',
+    remediation: 'Storage migration is a one-time operation. No action needed; the contract is already up to date.',
     toastClass: 'info',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nf.client.mock_all_auths().set_frozen(&f.governor, &true);\nf.client.mock_all_auths().migrate_storage(&f.governor, &0, &50);\nrejected!(f.client.mock_all_auths().try_migrate_storage(&f.governor, &0, &50));',
   },
   42: {
-    remediation: 'Stream payment rate is below governance policy floor. Increase flow rate.',
+    remediation: 'Increase the deposit amount or decrease the duration so the payment rate meets the governance policy floor.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.client.mock_all_auths().set_stream_policy(\n    &f.governor, &Some(f.token.clone()),\n    &crate::StreamPolicy { min_deposit: 0, min_duration: 0, max_duration: 0, min_rate: 1_000, max_rate: 0 },\n);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &100,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
   },
   43: {
-    remediation: 'Stream payment rate exceeds governance policy ceiling. Decrease flow rate.',
+    remediation: 'Decrease the deposit amount or increase the duration so the payment rate stays at or below the governance policy ceiling.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.client.mock_all_auths().set_stream_policy(\n    &f.governor, &Some(f.token.clone()),\n    &crate::StreamPolicy { min_deposit: 0, min_duration: 0, max_duration: 0, min_rate: 0, max_rate: 10 },\n);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
   },
   44: {
-    remediation: 'Stream duration is shorter than minimum policy floor. Increase stream duration.',
+    remediation: 'Increase the stream duration to at least the governance policy min_duration for this asset.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.client.mock_all_auths().set_stream_policy(\n    &f.governor, &Some(f.token.clone()),\n    &crate::StreamPolicy { min_deposit: 0, min_duration: 2 * DAY, max_duration: 0, min_rate: 0, max_rate: 0 },\n);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + DAY + 3600), &false,\n));',
   },
   45: {
-    remediation: 'Stream duration exceeds maximum policy ceiling. Decrease stream duration.',
+    remediation: 'Decrease the stream duration to at most the governance policy max_duration for this asset.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.client.mock_all_auths().set_stream_policy(\n    &f.governor, &Some(f.token.clone()),\n    &crate::StreamPolicy { min_deposit: 0, min_duration: 0, max_duration: DAY, min_rate: 0, max_rate: 0 },\n);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &DEPOSIT,\n    &(now + DAY), &(now + 3 * DAY), &false,\n));',
   },
   46: {
-    remediation: 'Stream deposit is below governance policy floor. Increase initial deposit amount.',
+    remediation: 'Increase the initial deposit to at least the governance policy min_deposit for this asset.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nf.client.mock_all_auths().set_stream_policy(\n    &f.governor, &Some(f.token.clone()),\n    &crate::StreamPolicy { min_deposit: 1_000, min_duration: 0, max_duration: 0, min_rate: 0, max_rate: 0 },\n);\nrejected!(f.client.mock_all_auths().try_create_stream(\n    &f.sender, &f.recipient, &f.token, &500,\n    &(now + DAY), &(now + 2 * DAY), &false,\n));',
+  },
+  47: {
+    remediation: 'Submit at least one entry in the create_streams_batch call.',
+    toastClass: 'error',
+    retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet entries = soroban_sdk::Vec::new(&f.env);\nrejected!(f.client.mock_all_auths().try_create_streams_batch(&entries));',
+  },
+  48: {
+    remediation: 'Reduce the batch size to at most MAX_BATCH entries when calling create_streams_batch.',
+    toastClass: 'error',
+    retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet now = f.env.ledger().timestamp();\nlet mut entries = soroban_sdk::Vec::new(&f.env);\nfor _ in 0..=(crate::stream::MAX_BATCH) {\n    entries.push_back(crate::stream::BatchEntry {\n        sender: f.sender.clone(), recipient: f.recipient.clone(),\n        token: f.token.clone(), deposit: DEPOSIT,\n        start_time: now + DAY, end_time: now + 2 * DAY, cancelable: false,\n    });\n}\nrejected!(f.client.mock_all_auths().try_create_streams_batch(&entries));',
+  },
+  49: {
+    remediation: 'Ensure the sponsor address is registered before calling sponsored_withdraw. Register via register_sponsor if needed.',
+    toastClass: 'error',
+    retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet sponsor = Address::generate(&f.env);\nlet id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);\nrejected!(sponsored_claim(&f, &sponsor, id, 1, 1, { f.env.ledger().timestamp() + DAY }));',
   },
   56: {
-    remediation: 'Oracle threshold is invalid. Threshold must be between 1 and the publisher count.',
+    remediation: 'Set the oracle threshold to a value between 1 and the publisher count.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet mut pubs = soroban_sdk::Vec::new(&f.env);\npubs.push_back(pub1);\nrejected!(f.client.mock_all_auths().try_set_oracle_config(&f.governor, &pubs, &2, &3600));',
   },
   57: {
-    remediation: 'Oracle publishers are not configured. Governor must set oracle config first.',
+    remediation: 'Call set_oracle_config to configure oracle publishers before calling oracle entrypoints.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_submit_oracle_time(&pub1, &now));',
   },
   58: {
-    remediation: 'Oracle report timestamp is too far in the past or future. Submit a fresh report.',
+    remediation: 'Verify the oracle report timestamp is within the configured staleness window and submit a fresh report.',
     toastClass: 'error',
     retryable: true,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet mut pubs = soroban_sdk::Vec::new(&f.env);\npubs.push_back(pub1.clone());\nf.client.mock_all_auths().set_oracle_config(&f.governor, &pubs, &1, &3600);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_submit_oracle_time(&pub1, &(now + 4000)));',
   },
   59: {
-    remediation: 'Caller is not an authorized oracle publisher.',
+    remediation: 'Ensure the caller address is in the configured oracle publisher list before calling submit_oracle_time.',
     toastClass: 'error',
     retryable: false,
+    reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet unauthorized = Address::generate(&f.env);\nlet mut pubs = soroban_sdk::Vec::new(&f.env);\npubs.push_back(pub1);\nf.client.mock_all_auths().set_oracle_config(&f.governor, &pubs, &1, &3600);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_submit_oracle_time(&unauthorized, &now));',
   },
 };
 
@@ -420,7 +488,19 @@ ${isRetired ? '- *Note*: This code is reserved/retired on-chain to guarantee app
 > **Plain-Language Remediation**:  
 > ${meta.remediation}
 
----
+${meta.reproduction ? `---
+
+## Reproduction
+
+The following test code triggers this error condition:
+
+\`\`\`rust
+${meta.reproduction}
+\`\`\`
+
+This reproduction is derived from the contract's error surface tests in \`error_surface_test.rs\`.
+
+` : ''}---
 
 ## Client-Side Mapping
 \`\`\`json

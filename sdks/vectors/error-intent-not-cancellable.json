@@ -1,7 +1,7 @@
 {
   "schema": "streampay-vector/v1",
   "name": "error-intent-not-cancellable",
-  "specFingerprint": "9b8829c66657a69af65b9ef94cef232f35aa56784ccff2bba5f11db134074196",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
   "provenance": "schedule_test::cancel_after_window_opens_reverts: cancel_scheduled once execute_after has been reached.",
   "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAQY2FuY2VsX3NjaGVkdWxlZAAAAAIAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAABQAAAAAAAAABAAAAAAAAAAAAAAABFEbSLAAAAEDnunFJIH8xqLY5iH5ReR4fWYU29uiyaw7sn+3TzSDHyztRbeD7/uwIY9XvcLKZx0jWXtfTVr9FgRTjr1YJ/iQI",
   "resultXdr": "AAAAAgAAAAAAAAAW",

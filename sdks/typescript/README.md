@@ -102,14 +102,58 @@ const freighter: Signer = {
 The pipeline mirrors `frontend/lib/stellar.ts`: simulate first (early typed
 contract errors), assemble, sign, submit, poll, then decode the return value.
 
+## Method examples
+
+Every example under [`examples/`](./examples) is a complete, copy-pasteable
+script against testnet, written with the SDK's own generated types. Each row
+below links its runnable file, and the files are typechecked in CI
+(`npm run typecheck`), so they cannot drift from the API.
+
+| Method | Example | Returns |
+|---|---|---|
+| `createStream` | [`examples/create-stream.ts`](./examples/create-stream.ts) | `bigint` — new stream id |
+| `topUp` | [`examples/top-up.ts`](./examples/top-up.ts) | `void` — deposit grows; read it back with `getStream` |
+| `withdraw` | [`examples/withdraw.ts`](./examples/withdraw.ts) | `void` — `Stream.withdrawn` grows |
+| `withdrawMax` | [`examples/withdraw-max.ts`](./examples/withdraw-max.ts) | `bigint` — amount paid |
+| `pauseStream` / `resumeStream` | [`examples/pause-resume.ts`](./examples/pause-resume.ts) | `void` — `endTime` shifts on resume |
+| `cancelStream` | [`examples/cancel-stream.ts`](./examples/cancel-stream.ts) | `void` — pro-rata split to both sides |
+| `createStreams` / `createStreamsBatch` | [`examples/batch.ts`](./examples/batch.ts) | `bigint[]` / per-entry `{ ok }` or `{ error }` |
+| `getStream`, `available`, `recipientStreams`, `streamIds`, `streamsFor` | [`examples/reads.ts`](./examples/reads.ts) | typed `Stream`, `bigint` accrual, index pages |
+| `decodeEvent` / `decodeEvents` | [`examples/decode-events.ts`](./examples/decode-events.ts) | `StreamPayEvent[]` |
+
+Each script reads its configuration from the environment:
+
+| Variable | Used by |
+|---|---|
+| `STREAM_CONTRACT_ID` | all examples |
+| `TOKEN_CONTRACT_ID` | `create`, `top-up`, `batch` |
+| `STELLAR_SECRET` | `create`, `top-up`, `pause/resume`, `cancel`, `batch` (sender) |
+| `RECIPIENT_ADDRESS` | `create`, `batch`, `reads` |
+| `RECIPIENT_SECRET` | `withdraw`, `withdrawMax` |
+
+Mutating examples need a funded sender. Fund it with Friendbot and approve the
+contract as a spender before running (the whole funded walkthrough, including
+the demo token, is in [`docs/DEMO.md`](../../docs/DEMO.md#step-1-generate--fund-keypairs)):
+
+```bash
+curl -s "https://friendbot.stellar.org?addr=$STELLAR_PUBLIC" >/dev/null
+stellar contract invoke --id "$TOKEN_CONTRACT_ID" --source sender --network testnet \
+  -- approve --spender "$STREAM_CONTRACT_ID" --amount 10000000 --expiration_ledger +5000
+```
+
+The examples are typechecked, not executed, by CI. To paste one into a project
+that installed the SDK tarball, keep the snippets as they are — the imports are
+`@streampay/sdk` in both the README and the example files.
+
 ## Events
 
-Events from RPC (`getEvents`) are base64 `ContractEvent` XDR:
+Events from RPC are base64 `ContractEvent` XDR. `rpc.Server._getEvents`
+returns that raw shape (`event.value`); `getEvents` parses it into ScVals:
 
 ```ts
 import { decodeEvents } from "@streampay/sdk";
 
-const events = decodeEvents(rpcResponse.events.map((event) => event.valueXdr));
+const events = decodeEvents(rawGetEventsResponse.events.map((event) => event.value));
 // StreamCreatedEvent | WithdrawnEvent | … (all contract events)
 for (const event of events) {
   if (event.type === "StreamCreated") {
@@ -119,6 +163,38 @@ for (const event of events) {
 ```
 
 Malformed XDR throws; events from other contracts are not returned.
+
+### Resumable indexer subscription
+
+Configure the indexer's SSE endpoint on the client to subscribe to one stream:
+
+```ts
+const client = new StreamPayClient({
+  contractId: process.env.STREAM_CONTRACT_ID!,
+  eventFeedUrl: "https://indexer.example/events/stream",
+});
+const controller = new AbortController();
+
+for await (const event of client.subscribeEvents(1n, {
+  fromCursor: "evt-123",
+  signal: controller.signal,
+  onError: (error) => console.warn("Event feed reconnecting:", error),
+})) {
+  // `event.type` is the generated event discriminator.
+  // The feed may replay events, so deduplicate by `event.id` before applying
+  // non-idempotent state changes.
+  console.log(event.id, event.type, event.data);
+}
+
+// Stop the iterator from another task:
+controller.abort();
+```
+
+The indexer feed is at-least-once: a reconnect may replay the last event.
+`id`/`cursor` is the stable deduplication key. The subscription reconnects
+from its latest received ID with exponential backoff; unknown event names are
+skipped, matching the generated decoder's `null` result for unregistered
+events.
 
 ## Index pagination
 
