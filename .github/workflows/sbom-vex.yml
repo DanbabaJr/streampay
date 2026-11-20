@@ -292,12 +292,13 @@ jobs:
         run: |
           set -u
           mkdir -p advisories
-          # `--audit-compatible-output` is the documented, single-document,
-          # cargo-audit-shaped report on stdout. The plain `--format json`
-          # shape is a stream of per-finding diagnostics, and older cargo-deny
-          # releases wrote those to stderr — which is exactly how a plain `>`
-          # redirect produced an empty file that then read as "no advisories".
-          cargo deny --format json check advisories --audit-compatible-output \
+          # `--format json` alone is the single-document report (top-level
+          # "advisories"/"bans"/"licenses"/"sources" keys). Combining it with
+          # `--audit-compatible-output` instead makes cargo-deny emit one JSON
+          # document per advisory — the empty-file risk the redirect used to
+          # guard against is already caught by the explicit "is empty" check
+          # below, so we keep the single-document shape the parser expects.
+          cargo deny --format json check advisories \
             > advisories/cargo-deny.json \
             2> advisories/cargo-deny.diagnostics.json
           rc=$?
