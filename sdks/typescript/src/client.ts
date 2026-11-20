@@ -18,6 +18,7 @@ import { MAX_PAGE_SIZE, type Stream } from "./generated.js";
 import { StreamPayMethods } from "./methods.js";
 import { StreamPayError } from "./errors.js";
 import { collectPages, type IndexRole } from "./pagination.js";
+import { subscribeEvents as createEventSubscription, type SubscribeEventsOptions, type StreamFeedEvent } from "./subscription.js";
 
 /** Wallet adapter: Freighter, a server keypair, or a hardware signer. */
 export interface Signer {
@@ -49,6 +50,8 @@ export interface StreamPayClientOptions {
   server?: rpc.Server;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  /** Base URL for the indexer SSE event feed. */
+  eventFeedUrl?: string;
 }
 
 /** ed25519 all-zero key: valid source for simulations, never signs. */
@@ -64,6 +67,7 @@ export class StreamPayClient extends StreamPayMethods {
   private readonly signer?: Signer;
   private readonly pollIntervalMs: number;
   private readonly pollTimeoutMs: number;
+  private readonly eventFeedUrl: string | undefined;
 
   constructor(options: StreamPayClientOptions) {
     super();
@@ -74,6 +78,19 @@ export class StreamPayClient extends StreamPayMethods {
     if (options.signer !== undefined) this.signer = options.signer;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.pollTimeoutMs = options.pollTimeoutMs ?? 30_000;
+    this.eventFeedUrl = options.eventFeedUrl;
+  }
+
+  /** Streams typed feed events for a stream, resuming after `fromCursor`. */
+  subscribeEvents(
+    streamId: bigint | number | string,
+    options: Omit<SubscribeEventsOptions, "eventFeedUrl"> & { eventFeedUrl?: string } = {}
+  ): AsyncGenerator<StreamFeedEvent> {
+    const eventFeedUrl = options.eventFeedUrl ?? this.eventFeedUrl;
+    if (!eventFeedUrl) {
+      throw new Error("eventFeedUrl is required to subscribe to stream events");
+    }
+    return createEventSubscription(streamId, { ...options, eventFeedUrl });
   }
 
   // ------------------------------------------------------------- pagination
