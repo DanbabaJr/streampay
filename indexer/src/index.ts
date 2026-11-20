@@ -15,7 +15,9 @@ import { httpPushTransport } from "./outbox/http-transport.js";
 import { traceCorrelationRegistry } from "./telemetry.js";
 import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
 import { registerGraphQLRoutes, type GraphQLHandlerOptions } from "./graphql/index.js";
-import type { DecodedEvent, Stream } from "./types.js";
+import { WasmPluginHost } from "./wasm/host.js";
+import { PluginDispatcher } from "./wasm/dispatcher.js";
+import type { DecodedEvent, EventValue, Stream } from "./types.js";
 
 function parseCursor(raw: unknown): number {
   const value = Number(raw ?? 0);
@@ -71,6 +73,14 @@ export interface ProofConfig {
   signer: Keypair;
 }
 
+/**
+ * WASM plugin dispatch for the HTTP API (issue #580). When absent, no
+ * `/api/wasm/*` routes exist and SSE behaves exactly as before.
+ */
+export interface WasmOptions {
+  dispatcher: PluginDispatcher;
+}
+
 export function createApp(
   store: StreamStore,
   dispatcher?: WebhookDispatcher,
@@ -79,7 +89,8 @@ export function createApp(
   rpcHealth?: () => EndpointHealth[],
   ingestStats?: () => IngestStats,
   proofConfig?: ProofConfig,
-  graphqlOptions?: GraphQLHandlerOptions
+  graphqlOptions?: GraphQLHandlerOptions,
+  wasmOptions?: WasmOptions,
 ): express.Express {
   const app = express();
   app.use(express.json());
@@ -150,6 +161,103 @@ export function createApp(
       return `id: ${evt.id}\nevent: ${evt.name}\ndata: ${data}\n\n`;
     };
 
+    // Heartbeat ping every 15 seconds to prevent reverse proxy/load-balancer timeouts
+    const pingInterval = setInterval(() => {
+      res.write(": ping\n\n");
+    }, 15000);
+
+    // WASM plugin dispatch (#580): opt-in per connection with
+    // `?tenant=<tenant>&plugin=<digest>`. When both are present (and a
+    // dispatcher was configured), live *and* replayed events for this
+    // connection run through the tenant's approved plugin — in order, via
+    // a promise chain, with live events that arrive during the replay
+    // buffered rather than reordered. Dropped events are not written;
+    // a failed plugin falls back to the raw (redacted) event. Without
+    // those query params the path below is the historical behaviour.
+    const wasmTenant = typeof req.query.tenant === "string" ? req.query.tenant : undefined;
+    const wasmDigest = typeof req.query.plugin === "string" ? req.query.plugin : undefined;
+    const wasm =
+      wasmOptions && wasmTenant && wasmDigest
+        ? { dispatcher: wasmOptions.dispatcher, tenant: wasmTenant, pluginDigest: wasmDigest }
+        : undefined;
+
+    let onLiveEvent: ((event: DecodedEvent, stream?: Stream) => void) | undefined;
+
+    if (wasm) {
+      const subscriptionId = `sse:${streamId ?? address ?? "all"}:${wasm.tenant}`;
+      wasm.dispatcher.subscribe(subscriptionId, wasm.tenant, wasm.pluginDigest);
+      // Serialise dispatch so one connection's events keep journal order
+      // even though each transform runs in its own worker thread.
+      let chain: Promise<void> = Promise.resolve();
+      const enqueue = (fn: () => Promise<void>): void => {
+        chain = chain.then(async () => {
+          try {
+            await fn();
+          } catch (err) {
+            console.error("[wasm] SSE dispatch failed:", err);
+          }
+        });
+      };
+      const dispatchAndWrite = async (event: DecodedEvent, stream?: Stream): Promise<void> => {
+        if (streamId && event.streamId !== streamId) return;
+        if (address && stream && stream.sender !== address && stream.recipient !== address) return;
+        const result = await wasm.dispatcher.dispatch(event, subscriptionId);
+        if (!result.event) return; // dropped by the plugin
+        res.write(
+          formatSse({
+            id: result.event.id,
+            streamId: result.event.streamId,
+            name: result.event.name,
+            ledger: result.event.ledger,
+            ledgerClosedAt: result.event.ledgerClosedAt,
+            payload: result.event.data as Record<string, unknown>,
+            stream,
+          }),
+        );
+      };
+      let replayDone = false;
+      const pending: Array<{ event: DecodedEvent; stream?: Stream }> = [];
+      onLiveEvent = (event, stream) => {
+        if (!replayDone) {
+          pending.push({ event, stream });
+          return;
+        }
+        enqueue(() => dispatchAndWrite(event, stream));
+      };
+      store.on("event", onLiveEvent);
+      void (async () => {
+        if (lastEventId) {
+          const historical = store.getEventsAfter(lastEventId, address, streamId);
+          for (const evt of historical) {
+            await dispatchAndWrite(
+              {
+                id: evt.id,
+                pagingToken: evt.id,
+                ledger: evt.ledger,
+                ledgerClosedAt: evt.ledgerClosedAt,
+                contractId: "",
+                name: evt.name,
+                streamId: evt.streamId,
+                data: evt.payload as Record<string, EventValue>,
+              },
+              evt.stream,
+            );
+          }
+        }
+        replayDone = true;
+        for (const item of pending.splice(0)) {
+          enqueue(() => dispatchAndWrite(item.event, item.stream));
+        }
+      })();
+      req.on("close", () => {
+        clearInterval(pingInterval);
+        if (onLiveEvent) store.off("event", onLiveEvent);
+        wasm.dispatcher.unsubscribe(subscriptionId);
+        res.end();
+      });
+      return;
+    }
+
     // Replay historical events if lastEventId was supplied
     if (lastEventId) {
       const historical = store.getEventsAfter(lastEventId, address, streamId);
@@ -159,7 +267,7 @@ export function createApp(
     }
 
     // Subscribe to live events
-    const onLiveEvent = (event: DecodedEvent, stream?: Stream) => {
+    onLiveEvent = (event: DecodedEvent, stream?: Stream) => {
       if (streamId && event.streamId !== streamId) {
         return;
       }
@@ -175,20 +283,15 @@ export function createApp(
           ledgerClosedAt: event.ledgerClosedAt,
           payload: event.data as Record<string, unknown>,
           stream,
-        })
+        }),
       );
     };
 
     store.on("event", onLiveEvent);
 
-    // Heartbeat ping every 15 seconds to prevent reverse proxy/load-balancer timeouts
-    const pingInterval = setInterval(() => {
-      res.write(": ping\n\n");
-    }, 15000);
-
     req.on("close", () => {
       clearInterval(pingInterval);
-      store.off("event", onLiveEvent);
+      if (onLiveEvent) store.off("event", onLiveEvent);
       res.end();
     });
   });
@@ -451,6 +554,81 @@ export function createApp(
     return res.json({ ok: true, replayed: true });
   });
 
+  // ---------- WASM plugin management API (#580) ----------
+  // Only present when a dispatcher was configured. Plugins are registered
+  // by content digest and must be approved per tenant before they can run;
+  // see indexer/README.md ("WASM plugin filters") for the full flow.
+  if (wasmOptions) {
+    const { dispatcher: wasmDispatcher } = wasmOptions;
+    const digestParam = (req: express.Request, res: express.Response): string | undefined => {
+      const digest = req.params.digest;
+      if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) {
+        res.status(400).json({ error: "digest must be a lowercase hex sha256" });
+        return undefined;
+      }
+      return digest;
+    };
+
+    app.get("/api/wasm/plugins", (_req, res) => res.json(store.wasm.listPlugins()));
+
+    app.post("/api/wasm/plugins", (req, res) => {
+      const { bytesBase64, version, name } = req.body || {};
+      if (typeof bytesBase64 !== "string" || typeof version !== "string") {
+        return res.status(400).json({ error: "bytesBase64 and version are required" });
+      }
+      try {
+        const bytes = Buffer.from(bytesBase64, "base64");
+        const record = store.wasm.register(bytes, version, typeof name === "string" ? name : undefined);
+        return res.status(201).json({ digest: record.digest, version: record.version, name: record.name, size: record.bytes.length });
+      } catch (err: unknown) {
+        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.post("/api/wasm/plugins/:digest/approve", (req, res) => {
+      const digest = digestParam(req, res);
+      if (!digest) return;
+      const tenant = req.body?.tenant;
+      if (typeof tenant !== "string" || !tenant) return res.status(400).json({ error: "tenant is required" });
+      try {
+        return res.json(store.wasm.approve(tenant, digest));
+      } catch (err: unknown) {
+        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.post("/api/wasm/plugins/:digest/revoke", (req, res) => {
+      const digest = digestParam(req, res);
+      if (!digest) return;
+      const tenant = req.body?.tenant;
+      if (typeof tenant !== "string" || !tenant) return res.status(400).json({ error: "tenant is required" });
+      return res.json({ ok: true, revoked: store.wasm.revoke(tenant, digest) });
+    });
+
+    app.post("/api/wasm/subscriptions", (req, res) => {
+      const { subscriptionId, tenant, pluginDigest } = req.body || {};
+      if (typeof subscriptionId !== "string" || typeof tenant !== "string" || typeof pluginDigest !== "string") {
+        return res.status(400).json({ error: "subscriptionId, tenant and pluginDigest are required" });
+      }
+      try {
+        wasmDispatcher.subscribe(subscriptionId, tenant, pluginDigest);
+        return res.status(201).json({ subscriptionId, tenant, pluginDigest });
+      } catch (err: unknown) {
+        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.delete("/api/wasm/subscriptions/:id", (req, res) => {
+      const id = req.params.id;
+      if (typeof id !== "string") return res.status(400).json({ error: "subscription id must be a string" });
+      return res.json({ ok: true, removed: wasmDispatcher.unsubscribe(id) });
+    });
+
+    app.get("/api/wasm/fallbacks", (_req, res) => {
+      return res.json(wasmDispatcher.fallbackLog.slice(-100));
+    });
+  }
+
   return app;
 }
 
@@ -506,6 +684,21 @@ export async function run(): Promise<void> {
     maxDepth: process.env.OUTBOX_MAX_DEPTH ? envInt("OUTBOX_MAX_DEPTH", 1) : undefined,
   });
   outboxDispatcher.start();
+
+  // ── WASM plugin filters (#580) ──────────────────────────────────────────
+  // Plugins run sandboxed per subscription; a runaway plugin falls back to
+  // the raw stream (see src/wasm/). Redaction of delivered events is opt-in
+  // via WASM_REDACTION_ENABLED=1 and always runs after plugin transforms.
+  const wasmHost = new WasmPluginHost({
+    timeoutMs: Number(process.env.WASM_PLUGIN_TIMEOUT_MS ?? "500"),
+  });
+  const wasmDispatcher = new PluginDispatcher(store.wasm, wasmHost, {
+    redactionEnabled: process.env.WASM_REDACTION_ENABLED === "1",
+    onFallback: (alert) =>
+      console.warn(
+        `[wasm] fallback subscription=${alert.subscriptionId} event=${alert.eventId} reason=${alert.reason}`,
+      ),
+  });
 
   // `stream_refund_target_changed` (#204) is projected into `streams.refund_target`
   // by the store, so it has to be fetched for that column to ever be filled.
@@ -564,7 +757,9 @@ export async function run(): Promise<void> {
       sequencer: pipeline.metrics(),
       budget: manager.getRateBudget(),
     }),
-    { networkPassphrase, contractId, signer: checkpointSigner }
+    { networkPassphrase, contractId, signer: checkpointSigner },
+    undefined,
+    { dispatcher: wasmDispatcher },
   );
 
   async function poll(): Promise<void> {

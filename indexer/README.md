@@ -31,6 +31,8 @@ The service indexes the contract's emitted event topics: `stream_created`, `with
 | `OUTBOX_CLAIM_TIMEOUT_MS` | `60000` | Stale-claim reclaim threshold (crash recovery) |
 | `OUTBOX_MAX_DEPTH` | off | Global backpressure threshold for pending+in-flight intents |
 | `SHUTDOWN_DRAIN_MS` | `10000` | On SIGTERM/SIGINT, how long in-flight ingest and outbox dispatch may finish before the process exits (exit code `0` if drained, `1` if the window expired). Keep it below your orchestrator's kill grace period |
+| `WASM_PLUGIN_TIMEOUT_MS` | `500` | Per-invocation wall-clock budget for a WASM plugin transform, in milliseconds (max 5000). A plugin that exceeds it is killed and the subscription falls back to the raw stream |
+| `WASM_REDACTION_ENABLED` | unset (off) | Set to `1` to truncate full Stellar addresses in delivered event data to the 8-character prefix. Redaction runs after plugin transforms, never before |
 
 This table is the short version. [docs/INDEXER_OPERATIONS.md §1](../docs/INDEXER_OPERATIONS.md#1-configuration) explains each variable's behaviour, its validation, the ingest/RPC knobs read by the config code (`INGEST_*`, `RPC_MAX_RPS`, `RPC_URL_FALLBACK_n`), and deployment profiles.
 
@@ -269,6 +271,54 @@ are generated from the contract's `#[contractevent]` structs into
   indexers keep working against a newly upgraded contract.
 - `src/registry.test.ts` asserts the generated table matches the committed
   `schemas/events/registry.json` field-for-field.
+
+---
+
+### WASM plugin filters (issue #580)
+
+Integrators can upload small WASM filter/transform plugins that run
+sandboxed per subscription, shaping the event stream server-side (field
+projection, predicate filtering, enrichment) without a custom indexer
+fork. Full specification: [`src/wasm/README.md`](src/wasm/README.md).
+
+- **ABI**: a plugin is a WASM module with no imports, exporting `memory`
+  and `transform(inputPtr, inputLen) -> outputLen`. The host writes the
+  event JSON at offset 0; the plugin writes its JSON reply at offset
+  32768 and returns its length, or `-1` to drop the event. The reply's
+  `data` becomes the event's new data; envelope fields (id, ledger, name,
+  stream id) are always taken from the input, so a plugin cannot rewrite
+  an event's identity.
+- **Approval flow**: register a plugin (`POST /api/wasm/plugins` with the
+  base64 bytes and a version — the plugin id is the SHA-256 of the bytes),
+  approve that exact digest per tenant
+  (`POST /api/wasm/plugins/:digest/approve`), then bind it to a
+  subscription (`POST /api/wasm/subscriptions`). An unapproved plugin can
+  never run. Approvals and plugin bytes persist in SQLite
+  (`wasm_plugins`, `wasm_plugin_approvals`).
+- **Limits**: no host imports at all (WASI/`env` imports are rejected by
+  name); memory maximum 4 pages, enforced at validation; input/output
+  capped at 32 KiB each; per-invocation wall-clock budget
+  (`WASM_PLUGIN_TIMEOUT_MS`, default 500 ms) enforced by running the
+  transform in a worker thread that is terminated on expiry. V8 exposes
+  no instruction fuel counter, so the wall-clock + memory + size caps are
+  the fuel proxy — documented as such in `src/wasm/abi.ts`.
+- **Fallback behaviour**: a plugin that traps, times out, is killed, or
+  replies with garbage never stalls ingestion — the subscription falls
+  back to the raw stream and a fallback alert is recorded
+  (`GET /api/wasm/fallbacks`, and a warning log line). A plugin that
+  returns `-1` drops the event for that subscription.
+- **Determinism**: same input + same plugin digest yields the same
+  output; `src/wasm/conformance-vectors.json` is the vector suite run by
+  `wasm.test.ts`.
+- **Privacy redaction runs after plugin transforms**: with
+  `WASM_REDACTION_ENABLED=1`, full Stellar addresses in delivered event
+  data are truncated to the 8-character prefix (`sanitizeAddress`) on the
+  way out — on transformed, passthrough and fallback paths alike — so a
+  plugin cannot un-redact a protected field.
+- **Delivery**: `GET /events/stream?tenant=<tenant>&plugin=<digest>`
+  runs a connection's live and replayed events through the tenant's
+  approved plugin, in journal order. Without those query params, SSE is
+  unchanged.
 
 ---
 
