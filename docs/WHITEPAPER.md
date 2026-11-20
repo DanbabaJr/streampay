@@ -456,5 +456,5 @@ It also checks that every `[Cn]` cited in the text has a row, and that every row
 | C66 |   The indexer refuses a governed event that omits a declared data field   | `indexer/src/decoder.ts:423` | `is missing registry data field(s):` |
 | C67 |   The indexed stream id comes only from a topic the registry declares as stream_id   | `indexer/src/decoder.ts:417` | `if (field.name === "stream_id") streamId = String(positional[i]);` |
 | C68 |   Events from another contract id are journalled without a stream claim   | `indexer/src/decoder.ts:439` | `if (!fromGovernedContract) {` |
-| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:247` | `if (event.streamId === null) {` |
+| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:251` | `if (event.streamId === null) {` |
 <!-- claims:end -->
