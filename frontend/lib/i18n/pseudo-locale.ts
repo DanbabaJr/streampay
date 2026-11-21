@@ -68,6 +68,55 @@ const ACCENT_MAP: Record<string, string> = {
   Z: "Ž",
 };
 
+/** Transform only ICU message text while preserving argument syntax and selectors. */
+function transformIcuLiterals(message: string, transformLiteral: (literal: string) => string): string {
+  const matchingBrace = (input: string, start: number): number => {
+    let depth = 0;
+    for (let i = start; i < input.length; i++) {
+      if (input[i] === "{") depth++;
+      else if (input[i] === "}" && --depth === 0) return i;
+    }
+    return -1;
+  };
+  const transform = (input: string): string => {
+    let output = "";
+    let cursor = 0;
+    while (cursor < input.length) {
+      const open = input.indexOf("{", cursor);
+      if (open === -1) { output += transformLiteral(input.slice(cursor)); break; }
+      output += transformLiteral(input.slice(cursor, open));
+      const close = matchingBrace(input, open);
+      if (close === -1) { output += transformLiteral(input.slice(open)); break; }
+      const inner = input.slice(open + 1, close);
+      const nestedOpen = inner.indexOf("{");
+      if (nestedOpen === -1) {
+        if (/^[A-Za-z_]\w*(?:\s*,\s*[A-Za-z]+(?:\s*,[^{}]*)?)?$/.test(inner.trim())) {
+          output += input.slice(open, close + 1);
+        } else {
+          output += "{" + transform(inner) + "}";
+        }
+      } else {
+        output += "{" + inner.slice(0, nestedOpen);
+        const branches = inner.slice(nestedOpen);
+        let branchCursor = 0;
+        while (branchCursor < branches.length) {
+          const branchOpen = branches.indexOf("{", branchCursor);
+          if (branchOpen === -1) { output += branches.slice(branchCursor); break; }
+          output += branches.slice(branchCursor, branchOpen);
+          const branchClose = matchingBrace(branches, branchOpen);
+          if (branchClose === -1) { output += branches.slice(branchOpen); break; }
+          output += "{" + transform(branches.slice(branchOpen + 1, branchClose)) + "}";
+          branchCursor = branchClose + 1;
+        }
+        output += "}";
+      }
+      cursor = close + 1;
+    }
+    return output;
+  };
+  return transform(message);
+}
+
 /**
  * Transform a message to accented pseudo-locale with padding.
  * Preserves ICU placeholders and adds ~40% length expansion.
@@ -76,57 +125,9 @@ const ACCENT_MAP: Record<string, string> = {
  * accentedPseudo("Hello {name}!") // "[!!! Ĥéļļó {name}! !!!]"
  */
 export function accentedPseudo(message: string): string {
-  // Preserve ICU placeholders: {name}, {count, plural, ...}, etc.
-  const parts: Array<{ text: string; isPlaceholder: boolean }> = [];
-  let currentText = "";
-  let depth = 0;
-  let inPlaceholder = false;
-
-  for (let i = 0; i < message.length; i++) {
-    const char = message[i];
-    if (char === "{") {
-      if (depth === 0 && currentText) {
-        parts.push({ text: currentText, isPlaceholder: false });
-        currentText = "";
-      }
-      depth++;
-      inPlaceholder = true;
-      currentText += char;
-    } else if (char === "}") {
-      depth--;
-      currentText += char;
-      if (depth === 0 && inPlaceholder) {
-        parts.push({ text: currentText, isPlaceholder: true });
-        currentText = "";
-        inPlaceholder = false;
-      }
-    } else {
-      currentText += char;
-    }
-  }
-
-  if (currentText) {
-    parts.push({ text: currentText, isPlaceholder: inPlaceholder });
-  }
-
-  // Transform non-placeholder parts
-  const transformed = parts
-    .map((part) => {
-      if (part.isPlaceholder) {
-        return part.text; // Keep placeholders unchanged
-      }
-
-      // Accent the text
-      let accented = "";
-      for (const char of part.text) {
-        accented += ACCENT_MAP[char] ?? char;
-      }
-
-      return accented;
-    })
-    .join("");
-
-  // Add ~40% padding with bracketing for visibility
+  const transformed = transformIcuLiterals(message, (literal) =>
+    Array.from(literal, (char) => ACCENT_MAP[char] ?? char).join("")
+  );
   const padding = " !!!".repeat(Math.ceil(transformed.length * 0.1));
   return `[${padding} ${transformed}${padding}]`;
 }
@@ -139,69 +140,18 @@ export function accentedPseudo(message: string): string {
  * longWordPseudo("Hello world") // "Ħēļļōōōōō ŵōŕļðððððð"
  */
 export function longWordPseudo(message: string): string {
-  // Preserve ICU placeholders
-  const parts: Array<{ text: string; isPlaceholder: boolean }> = [];
-  let currentText = "";
-  let depth = 0;
-  let inPlaceholder = false;
-
-  for (let i = 0; i < message.length; i++) {
-    const char = message[i];
-    if (char === "{") {
-      if (depth === 0 && currentText) {
-        parts.push({ text: currentText, isPlaceholder: false });
-        currentText = "";
+  return transformIcuLiterals(message, (literal) =>
+    literal.replace(/\b(\w+)\b/g, (word) => {
+      let result = "";
+      for (const [index, char] of Array.from(word).entries()) {
+        const accented = ACCENT_MAP[char] ?? char;
+        result += accented;
+        if ("aeiouAEIOU".includes(char)) result += accented.repeat(3);
+        if (index === 0 && word.length === 1) result += accented.repeat(2);
       }
-      depth++;
-      inPlaceholder = true;
-      currentText += char;
-    } else if (char === "}") {
-      depth--;
-      currentText += char;
-      if (depth === 0 && inPlaceholder) {
-        parts.push({ text: currentText, isPlaceholder: true });
-        currentText = "";
-        inPlaceholder = false;
-      }
-    } else {
-      currentText += char;
-    }
-  }
-
-  if (currentText) {
-    parts.push({ text: currentText, isPlaceholder: inPlaceholder });
-  }
-
-  // Transform non-placeholder parts
-  return parts
-    .map((part) => {
-      if (part.isPlaceholder) {
-        return part.text;
-      }
-
-      // Replace each word with a long compound
-      return part.text.replace(/\b(\w+)\b/g, (word) => {
-        if (word.length === 0) return word;
-
-        // Accent first character
-        let longWord = ACCENT_MAP[word[0]] ?? word[0];
-
-        // Elongate by repeating vowel-like characters
-        for (let i = 1; i < word.length; i++) {
-          const char = word[i];
-          const accented = ACCENT_MAP[char] ?? char;
-          longWord += accented;
-
-          // Add extra characters to make it long and unbreakable
-          if ("aeiouAEIOU".includes(char)) {
-            longWord += accented.repeat(Math.min(4, word.length));
-          }
-        }
-
-        return longWord;
-      });
+      return result;
     })
-    .join("");
+  );
 }
 
 /**
