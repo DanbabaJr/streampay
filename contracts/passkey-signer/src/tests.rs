@@ -22,7 +22,8 @@
 #![cfg(test)]
 extern crate std;
 
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use std::vec;
 use soroban_sdk::{Address, Bytes, BytesN, Env};
 
 use crate::errors::PasskeyError;
