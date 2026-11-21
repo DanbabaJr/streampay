@@ -121,6 +121,15 @@ lint/typecheck/build when frontend files are touched) are the minimum gate.
   changes — it's the source of truth for design decisions, including
   rejected alternatives, the append-only public-interface rules (§13), and
   the Soroban-specific traps to avoid rediscovering the hard way (§14).
+- **Terms used in this doc.** New and revised docs must not make the reader
+  infer a protocol term from context: define any new term first in
+  [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) (alphabetized, with a definition
+  grounded in the implementation and a link to its authoritative source),
+  link the first use of each glossary term to its entry, and add a short
+  "terms used in this doc" note near the top of a doc that leans on several
+  terms. Never redefine a term inline — extend the glossary entry instead.
+  The full convention lives in
+  [`docs/GLOSSARY.md`](./docs/GLOSSARY.md#writing-docs-the-terms-used-in-this-doc-convention).
 - Error codes and events are documented in tables; keep the tables in sync —
   see **Generated files & CI gates** below for the exact commands.
 
