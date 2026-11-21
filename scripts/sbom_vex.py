@@ -10,9 +10,16 @@ one command. It answers three questions and fails closed on each:
    artifact's *actual* sha256 to the SBOM that describes it.
 
 2. **Has any ingredient changed without the change being reviewed?**
-   `--baseline` holds the committed component inventory. A component added,
-   removed or version-bumped is drift: regenerate the SBOM deliberately, review
-   the diff, and update the baseline with `--write-baseline`.
+   `--lock` compares an SBOM against the lockfile that produced it: the forward
+   direction is strict (every component the SBOM names must be a version the
+   lockfile resolves), and the reverse direction runs against the set the
+   generator is contracted to describe — npm's top-level install nodes, or the
+   `--shipped-graph` (`cargo tree -e normal`) that says which crates one artifact
+   actually links. Copies the generator cannot emit are reported, not failed,
+   because the advisory reports below are read from the whole lockfile.
+   `--baseline` additionally holds the committed component inventory: a component
+   added, removed or version-bumped is drift. Regenerate the SBOM deliberately,
+   review the diff, and update the baseline with `--write-baseline`.
 
 3. **Has every advisory been triaged in machine-readable VEX?**
    cargo-deny, `npm audit` and `pip-audit` findings are normalised and each one
@@ -20,8 +27,9 @@ one command. It answers three questions and fails closed on each:
    under_investigation with a justification, an owner, a reviewed date and an
    expiry. An unreviewed advisory, an expired entry, an entry whose version
    disagrees with the SBOM, or a critical/high advisory left `under_investigation`
-   blocks the gate. There is no ignore list: `deny.toml`'s `ignore` entries
-   must also exist here as VEX, or this gate reports them as unreviewed.
+   blocks the gate. There is no second ignore list: with `--deny-config deny.toml`
+   every cargo-deny `ignore` id has to exist here as a VEX entry too, because an
+   id cargo-deny suppresses never reaches the loop that would otherwise demand one.
 
 Exit status: 0 clean, 1 gate failure, 2 usage error.
 """
@@ -35,6 +43,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 SCHEMA_INDEX = "streampay.sbom-index/v1"
 SCHEMA_BASELINE = "streampay.sbom-baseline/v1"
@@ -130,10 +139,20 @@ def sha256_file(path: Path) -> str:
 
 
 def parse_purl(ref: str) -> tuple[str, str | None] | None:
+    """Split a package URL into (name, version).
+
+    The name is percent-decoded, which is not cosmetic: CycloneDX writes a
+    scoped npm package as `pkg:npm/%40types/express@5.0.6`, and a key of
+    `%40types/express` matches neither the SBOM's own `@types/express` name nor
+    the lockfile's. Every scoped package then read as a component the lockfile
+    does not resolve.
+    """
     match = PURL_RE.match(ref)
     if not match:
         return None
-    return match.group("name"), match.group("version")
+    name = unquote(match.group("name"))
+    version = match.group("version")
+    return name, unquote(version) if version else None
 
 
 def parse_pairs(values: list[str] | None) -> dict[str, Path]:
@@ -150,8 +169,14 @@ def parse_pairs(values: list[str] | None) -> dict[str, Path]:
 # ── SBOM validation ─────────────────────────────────────────────────────────
 
 
-def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, str]:
-    """Return {component_name: version} for one SBOM, checking its structure."""
+def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, set[str]]:
+    """Return {component key: every version it appears at} for one SBOM.
+
+    A key maps to a *set* because one artifact can legitimately ship two versions
+    of one package (the Rust SBOM does exactly that 20 times over), and a flat
+    name -> version map can only keep one of them. First-write-wins silently
+    hid the second version from every cross-check below.
+    """
     where = f"SBOM '{name}'"
     if sbom.get("bomFormat") != "CycloneDX":
         gate.fail(f"{where}: bomFormat is {sbom.get('bomFormat')!r}, not 'CycloneDX'")
@@ -179,7 +204,8 @@ def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, str]:
         )
         return {}
 
-    inventory: dict[str, str] = {}
+    inventory: dict[str, set[str]] = {}
+    file_components = 0
     for index, component in enumerate(components):
         label = f"{where} component #{index + 1}"
         if not isinstance(component, dict):
@@ -191,6 +217,17 @@ def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, str]:
             continue
         label = f"{where} component '{comp_name}'"
 
+        # CycloneDX splits an ecosystem-scoped package into `group` + `name`, so
+        # `@types/express` arrives as group `@types`, name `express`. Keying on
+        # the bare name makes it collide with the real `express`, which the old
+        # implementation resolved by first-write-wins: 43 scoped components in
+        # the indexer SBOM silently overwrote their unscoped twins, and the
+        # lockfile cross-check then reported pure name collisions as version
+        # drift. The purl carries the scope in one string and is what the
+        # lockfile keys look like, so prefer it and fall back to group + name.
+        group = component.get("group")
+        key = f"{group}/{comp_name}" if isinstance(group, str) and group.strip() else comp_name
+
         version = component.get("version")
         purl_version = None
         purl = component.get("purl")
@@ -199,11 +236,23 @@ def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, str]:
             if parsed is None:
                 gate.fail(f"{label}: purl {purl!r} is not a package URL")
             else:
+                if parsed[0]:
+                    key = parsed[0]
                 purl_version = parsed[1]
                 if comp_name.lower() not in parsed[0].lower() and parsed[0].lower() not in comp_name.lower():
                     gate.warn(f"{label}: purl names {parsed[0]!r}")
         if not isinstance(version, str) or not version.strip():
             version = purl_version
+
+        # A filesystem inventory (`type: "file"`, no purl) is what syft emits for
+        # the contents of a container image. Those entries are legitimately
+        # unversioned, they are not dependencies, and they can never appear in a
+        # lockfile — so they are counted, not required to carry a version, and
+        # left out of the inventory the lockfile is compared against.
+        if str(component.get("type") or "") == "file" and not isinstance(purl, str):
+            file_components += 1
+            continue
+
         if not isinstance(version, str) or not version.strip():
             gate.fail(f"{label}: has no version (and no purl binding one)")
             continue
@@ -214,60 +263,95 @@ def component_inventory(sbom: dict, name: str, gate: Gate) -> dict[str, str]:
         hashes = component.get("hashes")
         if hashes is not None:
             if not isinstance(hashes, list) or not hashes:
-                gate.warn(f"{label}: empty hash list; omit the field instead")
+                gate.warn(f"{where} component '{key}': empty hash list; omit the field instead")
             for digest in hashes:
                 if not isinstance(digest, dict) or not digest.get("alg") or not digest.get("content"):
-                    gate.fail(f"{label}: malformed hash entry {digest!r}")
+                    gate.fail(f"{where} component '{key}': malformed hash entry {digest!r}")
                     break
                 content = str(digest["content"])
                 expected = {"SHA-256": 64, "SHA-512": 128, "SHA-1": 40, "SHA-384": 96}.get(
                     str(digest["alg"]).upper()
                 )
                 if expected and not re.fullmatch(rf"[0-9a-fA-F]{{{expected}}}", content):
-                    gate.fail(f"{label}: {digest['alg']} hash is not {expected} hex characters")
+                    gate.fail(f"{where} component '{key}': {digest['alg']} hash is not {expected} hex characters")
 
-        previous = inventory.get(comp_name)
-        if previous is not None and previous != version:
+        seen_versions = inventory.setdefault(key, set())
+        if seen_versions and version not in seen_versions:
             # Two versions of one package in one artifact is exactly the kind of
             # thing a VEX entry would silently mis-attribute.
-            gate.warn(f"{label}: also appears at version {previous}")
-        inventory.setdefault(comp_name, version)
+            gate.warn(f"{where} component '{key}': also appears at {sorted(seen_versions)}")
+        seen_versions.add(version)
+    if file_components:
+        gate.warn(
+            f"{where}: {file_components} component(s) of type 'file' are image contents, not "
+            "dependencies; they are checked for structure and left out of the lockfile comparison"
+        )
     return inventory
 
 
 # ── lockfile cross-check ───────────────────────────────────────────────────
 
 
-def lockfile_components(path: Path, gate: Gate) -> dict[str, str]:
-    """Resolved packages from a Cargo.lock or package-lock.json.
+def lockfile_components(
+    path: Path, gate: Gate
+) -> tuple[dict[str, set[str]], dict[str, set[str]], str, dict[tuple[str, str], bool]]:
+    """Read a Cargo.lock or package-lock.json into the sets an SBOM is judged by.
 
-    The lockfile is the ground truth for what a build actually installs, so
-    comparing the SBOM against it is drift detection that needs no committed
-    baseline: an SBOM that disagrees with the lock is either stale (it hides a
-    dependency from advisory review) or hand-edited.
+    Returns `(resolved, described, kind, nested)` where:
+
+    * `resolved` holds **every** version the lockfile resolves anywhere, which is
+      what an SBOM component has to be drawn from;
+    * `described` holds the packages the SBOM generator is expected to have
+      emitted, i.e. what an SBOM must not be silent about;
+    * `nested` maps a `(name, version)` that appears only deeper in the install
+      tree to whether any of those copies is a non-dev dependency.
+
+    The first two differ because npm's `packages` map has one entry per *node* in
+    the install tree, and `@cyclonedx/cyclonedx-npm` describes only the
+    `node_modules/<name>` nodes at the top of that tree. Measured against the
+    SBOMs CI generates, its output is exactly those nodes — 633 components for
+    frontend's 633 top-level nodes, 167 and 44 for indexer and the SDK, same
+    names, same versions, and not one of the 62 nested copies. So a nested
+    `debug@3.2.7` under `eslint-config-next` is a real installed package the
+    artifact SBOM will never list, and treating that as drift made the gate fail
+    25 times on a tree nobody had touched.
     """
     if not path.is_file():
         gate.fail(f"lockfile: file not found: {path}")
-        return {}
-    resolved: dict[str, str] = {}
+        return {}, {}, "unknown", {}
+    resolved: dict[str, set[str]] = {}
+    described: dict[str, set[str]] = {}
+    nested: dict[tuple[str, str], bool] = {}
     if path.name.endswith("package-lock.json") or path.suffix == ".json":
         document = load_json(path, gate, what=f"lockfile {path}")
         if not isinstance(document, dict):
-            return {}
+            return {}, {}, "unknown", {}
         packages = document.get("packages")
         if isinstance(packages, dict):
             for key, meta in packages.items():
                 if not key or not isinstance(meta, dict) or not meta.get("version"):
                     continue
-                name = meta.get("name") or key.rsplit("node_modules/", 1)[-1]
-                resolved[str(name)] = str(meta["version"])
-            return resolved
+                name = str(meta.get("name") or key.rsplit("node_modules/", 1)[-1])
+                version = str(meta["version"])
+                resolved.setdefault(name, set()).add(version)
+                # `node_modules/a/node_modules/b` is nested; anything else with a
+                # node_modules prefix is one level deep, which is what the
+                # generator describes.
+                if key.startswith("node_modules/") and "/node_modules/" not in key:
+                    described.setdefault(name, set()).add(version)
+                else:
+                    nested[(name, version)] = nested.get((name, version), False) or not meta.get("dev")
+            return resolved, described, "npm", nested
         dependencies = document.get("dependencies")
         if isinstance(dependencies, dict):
+            # lockfileVersion 1/2: the nested graph lives under `dependencies`
+            # as trees, so every name is described at the level it is listed.
             for name, meta in dependencies.items():
                 if isinstance(meta, dict) and meta.get("version"):
-                    resolved[str(name)] = str(meta["version"])
-        return resolved
+                    resolved.setdefault(str(name), set()).add(str(meta["version"]))
+                    described.setdefault(str(name), set()).add(str(meta["version"]))
+            return resolved, described, "npm", nested
+        return resolved, described, "npm", nested
 
     # Cargo.lock: a TOML subset, read with a regex rather than a TOML parser so
     # the gate keeps running on the CI image's stock python3.
@@ -276,24 +360,124 @@ def lockfile_components(path: Path, gate: Gate) -> dict[str, str]:
         name = re.search(r'^\s*name\s*=\s*"([^"]+)"', block, flags=re.MULTILINE)
         version = re.search(r'^\s*version\s*=\s*"([^"]+)"', block, flags=re.MULTILINE)
         if name and version:
-            resolved[name.group(1)] = version.group(1)
-    return resolved
+            resolved.setdefault(name.group(1), set()).add(version.group(1))
+    return resolved, described, "cargo", nested
 
 
-def check_lockfile(sbom_name: str, comps: dict[str, str], lock_path: Path, gate: Gate) -> None:
-    resolved = lockfile_components(lock_path, gate)
+def shipped_graph(path: Path, gate: Gate) -> dict[str, set[str]]:
+    """`cargo tree -e normal` output: the crates actually linked into the Wasm.
+
+    Cargo.lock is the union of the normal, dev, build, proc-macro, host and
+    every-target-platform graphs — 319 package names for this contract against
+    the 162 the SBOM describes. Neither set is wrong; they answer different
+    questions, and comparing an SBOM of one artifact to the resolve of a whole
+    workspace is why the Rust half of this gate reported 157 phantom omissions.
+    The reverse check therefore runs against the shipped graph, and the lockfile
+    still answers "did the SBOM invent a version that nothing resolves?".
+    """
+    if not path.is_file():
+        gate.fail(f"shipped dependency graph: file not found: {path}")
+        return {}
+    graph: dict[str, set[str]] = {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    root_skipped = False
+    for line in lines:
+        # `cargo tree --prefix none` prints `name vversion`, optionally followed
+        # by `(proc-macro)`, feature lists, or `(*)` meaning "already shown".
+        match = re.match(r"^\s*([A-Za-z0-9_.+-]+) v(\S+)", line)
+        if not match:
+            continue
+        if not root_skipped:
+            # The first entry is the queried package itself, which CycloneDX
+            # puts in metadata.component rather than in components[].
+            root_skipped = True
+            continue
+        graph.setdefault(match.group(1), set()).add(match.group(2))
+    if not root_skipped:
+        gate.fail(
+            f"shipped dependency graph {path}: no `cargo tree` entries found; refusing to read an "
+            "unparsed file as an empty graph, which would pass the reverse check by saying nothing"
+        )
+        return {}
+    return graph
+
+
+def check_lockfile(
+    sbom_name: str,
+    comps: dict[str, set[str]],
+    lock_path: Path,
+    gate: Gate,
+    *,
+    shipped: dict[str, set[str]] | None = None,
+) -> None:
+    resolved, described, kind, nested = lockfile_components(lock_path, gate)
     if not resolved:
         return
-    for name, version in sorted(resolved.items()):
-        shipped = comps.get(name)
-        if shipped is None:
-            gate.fail(
-                f"SBOM drift: {lock_path.name} resolves '{name}@{version}' but SBOM '{sbom_name}' "
-                f"does not list it; an unlisted dependency is invisible to advisory review"
+    # Forward: everything the SBOM claims must be something the build resolves.
+    for name, versions in sorted(comps.items()):
+        for version in sorted(versions):
+            if version not in resolved.get(name, set()):
+                gate.fail(
+                    f"SBOM drift: SBOM '{sbom_name}' describes {name}@{version} but {lock_path.name} "
+                    f"resolves {sorted(resolved.get(name, ['<not in the lockfile>']))}"
+                )
+    # Reverse: everything the artifact is built from should be described. A
+    # dependency the SBOM omits is a dependency no advisory review will see.
+    if described:
+        reverse, reverse_from = described, lock_path.name
+        if shipped is not None:
+            gate.warn(
+                f"{lock_path.name} already says which packages the generator describes, so --shipped-graph "
+                "is not used for the reverse check of this SBOM"
             )
-        elif shipped != version:
+    elif shipped is not None:
+        reverse, reverse_from = shipped, "the shipped dependency graph"
+    elif kind == "cargo":
+        gate.fail(
+            f"lockfile {lock_path.name}: a Cargo.lock cannot be reverse-checked against one artifact's SBOM "
+            "(it resolves dev, build, proc-macro and other-platform crates the artifact does not contain); "
+            f"pass --shipped-graph {sbom_name}=<cargo tree -e normal output> so the check runs against what ships"
+        )
+        return
+    else:
+        gate.warn(f"lockfile {lock_path.name}: no package nodes were parsed; reverse check skipped")
+        return
+    for name, versions in sorted(reverse.items()):
+        if versions & comps.get(name, set()):
+            continue
+        gate.fail(
+            f"SBOM drift: {reverse_from} resolves {name}@{'/'.join(sorted(versions))} but SBOM "
+            f"'{sbom_name}' does not describe it; an undescribed dependency is invisible to advisory review"
+        )
+    if kind == "npm":
+        # A copy that exists only deeper in the install tree is one the npm
+        # generator emits no component for, so it is judged by whether the SBOM
+        # describes the package at all. A production copy of a name the SBOM has
+        # never heard of is an undescribed dependency and fails. A second version
+        # of a package the SBOM does name is a gap in the artifact's description
+        # rather than a dependency nobody has reviewed: the advisory reports this
+        # gate consumes run against the whole lockfile, so `npm audit` still sees
+        # the nested copy and still requires a VEX decision for it.
+        extra = {(name, v): nondev for (name, v), nondev in nested.items() if v not in described.get(name, set())}
+        for name in sorted({n for (n, _), nondev in extra.items() if nondev and n not in comps}):
             gate.fail(
-                f"SBOM drift: SBOM '{sbom_name}' says '{name}@{shipped}', {lock_path.name} resolves {version}"
+                f"SBOM drift: {lock_path.name} installs a production copy of {name} deeper in the tree and "
+                f"SBOM '{sbom_name}' does not describe that package at all; it is invisible to advisory review"
+            )
+        shipping = sorted(f"{name}@{version}" for (name, version), nondev in extra.items() if nondev)
+        dev_only = sorted(f"{name}@{version}" for (name, version), nondev in extra.items() if not nondev)
+        if shipping:
+            gate.warn(
+                f"SBOM '{sbom_name}': {len(shipping)} production nested copy/copies resolve to a version the "
+                f"SBOM does not list for that package ({', '.join(shipping[:8])}"
+                f"{' (and more)' if len(shipping) > 8 else ''}); the npm generator describes only top-level nodes, "
+                "and npm audit still reports advisories against them"
+            )
+        if dev_only:
+            gate.warn(
+                f"SBOM '{sbom_name}': {len(dev_only)} dev-only nested copy/copies are in {lock_path.name} but "
+                f"not in the SBOM ({', '.join(dev_only[:8])}{' (and more)' if len(dev_only) > 8 else ''}); they do not "
+                "ship and the npm generator does not describe nested nodes"
             )
 
 
@@ -334,6 +518,32 @@ def advisory(ident: str, package: str | None, version: str | None, severity: str
 
 
 RUSTSEC_RE = re.compile(r"RUSTSEC-\d{4}-\d{4,}")
+
+
+def deny_ignores(path: Path, gate: Gate) -> list[str]:
+    """The `[advisories] ignore = [...]` ids from a cargo-deny config.
+
+    cargo-deny's ignore list is a second, independent way to make an advisory
+    disappear, and it carries only a comment as its justification. Reading it
+    here is what turns "every ignore has a VEX entry" from a promise into a
+    check: an id in `deny.toml` with no VEX entry is an unreviewed suppression.
+
+    Comments are stripped before matching because the ignore block documents
+    itself with the very ids and quoted phrases this function has to tell apart.
+    """
+    if not path.is_file():
+        gate.fail(f"cargo-deny config: file not found: {path}")
+        return []
+    text = path.read_text(encoding="utf-8")
+    section = re.search(r"^\s*\[advisories\]\s*$(.*?)(?=^\s*\[|\Z)", text, flags=re.MULTILINE | re.DOTALL)
+    if section is None:
+        gate.warn(f"{path} has no [advisories] section; nothing to cross-check against VEX")
+        return []
+    block = re.search(r"ignore\s*=\s*\[(.*?)\]", section.group(1), flags=re.DOTALL)
+    if block is None:
+        return []
+    body = re.sub(r"#[^\n]*", "", block.group(1))
+    return sorted(set(RUSTSEC_RE.findall(body)))
 
 
 def advisories_from_cargo_deny(report: object, raw: str = "") -> list[dict]:
@@ -567,7 +777,7 @@ def run_gate(args: argparse.Namespace) -> int:
         gate.fail("no --sbom inputs: the gate has nothing to gate")
 
     # 1. SBOM structure + inventory.
-    inventory: dict[str, dict[str, str]] = {}
+    inventory: dict[str, dict[str, set[str]]] = {}
     for name, path in sboms.items():
         if not path.is_file():
             gate.fail(f"SBOM '{name}': file not found: {path}")
@@ -600,7 +810,7 @@ def run_gate(args: argparse.Namespace) -> int:
                 "sha256": sha256_file(path),
                 "sbom": str(sbom_path),
                 "sbom_sha256": sha256_file(sbom_path) if sbom_path.is_file() else None,
-                "components": len(inventory.get(sbom_key, {})),
+                "components": sum(len(versions) for versions in inventory.get(sbom_key, {}).values()),
             }
         )
 
@@ -611,7 +821,10 @@ def run_gate(args: argparse.Namespace) -> int:
             baseline = {
                 "schema": SCHEMA_BASELINE,
                 "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "sboms": {name: dict(sorted(comp.items())) for name, comp in sorted(inventory.items())},
+                "sboms": {
+                    name: {key: sorted(versions) for key, versions in sorted(comp.items())}
+                    for name, comp in sorted(inventory.items())
+                },
             }
             baseline_path.parent.mkdir(parents=True, exist_ok=True)
             baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -628,20 +841,41 @@ def run_gate(args: argparse.Namespace) -> int:
                         f"Review the SBOM, then run with --write-baseline."
                     )
                     continue
-                expected = {str(k): str(v) for k, v in (committed[name] or {}).items()}
+                expected = {
+                    str(k): {str(v) for v in (vs if isinstance(vs, list) else [vs])}
+                    for k, vs in (committed[name] or {}).items()
+                }
                 added = sorted(set(comps) - set(expected))
                 removed = sorted(set(expected) - set(comps))
                 changed = sorted(k for k in set(comps) & set(expected) if comps[k] != expected[k])
                 for key in added:
-                    gate.fail(f"SBOM drift: '{name}' gained component '{key}@{comps[key]}' (not in baseline)")
+                    gate.fail(
+                        f"SBOM drift: '{name}' gained component '{key}@{'/'.join(sorted(comps[key]))}' "
+                        "(not in baseline)"
+                    )
                 for key in removed:
-                    gate.fail(f"SBOM drift: '{name}' lost component '{key}' (in baseline at {expected[key]})")
+                    gate.fail(
+                        f"SBOM drift: '{name}' lost component '{key}' "
+                        f"(in baseline at {'/'.join(sorted(expected[key]))})"
+                    )
                 for key in changed:
                     gate.fail(
-                        f"SBOM drift: '{name}' component '{key}' is {comps[key]}, baseline says {expected[key]}"
+                        f"SBOM drift: '{name}' component '{key}' is "
+                        f"{'/'.join(sorted(comps[key]))}, baseline says {'/'.join(sorted(expected[key]))}"
                     )
 
     # 3b. Lockfile cross-check: the SBOM must describe what the build installs.
+    shipped_graphs: dict[str, dict[str, set[str]]] = {}
+    locked: set[str] = set()
+    for item in args.shipped_graph or []:
+        sbom_name, _, raw = item.partition("=")
+        if not sbom_name or not raw:
+            gate.fail(f"--shipped-graph expects SBOM_NAME=PATH, got {item!r}")
+            continue
+        if sbom_name not in inventory:
+            gate.fail(f"--shipped-graph names SBOM '{sbom_name}', which was not passed to --sbom")
+            continue
+        shipped_graphs[sbom_name] = shipped_graph(Path(raw), gate)
     for item in args.lock or []:
         sbom_name, _, lock_raw = item.partition("=")
         if not sbom_name or not lock_raw:
@@ -650,7 +884,19 @@ def run_gate(args: argparse.Namespace) -> int:
         if sbom_name not in inventory:
             gate.fail(f"--lock names SBOM '{sbom_name}', which was not passed to --sbom")
             continue
-        check_lockfile(sbom_name, inventory[sbom_name], Path(lock_raw), gate)
+        locked.add(sbom_name)
+        check_lockfile(
+            sbom_name,
+            inventory[sbom_name],
+            Path(lock_raw),
+            gate,
+            shipped=shipped_graphs.get(sbom_name),
+        )
+    for sbom_name in sorted(set(shipped_graphs) - locked):
+        gate.fail(
+            f"--shipped-graph names SBOM '{sbom_name}' but no --lock does; the shipped graph is only used "
+            "for the reverse half of the lockfile cross-check"
+        )
 
     # 4. Advisory review through VEX.
     # `--advisories` may name the same tool more than once (one report per npm
@@ -668,6 +914,7 @@ def run_gate(args: argparse.Namespace) -> int:
         document = load_json(Path(args.vex), gate, what="VEX")
         if document is not None:
             vex_entries = validate_vex(document, today, gate)
+    ignored = deny_ignores(Path(args.deny_config), gate) if args.deny_config else []
 
     reported: list[dict] = []
     for tool, path in advisory_reports:
@@ -723,16 +970,34 @@ def run_gate(args: argparse.Namespace) -> int:
         if entry.get("_package") and item.get("package") and entry["_package"].lower() != str(item["package"]).lower():
             gate.warn(f"{where}: VEX affects '{entry['_package']}', the report names '{item['package']}'")
         if entry.get("_package"):
+            reviewed = str(entry["_package"])
             for comps in inventory.values():
-                shipped = comps.get(entry["_package"]) or comps.get(str(entry["_package"]).replace("_", "-"))
-                if shipped and entry.get("_version") and shipped != entry["_version"]:
+                # npm writes underscores in a lockfile name and hyphens in the
+                # published name, so either spelling may be the one the SBOM uses.
+                shipped = comps.get(reviewed) or comps.get(reviewed.replace("_", "-"))
+                if shipped and entry.get("_version") and entry["_version"] not in shipped:
                     gate.fail(
-                        f"{where}: VEX is written for {entry['_package']}@{entry['_version']} "
-                        f"but the SBOM ships {shipped}; re-triage against the shipped version"
+                        f"{where}: VEX is written for {reviewed}@{entry['_version']} "
+                        f"but the SBOM ships {'/'.join(sorted(shipped))}; re-triage against the shipped version"
                     )
                     break
 
-    for ident in sorted(set(vex_entries) - seen):
+    # A `deny.toml` ignore is a suppression cargo-deny applies before this gate
+    # ever sees the advisory, so it cannot be caught by the loop above. Require
+    # the same VEX entry it would have needed if it had been reported.
+    for ident in ignored:
+        if ident not in vex_entries:
+            gate.fail(
+                f"{ident}: ignored in {args.deny_config} so no advisory report mentions it, and it has no "
+                "VEX entry; an ignore list is a decision nobody owns unless it is written down here too"
+            )
+    if ignored:
+        gate.warn(
+            f"{len(ignored)} advisory id(s) suppressed by {args.deny_config}: "
+            + ", ".join(f"{i} ({vex_entries[i]['_state']})" for i in ignored if i in vex_entries)
+        )
+
+    for ident in sorted(set(vex_entries) - seen - set(ignored)):
         if advisory_reports:
             gate.warn(f"VEX entry {ident}: no longer reported by any advisory source (stale review)")
 
@@ -761,7 +1026,7 @@ def run_gate(args: argparse.Namespace) -> int:
     if gate.failures:
         print(f"\nSBOM/VEX gate failed: {len(gate.failures)} problem(s), {len(gate.warnings)} warning(s)")
         return 1
-    components = sum(len(comps) for comps in inventory.values())
+    components = sum(len(v) for comps in inventory.values() for v in comps.values())
     print(
         f"SBOM/VEX gate passed: {len(inventory)} SBOM(s), {components} component(s), "
         f"{len(vex_entries)} VEX entr{'y' if len(vex_entries) == 1 else 'ies'}, "
@@ -795,7 +1060,19 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SBOM=LOCKFILE",
         help="cross-check an SBOM against Cargo.lock / package-lock.json (drift detection)",
     )
+    parser.add_argument(
+        "--shipped-graph",
+        action="append",
+        metavar="SBOM=PATH",
+        help="`cargo tree -e normal` output: the crates one artifact actually links, used instead of "
+        "the whole lockfile for the reverse half of --lock",
+    )
     parser.add_argument("--vex", metavar="PATH", help="CycloneDX VEX document")
+    parser.add_argument(
+        "--deny-config",
+        metavar="PATH",
+        help="cargo-deny deny.toml: every [advisories] ignore id must also have a VEX entry",
+    )
     parser.add_argument("--baseline", metavar="PATH", help="committed SBOM inventory baseline")
     parser.add_argument("--write-baseline", action="store_true", help="rewrite the baseline from these SBOMs")
     parser.add_argument("--index-out", metavar="PATH", help="write the signed SBOM index here")

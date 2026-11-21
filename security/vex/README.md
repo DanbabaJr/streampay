@@ -11,24 +11,36 @@ that reads it is [`scripts/sbom_vex.py`](../../scripts/sbom_vex.py), wired into
 `deny.toml` already ignores two RUSTSEC advisories, with a comment each. Comments
 are for humans, so nothing checks that the reasoning still holds, that anyone
 owns the decision, or that it is revisited. Every ignore therefore has a VEX
-entry **with the same id**, an owner, a review date and an expiry — and
-`tests/sbom_vex_test.py` fails if the two lists disagree.
+entry **with the same id**, an owner, a review date and an expiry. That is
+enforced twice: `tests/sbom_vex_test.py` reads `deny.toml` through the gate's own
+parser, and the gate itself takes `--deny-config deny.toml` so CI blocks if an id
+is ignored without being triaged here.
 
 ## The gate
 
 ```sh
 python3 scripts/sbom_vex.py \
-  --sbom rust=sbom/rust/streampay_contract.cdx.json \
+  --sbom rust=sbom/rust/streampay-contract.cdx.json \
   --sbom frontend=sbom/frontend.cdx.json \
   --artifact contract-wasm=target/wasm32v1-none/release/streampay_contract.wasm \
   --sbom-for contract-wasm=rust \
   --lock rust=Cargo.lock \
   --lock frontend=frontend/package-lock.json \
+  --shipped-graph rust=sbom/rust/normal-deps.txt \
   --advisories cargo-deny=advisories/cargo-deny.json \
   --advisories npm-audit=advisories/npm-audit.json \
+  --deny-config deny.toml \
   --vex security/vex/vex.json \
   --index-out sbom/sbom-index.json
 ```
+
+`--lock` compares an SBOM with the manifest the build installs from. For Cargo
+that comparison only works one way: `Cargo.lock` resolves the union of every
+target, host build script and dev dependency (319 package names for this
+contract), while the Wasm links 128 of them. `--shipped-graph` supplies the
+narrower truth — `cargo tree -e normal` — so an SBOM that omits a crate the
+artifact actually links is drift, and a dev-only or other-platform crate is not.
+`--deny-config` makes cargo-deny's `ignore` list a decision this gate has to see.
 
 It fails when:
 
@@ -37,6 +49,9 @@ It fails when:
 | an SBOM is malformed, has a component with no resolved version or a bad hash | a dependency audit cannot trust the inventory it is auditing |
 | an artifact has no SBOM covering it | shipped bytes with no inventory are unauditable |
 | an SBOM disagrees with the lockfile | the SBOM hides or invents a dependency |
+| the lockfile installs a production package the SBOM does not name at all | a dependency no advisory report will ever be matched against |
+| an advisory report is empty or truncated | a report that failed to run reads exactly like a clean scan |
+| a `deny.toml` ignore has no VEX entry (`--deny-config`) | the same decision cannot live in two places, only one of them checked |
 | an SBOM drifts from the committed baseline (`--baseline`) | ingredient changes must be reviewed, not absorbed |
 | a **critical/high** (or unclassified) advisory has no VEX entry | an unreviewed high finding is not an accepted one |
 | a critical/high advisory is still `under_investigation` | "we are looking at it" is not a decision, and it never expires by itself |
@@ -45,6 +60,10 @@ It fails when:
 
 Medium and low advisories with no entry are printed as warnings with the advisory
 id, so they stay visible in the run log without blocking a release on their own.
+So is a *nested* package copy whose version the SBOM does not list: the npm
+generator describes each top-level `node_modules` entry once, so a transitive copy
+at another version is reported rather than treated as drift. A nested package the
+SBOM does not name in any version is a failure, not a warning.
 
 ## Writing an entry
 

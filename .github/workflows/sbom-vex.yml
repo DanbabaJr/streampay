@@ -147,6 +147,34 @@ jobs:
           grep -q '"bomFormat"' sbom/rust/streampay-contract.cdx.json \
             || { echo "::error::the Rust SBOM is not a CycloneDX document"; exit 1; }
 
+      # Cargo.lock is the union of the normal, dev, build, proc-macro, host and
+      # every-target-platform graphs (319 package names here); the Wasm contains
+      # the normal graph of one crate (162). The gate needs both: the lock to
+      # prove the SBOM invented nothing, the tree to prove it forgot nothing.
+      # `cargo tree` is built in, and `stellar contract build` above has already
+      # fetched every crate, so this needs no network and no extra tool.
+      - name: Rust shipped dependency graph (what the Wasm actually links)
+        run: |
+          set -eu
+          mkdir -p sbom/rust
+          cargo tree \
+            --manifest-path contracts/streaming-payments/Cargo.toml \
+            -e normal \
+            --prefix none \
+            --offline \
+            > sbom/rust/normal-deps.txt
+          # An empty or truncated graph would make the reverse check pass by
+          # saying nothing, so require it to look like the real graph: the root
+          # crate first, and the SDK the contract is built on somewhere in it.
+          lines=$(wc -l < sbom/rust/normal-deps.txt)
+          [ "$lines" -ge 50 ] \
+            || { echo "::error::cargo tree produced $lines line(s); refusing to gate against it"; exit 1; }
+          head -n 1 sbom/rust/normal-deps.txt | grep -q '^streampay-contract v' \
+            || { echo "::error::cargo tree did not start at the contract crate"; exit 1; }
+          grep -q '^soroban-sdk v' sbom/rust/normal-deps.txt \
+            || { echo "::error::cargo tree output does not contain soroban-sdk; wrong manifest or features?"; exit 1; }
+          wc -l sbom/rust/normal-deps.txt
+
       # `--package-lock-only`: the SBOM is derived from the lockfile, so it
       # describes what `npm ci` resolves without installing node_modules again.
       - name: npm SBOMs (frontend, indexer, TypeScript SDK, CLI)
@@ -393,6 +421,10 @@ jobs:
             cli=tools/streampay-cli/package-lock.json; do
             [ -f "${pair#*=}" ] && args+=(--lock "$pair")
           done
+          # The reverse half of the Cargo.lock check runs against what the Wasm
+          # links, not against the whole resolve. Without it the gate refuses to
+          # guess, so a missing file here fails the job rather than the check.
+          [ -f sbom/rust/normal-deps.txt ] && args+=(--shipped-graph rust=sbom/rust/normal-deps.txt)
 
           # Advisory reports, normalised from the three ecosystems.
           [ -f advisories/cargo-deny.json ] && args+=(--advisories "cargo-deny=advisories/cargo-deny.json")
@@ -408,6 +440,9 @@ jobs:
           fi
 
           args+=(--vex security/vex/vex.json --index-out sbom/sbom-index.json)
+          # cargo-deny's own ignore list is a suppression this gate would never
+          # see as an advisory, so require each ignored id to be triaged too.
+          [ -f deny.toml ] && args+=(--deny-config deny.toml)
           python3 scripts/sbom_vex.py "${args[@]}"
 
       - name: Upload SBOMs, advisory reports and the index
@@ -449,10 +484,13 @@ jobs:
       - name: Sign the SBOMs and the index keylessly
         run: |
           set -eu
-          shopt -s nullglob
+          # globstar, not just `*`: the contract SBOM is generated into
+          # sbom/rust/ and a single-level glob would sign and publish every
+          # *other* artifact's SBOM while leaving the Wasm's unmentioned.
+          shopt -s nullglob globstar
           mkdir -p dist/sbom
           bundles=()
-          for file in dist/sbom/*.cdx.json dist/sbom/sbom-index.json; do
+          for file in dist/sbom/**/*.cdx.json dist/sbom/sbom-index.json; do
             [ -f "$file" ] || continue
             name="$(basename "$file")"
             bundle="dist/sbom/$name.sigstore.json"
@@ -505,7 +543,9 @@ jobs:
       - name: Verify the signatures before publishing them
         run: |
           set -eu
-          for file in dist/sbom/*.cdx.json dist/sbom/sbom-index.json; do
+          shopt -s nullglob globstar
+          signed=0
+          for file in dist/sbom/**/*.cdx.json dist/sbom/sbom-index.json; do
             [ -f "$file" ] || continue
             name="$(basename "$file")"
             cosign verify-blob \
@@ -514,15 +554,21 @@ jobs:
                 "https://github.com/${{ github.repository }}/.github/workflows/sbom-vex.yml@${{ github.ref }}" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               "$file"
+            signed=$((signed + 1))
           done
-
+          # Every SBOM the gate produced must come back verified: a list that
+          # silently stops matching files is how an artifact goes unattached.
+          expected=$(find dist/sbom -name '*.cdx.json' | wc -l)
+          [ "$signed" -ge "$((expected + 1))" ] \
+            || { echo "::error::verified $signed of $((expected + 1)) documents (expected every .cdx.json plus the index)"; exit 1; }
       - name: Attach SBOMs, signatures and the index to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          shopt -s nullglob globstar
           tag="${GITHUB_REF_NAME}"
-          gh release upload "$tag" dist/sbom/*.cdx.json dist/sbom/*.sigstore.json \
+          gh release upload "$tag" dist/sbom/**/*.cdx.json dist/sbom/*.sigstore.json \
             dist/sbom/*.pem dist/sbom/sbom-index.json \
             --repo "$GITHUB_REPOSITORY" --clobber
           echo "### SBOMs — $tag" >> "$GITHUB_STEP_SUMMARY"

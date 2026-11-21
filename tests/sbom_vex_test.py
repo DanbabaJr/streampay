@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -71,19 +72,11 @@ class SbomVexGateTests(unittest.TestCase):
         self.artifact = self.dir / "indexer.tgz"
 
         self.write_sbom()
-        self.lock.write_text(
-            json.dumps(
-                {
-                    "name": "streampay-indexer",
-                    "lockfileVersion": 3,
-                    "packages": {
-                        "": {"name": "streampay-indexer", "version": "0.1.0"},
-                        "node_modules/left-pad": {"version": "1.3.0"},
-                        "node_modules/express": {"version": "5.1.0"},
-                    },
-                }
-            ),
-            encoding="utf-8",
+        self.set_lock(
+            {
+                "node_modules/left-pad": {"version": "1.3.0"},
+                "node_modules/express": {"version": "5.1.0"},
+            }
         )
         self.audit.write_text(
             json.dumps(
@@ -142,6 +135,24 @@ class SbomVexGateTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+
+    def set_lock(self, packages):
+        """Write a lockfileVersion 3 `package-lock.json` from its node map."""
+        self.lock.write_text(
+            json.dumps(
+                {
+                    "name": "streampay-indexer",
+                    "lockfileVersion": 3,
+                    "packages": {"": {"name": "streampay-indexer", "version": "0.1.0"}, **packages},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def cargo_lock(self, text):
+        """Point --lock at a Cargo.lock instead of an npm one."""
+        self.lock = self.dir / "Cargo.lock"
+        self.lock.write_text(text, encoding="utf-8")
 
     def write_vex(self, entries):
         self.vex.write_text(
@@ -328,7 +339,161 @@ class SbomVexGateTests(unittest.TestCase):
     def test_dependency_missing_from_sbom_blocks(self):
         self.write_sbom([{"type": "library", "name": "left-pad", "version": "1.3.0"}])
         code, output = self.run_gate()
-        self.assert_blocks(code, output, "does not list it")
+        self.assert_blocks(code, output, "does not describe it")
+
+    def test_scoped_package_does_not_collide_with_its_unscoped_twin(self):
+        # CycloneDX writes `@types/express` as group `@types` + name `express`,
+        # and its purl percent-encodes the scope (`pkg:npm/%40types/express`).
+        # Keying the inventory on the bare name made the scoped component
+        # overwrite the real `express` at first-write-wins, and the lockfile
+        # cross-check then reported a disagreement neither file contains: 43
+        # times over in the indexer SBOM alone.
+        self.write_sbom(
+            [
+                {"type": "library", "name": "left-pad", "version": "1.3.0"},
+                {"type": "library", "name": "express", "version": "5.1.0", "purl": "pkg:npm/express@5.1.0"},
+                {
+                    "type": "library",
+                    "group": "@types",
+                    "name": "express",
+                    "version": "5.0.6",
+                    "purl": "pkg:npm/%40types/express@5.0.6",
+                },
+            ]
+        )
+        self.set_lock(
+            {
+                "node_modules/left-pad": {"version": "1.3.0"},
+                "node_modules/express": {"version": "5.1.0"},
+                "node_modules/@types/express": {"version": "5.0.6", "dev": True},
+            }
+        )
+        code, output = self.run_gate()
+        self.assertEqual(code, 0, output)
+
+    def test_scoped_package_version_drift_still_blocks(self):
+        self.write_sbom(
+            [
+                {"type": "library", "name": "left-pad", "version": "1.3.0"},
+                {"type": "library", "name": "express", "version": "5.1.0", "purl": "pkg:npm/express@5.1.0"},
+                {
+                    "type": "library",
+                    "group": "@types",
+                    "name": "express",
+                    "version": "5.0.6",
+                    "purl": "pkg:npm/%40types/express@5.0.6",
+                },
+            ]
+        )
+        self.set_lock(
+            {
+                "node_modules/left-pad": {"version": "1.3.0"},
+                "node_modules/express": {"version": "5.1.0"},
+                "node_modules/@types/express": {"version": "5.0.5", "dev": True},
+            }
+        )
+        code, output = self.run_gate()
+        self.assert_blocks(code, output, "@types/express@5.0.6")
+
+    def test_nested_dev_only_copy_is_not_drift(self):
+        # npm's `packages` map has one entry per node, and the SBOM generator
+        # describes only the top-level ones. A dev-only nested copy therefore
+        # reads as "the lock resolves a version the SBOM does not list" on every
+        # tree that has one — which, in frontend, is 43 packages.
+        self.set_lock(
+            {
+                "node_modules/left-pad": {"version": "1.3.0"},
+                "node_modules/express": {"version": "5.1.0"},
+                "node_modules/express/node_modules/left-pad": {"version": "1.2.0", "dev": True},
+            }
+        )
+        code, output = self.run_gate()
+        self.assertEqual(code, 0, output)
+        self.assertIn("dev-only nested", output)
+
+    def test_nested_production_copy_of_an_undescribed_package_blocks(self):
+        self.set_lock(
+            {
+                "node_modules/left-pad": {"version": "1.3.0"},
+                "node_modules/express": {"version": "5.1.0"},
+                "node_modules/express/node_modules/chalk": {"version": "5.6.0"},
+            }
+        )
+        code, output = self.run_gate()
+        self.assert_blocks(code, output, "does not describe that package at all")
+
+    def test_every_version_in_an_sbom_is_checked_not_just_the_first(self):
+        # One package at two versions is legal in one SBOM (the Rust graph does
+        # it 20 times). A flat name -> version inventory kept whichever came
+        # first, so a version nothing resolves could hide behind a real one.
+        self.write_sbom(
+            [
+                {"type": "library", "name": "left-pad", "version": "1.3.0"},
+                {"type": "library", "name": "left-pad", "version": "9.9.9"},
+                {"type": "library", "name": "express", "version": "5.1.0"},
+            ]
+        )
+        code, output = self.run_gate()
+        self.assert_blocks(code, output, "describes left-pad@9.9.9")
+        self.assertIn("also appears at", output)
+
+    def test_image_file_components_do_not_need_versions(self):
+        # syft indexes the container image, so most of its 1,000+ components are
+        # files on a filesystem: unversioned by nature and in no lockfile. They
+        # are structural-validated, not treated as undeclared dependencies.
+        self.write_sbom(
+            [
+                {"type": "library", "name": "left-pad", "version": "1.3.0"},
+                {"type": "library", "name": "express", "version": "5.1.0"},
+                {"type": "file", "name": "etc/os-release"},
+                {"type": "file", "name": "usr/lib/node_modules/express/package.json"},
+            ]
+        )
+        code, output = self.run_gate()
+        self.assertEqual(code, 0, output)
+        self.assertIn("2 component(s) of type 'file'", output)
+
+    def test_cargo_lock_reverse_check_refuses_and_asks_for_the_shipped_graph(self):
+        # Cargo.lock is the union of the normal, dev, build, proc-macro and
+        # every-target graphs: 319 names for this contract against the 162 one
+        # artifact contains. Comparing an SBOM to all of them is 157 phantom
+        # omissions, and comparing it to nothing is no check at all.
+        self.write_sbom([{"type": "library", "name": "crate-a", "version": "1.0.0"}])
+        self.cargo_lock(
+            'version = 4\n\n[[package]]\nname = "crate-a"\nversion = "1.0.0"\n'
+            '\n[[package]]\nname = "dev-only-crate"\nversion = "2.0.0"\n'
+        )
+        code, output = self.run_gate()
+        self.assert_blocks(code, output, "--shipped-graph")
+
+    def test_shipped_graph_catches_a_crate_the_artifact_links(self):
+        self.write_sbom([{"type": "library", "name": "crate-a", "version": "1.0.0"}])
+        self.cargo_lock(
+            'version = 4\n\n[[package]]\nname = "crate-a"\nversion = "1.0.0"\n'
+            '\n[[package]]\nname = "dev-only-crate"\nversion = "2.0.0"\n'
+        )
+        graph = self.dir / "normal-deps.txt"
+        graph.write_text("streampay-contract v0.1.0\ncrate-a v1.0.0\n", encoding="utf-8")
+        code, output = self.run_gate("--shipped-graph", f"indexer={graph}")
+        self.assertEqual(code, 0, output)
+
+        self.write_sbom([{"type": "library", "name": "crate-a", "version": "1.0.0"}])
+        graph.write_text("streampay-contract v0.1.0\ncrate-a v1.0.0\ncrate-b v3.1.0\n", encoding="utf-8")
+        code, output = self.run_gate("--shipped-graph", f"indexer={graph}")
+        self.assert_blocks(code, output, "crate-b@3.1.0")
+
+        # The graph still has to be checked against the lockfile, so an SBOM
+        # inventing a version that only the shipped graph lists is caught too.
+        graph.write_text("streampay-contract v0.1.0\ncrate-a v9.9.9\n", encoding="utf-8")
+        self.write_sbom([{"type": "library", "name": "crate-a", "version": "9.9.9"}])
+        code, output = self.run_gate("--shipped-graph", f"indexer={graph}")
+        self.assert_blocks(code, output, "Cargo.lock resolves ['1.0.0']")
+
+    def test_shipped_graph_without_a_lock_is_a_usage_error(self):
+        graph = self.dir / "normal-deps.txt"
+        graph.write_text("streampay-contract v0.1.0\ncrate-a v1.0.0\n", encoding="utf-8")
+        code, output = self.run_gate("--shipped-graph", f"indexer={graph}", lock=False)
+        self.assert_blocks(code, output, "no --lock")
 
     def test_unresolved_component_version_blocks(self):
         self.write_sbom(
@@ -426,15 +591,48 @@ class SbomVexGateTests(unittest.TestCase):
     def test_committed_vex_document_passes_validation(self):
         gate = GATE.Gate()
         document = json.loads((ROOT / "security" / "vex" / "vex.json").read_text(encoding="utf-8"))
-        entries = GATE.validate_vex(document, __import__("datetime").date.fromisoformat(TODAY), gate)
+        entries = GATE.validate_vex(document, date.fromisoformat(TODAY), gate)
         self.assertEqual(gate.failures, [], "\n".join(gate.failures))
         self.assertIn("RUSTSEC-2024-0436", entries)
         # Every ignore in deny.toml must carry VEX with a rationale and expiry,
-        # or the two records of the same decision drift apart.
-        deny = (ROOT / "deny.toml").read_text(encoding="utf-8")
-        ignored = __import__("re").findall(r'^\s*"(RUSTSEC-[0-9-]+)"', deny, __import__("re").MULTILINE)
+        # or the two records of the same decision drift apart. Read through the
+        # gate's own parser, which is the one CI runs: the previous regex here
+        # matched any quoted RUSTSEC id anywhere in the file, including one that
+        # only appears in a comment, so it could pass while the real list moved.
+        ignored = GATE.deny_ignores(ROOT / "deny.toml", gate)
+        self.assertEqual(gate.failures, [], "\n".join(gate.failures))
+        self.assertEqual(ignored, ["RUSTSEC-2024-0436", "RUSTSEC-2026-0387"])
         for ident in ignored:
             self.assertIn(ident, entries, f"{ident} is ignored in deny.toml but has no VEX entry")
+
+    def test_deny_ignore_without_vex_blocks(self):
+        deny = self.dir / "deny.toml"
+        deny.write_text(
+            '[advisories]\nignore = [\n    # RUSTSEC-2031-0001 is only a comment\n'
+            '    "RUSTSEC-2025-9999",\n]\n\n[licenses]\n',
+            encoding="utf-8",
+        )
+        code, output = self.run_gate("--deny-config", str(deny))
+        self.assert_blocks(code, output, "RUSTSEC-2025-9999: ignored in")
+        # The comment is not an ignore, so it must not be demanded of the VEX too.
+        self.assertNotIn("RUSTSEC-2031-0001", output)
+
+    def test_deny_ignore_covered_by_vex_passes_and_is_announced(self):
+        deny = self.dir / "deny.toml"
+        deny.write_text('[advisories]\nignore = [\n    "RUSTSEC-2026-0387",\n]\n', encoding="utf-8")
+        self.write_vex([vex_entry("GHSA-aaaa-bbbb-cccc"), vex_entry("RUSTSEC-2026-0387",
+                                                                    package="crypto-bigint",
+                                                                    version="0.5.5")])
+        code, output = self.run_gate("--deny-config", str(deny))
+        self.assertEqual(code, 0, output)
+        self.assertIn("RUSTSEC-2026-0387 (not_affected)", output)
+        # An ignore-backed entry is deliberately never reported by cargo-deny, so
+        # its absence from the advisory reports is not a stale review.
+        self.assertNotIn("stale review", output)
+
+    def test_missing_deny_config_blocks(self):
+        code, output = self.run_gate("--deny-config", str(self.dir / "absent.toml"))
+        self.assert_blocks(code, output, "cargo-deny config: file not found")
 
 
 if __name__ == "__main__":
