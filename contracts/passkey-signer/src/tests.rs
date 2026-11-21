@@ -475,7 +475,6 @@ fn expired_challenge_nonce_rejected() {
 #[test]
 fn challenge_expiry_boundary_matrix() {
     // Constants from registry.rs
-    const TTL_THRESHOLD: u32 = 200_000;
     const TTL_EXTEND: u32 = 500_000;
 
     // Test matrix rows
