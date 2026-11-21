@@ -33,12 +33,12 @@ Authoritative registry of all **125** append-only on-chain error codes returned 
 | **#16** | `NoPendingGovernor` | Active | `warning` | No | Ask the current governor to call nominate_governor with the target address before calling accept_governor. | [View Docs](errors/16.md) |
 | **#17** | `InsufficientTreasuryBalance` | Active | `error` | No | Query the collected fee balance for the token before calling withdraw_treasury; request at most the available amount. | [View Docs](errors/17.md) |
 | **#49** | `SponsorNotFound` | Active | `error` | No | Ensure the sponsor address is registered before calling sponsored_withdraw. Register via register_sponsor if needed. | [View Docs](errors/49.md) |
-| **#50** | `SponsorInactive` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/50.md) |
-| **#51** | `BeneficiaryNotEnrolled` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/51.md) |
-| **#52** | `ClaimExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/52.md) |
-| **#53** | `ClaimNonceReplay` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/53.md) |
-| **#54** | `SponsorBudgetExceeded` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/54.md) |
-| **#55** | `BeneficiaryBudgetExceeded` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/55.md) |
+| **#50** | `SponsorInactive` | Active | `warning` | Yes | Resume the sponsor budget with `set_sponsor_active(sponsor, true)` before relaying, and submit the signed claim before its `deadline`. | [View Docs](errors/50.md) |
+| **#51** | `BeneficiaryNotEnrolled` | Active | `error` | Yes | Enroll the beneficiary's ed25519 consent key with `enroll_beneficiary` before the relay; `sponsored_withdraw` verifies the signed claim against that enrolled key. | [View Docs](errors/51.md) |
+| **#52** | `ClaimExpired` | Active | `error` | Yes | Sign and relay the claim before its `deadline`; if the deadline passed, generate a new signed claim with a later deadline. | [View Docs](errors/52.md) |
+| **#53** | `ClaimNonceReplay` | Active | `error` | No | Use a nonce that has never been spent for this `(sponsor, beneficiary)` pair; a successful claim consumes the nonce permanently. | [View Docs](errors/53.md) |
+| **#54** | `SponsorBudgetExceeded` | Active | `warning` | Yes | Wait for the sponsor's budget window to roll over, or have the sponsor raise the per-period cap; the claim must fit the remaining period allowance. | [View Docs](errors/54.md) |
+| **#55** | `BeneficiaryBudgetExceeded` | Active | `warning` | Yes | Wait for the sponsor window to roll or reduce the claim; the per-beneficiary cap is enforced separately from the sponsor's overall period cap. | [View Docs](errors/55.md) |
 | **#18** | `IntentNotFound` | Active | `error` | No | Verify the scheduled intent ID from your scheduling transaction receipt before calling execute_scheduled or cancel_scheduled. | [View Docs](errors/18.md) |
 | **#19** | `IntentNotPending` | Active | `error` | No | Check the intent status before calling execute_scheduled; already executed, cancelled, or expired intents cannot be re-executed. | [View Docs](errors/19.md) |
 | **#20** | `IntentNotYetExecutable` | Active | `info` | Yes | Wait until the current ledger timestamp reaches the intent execute_after time before calling execute_scheduled. | [View Docs](errors/20.md) |
@@ -70,50 +70,50 @@ Authoritative registry of all **125** append-only on-chain error codes returned 
 | **#46** | `PolicyDepositBelowFloor` | Active | `error` | Yes | Increase the initial deposit to at least the governance policy min_deposit for this asset. | [View Docs](errors/46.md) |
 | **#47** | `BatchEmpty` | Active | `error` | No | Submit at least one entry in the create_streams_batch call. | [View Docs](errors/47.md) |
 | **#48** | `BatchTooLarge` | Active | `error` | No | Reduce the batch size to at most MAX_BATCH entries when calling create_streams_batch. | [View Docs](errors/48.md) |
-| **#56** | `InvalidOracleThreshold` | Active | `error` | Yes | Set the oracle threshold to a value between 1 and the publisher count. | [View Docs](errors/56.md) |
-| **#57** | `OraclePublishersNotConfigured` | Active | `error` | No | Call set_oracle_config to configure oracle publishers before calling oracle entrypoints. | [View Docs](errors/57.md) |
-| **#58** | `OracleReportTooOld` | Active | `error` | Yes | Verify the oracle report timestamp is within the configured staleness window and submit a fresh report. | [View Docs](errors/58.md) |
-| **#59** | `NotOraclePublisher` | Active | `error` | No | Ensure the caller address is in the configured oracle publisher list before calling submit_oracle_time. | [View Docs](errors/59.md) |
-| **#60** | `NoPendingOwnership` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/60.md) |
-| **#61** | `OwnershipProposalExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/61.md) |
-| **#62** | `InvalidTransferTarget` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/62.md) |
-| **#63** | `OwnershipProposalPending` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/63.md) |
-| **#64** | `GovernanceNotInitialized` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/64.md) |
-| **#65** | `GovernanceAlreadyInitialized` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/65.md) |
-| **#66** | `NotGovernanceSigner` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/66.md) |
-| **#67** | `GovernanceDuplicateSigner` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/67.md) |
-| **#68** | `GovernanceSignerSetEmpty` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/68.md) |
-| **#69** | `GovernanceTooManySigners` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/69.md) |
-| **#70** | `GovernanceSignersNotDistinct` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/70.md) |
-| **#71** | `GovernanceProposalNotFound` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/71.md) |
-| **#72** | `GovernanceVetoWindowOpen` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/72.md) |
-| **#73** | `GovernanceVetoWindowClosed` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/73.md) |
-| **#74** | `GovernanceVetoWindowTooShort` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/74.md) |
-| **#75** | `GovernanceAlreadyVetoed` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/75.md) |
-| **#76** | `GovernanceAlreadyExecuted` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/76.md) |
-| **#77** | `GovernanceDuplicateSignature` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/77.md) |
-| **#78** | `GovernanceSignaturesInsufficient` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/78.md) |
-| **#79** | `GovernanceTimelockRequired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/79.md) |
-| **#80** | `DisputeActive` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/80.md) |
-| **#81** | `DisputeNotFound` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/81.md) |
-| **#82** | `DisputeNotExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/82.md) |
-| **#83** | `NoPendingRateChange` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/83.md) |
-| **#84** | `RateProposalExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/84.md) |
-| **#85** | `RateProposalPending` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/85.md) |
-| **#86** | `TooManyRateSegments` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/86.md) |
-| **#87** | `SchemaVersionUnsupported` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/87.md) |
-| **#88** | `SenderTransferNotFound` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/88.md) |
-| **#89** | `SenderTransferExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/89.md) |
-| **#90** | `SenderTransferNotExpired` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/90.md) |
-| **#91** | `SenderTransferNonceMismatch` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/91.md) |
-| **#92** | `SenderTransferPending` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/92.md) |
-| **#93** | `SenderTransferNotConsenter` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/93.md) |
-| **#94** | `RefundTargetNotSender` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/94.md) |
-| **#95** | `RefundTargetUnchanged` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/95.md) |
-| **#96** | `WithdrawBatchEmpty` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/96.md) |
-| **#97** | `WithdrawBatchTooLarge` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/97.md) |
-| **#98** | `WithdrawDuplicateStreamIds` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/98.md) |
-| **#99** | `InvalidPauseTransition` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/99.md) |
+| **#56** | `InvalidOracleThreshold` | Active | `error` | Yes | Set `threshold` to at least 1 and no greater than the number of configured oracle publishers, then re-run `set_oracle_config`. | [View Docs](errors/56.md) |
+| **#57** | `OraclePublishersNotConfigured` | Active | `error` | No | Call `set_oracle_config` with a non-empty publisher set before submitting a report or reading an oracle-priced stream. | [View Docs](errors/57.md) |
+| **#58** | `OracleReportTooOld` | Active | `error` | Yes | Submit a report timestamp within the configured `max_stale_seconds` of ledger time; a future timestamp beyond that bound is rejected too. | [View Docs](errors/58.md) |
+| **#59** | `NotOraclePublisher` | Active | `error` | No | Call `submit_oracle_time` from an address in the configured publisher set; rotate the set through governance if the caller should be authorized. | [View Docs](errors/59.md) |
+| **#60** | `NoPendingOwnership` | Active | `warning` | Yes | Call `propose_ownership_transfer` and wait for the proposal before accepting or cancelling it; check the pending proposal for the stream first. | [View Docs](errors/60.md) |
+| **#61** | `OwnershipProposalExpired` | Active | `warning` | Yes | Propose a fresh ownership transfer; the acceptance window is `OWNERSHIP_PROPOSAL_TTL_SECONDS` and an expired proposal cannot be accepted. | [View Docs](errors/61.md) |
+| **#62** | `InvalidTransferTarget` | Active | `error` | Yes | Choose a transfer target that does not already hold the role being transferred; the current sender and recipient cannot be the new target for that role. | [View Docs](errors/62.md) |
+| **#63** | `OwnershipProposalPending` | Active | `warning` | Yes | Cancel the existing unexpired ownership proposal or wait for it to expire before proposing another transfer. | [View Docs](errors/63.md) |
+| **#64** | `GovernanceNotInitialized` | Active | `warning` | Yes | Call `governance_bootstrap` with a signer set and veto window before using governance-gated actions; use the documented legacy governor path only where it remains open. | [View Docs](errors/64.md) |
+| **#65** | `GovernanceAlreadyInitialized` | Active | `error` | No | Do not call `governance_bootstrap` again; rotate the signer set through `governance_propose`, the required signatures, and execution. | [View Docs](errors/65.md) |
+| **#66** | `NotGovernanceSigner` | Active | `error` | No | Sign with an address in the current governance signer set; rotate the set through governance if the caller should be a signer. | [View Docs](errors/66.md) |
+| **#67** | `GovernanceDuplicateSigner` | Active | `error` | Yes | Provide a signer set with each address at most once; duplicate entries are rejected even when the set is within `MAX_SIGNERS`. | [View Docs](errors/67.md) |
+| **#68** | `GovernanceSignerSetEmpty` | Active | `error` | Yes | Provide at least two distinct signer addresses to `governance_bootstrap`; an empty set cannot govern. | [View Docs](errors/68.md) |
+| **#69** | `GovernanceTooManySigners` | Active | `error` | Yes | Reduce the signer set to at most `MAX_SIGNERS` distinct addresses before bootstrapping or rotating. | [View Docs](errors/69.md) |
+| **#70** | `GovernanceSignersNotDistinct` | Active | `error` | Yes | Provide at least two distinct signer addresses; one key, or the same key twice, cannot satisfy the two-key governance threshold. | [View Docs](errors/70.md) |
+| **#71** | `GovernanceProposalNotFound` | Active | `warning` | Yes | Use an existing proposal id returned by `governance_propose`; ids are sequential and unknown ids are rejected by sign, veto, and execute. | [View Docs](errors/71.md) |
+| **#72** | `GovernanceVetoWindowOpen` | Active | `info` | Yes | Wait until the veto window closes before executing; execution before the window closes reverts even with enough signatures. | [View Docs](errors/72.md) |
+| **#73** | `GovernanceVetoWindowClosed` | Active | `warning` | No | Veto before the veto window closes; after the execution instant the proposal can only be executed, not vetoed. | [View Docs](errors/73.md) |
+| **#74** | `GovernanceVetoWindowTooShort` | Active | `error` | Yes | Choose a veto window of at least `MIN_VETO_WINDOW_SECONDS` when bootstrapping or proposing a governance change. | [View Docs](errors/74.md) |
+| **#75** | `GovernanceAlreadyVetoed` | Active | `error` | No | Create a new proposal; a vetoed proposal is permanently dead and cannot be signed, executed, or vetoed again. | [View Docs](errors/75.md) |
+| **#76** | `GovernanceAlreadyExecuted` | Active | `error` | No | Create a new proposal for a fresh action; an executed proposal id is consumed and cannot be replayed. | [View Docs](errors/76.md) |
+| **#77** | `GovernanceDuplicateSignature` | Active | `warning` | Yes | Collect signatures from two distinct current signer keys; signing twice with the same key does not advance the threshold. | [View Docs](errors/77.md) |
+| **#78** | `GovernanceSignaturesInsufficient` | Active | `warning` | Yes | Collect the required number of distinct signatures from signers still in the current set; a rotation revokes signatures from removed keys. | [View Docs](errors/78.md) |
+| **#79** | `GovernanceTimelockRequired` | Active | `error` | No | Route the gated action through `governance_propose` and execution after bootstrap; freezing stays immediate, but unfreezing requires a proposal. | [View Docs](errors/79.md) |
+| **#80** | `DisputeActive` | Active | `warning` | Yes | Resolve or expire the open dispute before cancelling, topping up, or raising another dispute; re-read the dispute overlay first. | [View Docs](errors/80.md) |
+| **#81** | `DisputeNotFound` | Active | `warning` | Yes | Raise a dispute before resolving, expiring, or reading dispute data; no dispute means there is nothing to settle. | [View Docs](errors/81.md) |
+| **#82** | `DisputeNotExpired` | Active | `info` | Yes | Wait until the dispute timelock elapses before `expire_dispute`; the sender can resolve earlier, but permissionless expiry needs the full window. | [View Docs](errors/82.md) |
+| **#83** | `NoPendingRateChange` | Active | `warning` | Yes | Call `propose_rate_change` and let the counterparty accept it before accepting or cancelling; check the pending rate proposal first. | [View Docs](errors/83.md) |
+| **#84** | `RateProposalExpired` | Active | `warning` | Yes | Propose a fresh rate change; the acceptance window is bounded by the stream's `end_time`, and an expired proposal cannot be accepted. | [View Docs](errors/84.md) |
+| **#85** | `RateProposalPending` | Active | `warning` | Yes | Cancel or wait out the existing unexpired rate proposal before proposing another one. | [View Docs](errors/85.md) |
+| **#86** | `TooManyRateSegments` | Active | `error` | No | Do not exceed `MAX_RATE_SEGMENTS` renegotiations on one stream; create a new stream for further rate changes. | [View Docs](errors/86.md) |
+| **#87** | `SchemaVersionUnsupported` | Active | `error` | No | Upgrade the client/indexer to a build that understands the stored record version, or migrate the record with `migrate_stream_version`; never decode an unknown layout. | [View Docs](errors/87.md) |
+| **#88** | `SenderTransferNotFound` | Active | `warning` | Yes | Propose a sender transfer first; `accept_sender_transfer` and `expire_sender_transfer` require a stored proposal for that stream. | [View Docs](errors/88.md) |
+| **#89** | `SenderTransferExpired` | Active | `warning` | Yes | Propose a fresh sender transfer; the recipient must accept before the proposal's acceptance window elapses. | [View Docs](errors/89.md) |
+| **#90** | `SenderTransferNotExpired` | Active | `info` | Yes | Wait until the transfer's acceptance window elapses before calling `expire_sender_transfer`; a live proposal cannot be reclaimed. | [View Docs](errors/90.md) |
+| **#91** | `SenderTransferNonceMismatch` | Active | `error` | Yes | Present the exact nonce stored in the pending sender-transfer proposal in the recipient's consent signature; re-read the proposal before signing. | [View Docs](errors/91.md) |
+| **#92** | `SenderTransferPending` | Active | `warning` | Yes | Cancel or wait for the existing unexpired sender transfer to expire before proposing another one. | [View Docs](errors/92.md) |
+| **#93** | `SenderTransferNotConsenter` | Active | `error` | No | Only the stream's current recipient can execute or consent to a sender transfer; have the recipient sign the consent. | [View Docs](errors/93.md) |
+| **#94** | `RefundTargetNotSender` | Active | `error` | No | Call `set_refund_target` as the stream's current sender; the sender owns the deposit being re-routed. | [View Docs](errors/94.md) |
+| **#95** | `RefundTargetUnchanged` | Active | `warning` | No | Choose a refund target different from the address that already holds the refund claim; routing to the same address is a no-op and reverts. | [View Docs](errors/95.md) |
+| **#96** | `WithdrawBatchEmpty` | Active | `error` | Yes | Pass at least one stream id to `withdraw_many`; an empty batch is rejected. | [View Docs](errors/96.md) |
+| **#97** | `WithdrawBatchTooLarge` | Active | `error` | Yes | Split the batch so it contains at most `MAX_WITHDRAW_BATCH` stream ids. | [View Docs](errors/97.md) |
+| **#98** | `WithdrawDuplicateStreamIds` | Active | `error` | Yes | Deduplicate stream ids before calling `withdraw_many`; each id may appear only once in the batch. | [View Docs](errors/98.md) |
+| **#99** | `InvalidPauseTransition` | Active | `warning` | Yes | Call `pause_stream` only while the stream is active and unpaused, and `resume_stream` only while it is paused; re-read the stream status before retrying. | [View Docs](errors/99.md) |
 | **#100** | `AdvanceExceedsMaxLtv` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/100.md) |
 | **#101** | `AdvanceAmountNonPositive` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/101.md) |
 | **#102** | `AdvanceAlreadyActive` | Active | `error` | No | Contact protocol support if this error persists. | [View Docs](errors/102.md) |
