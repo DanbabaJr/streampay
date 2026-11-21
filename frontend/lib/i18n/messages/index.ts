@@ -4,8 +4,8 @@
  */
 
 import type { Locale } from "../locales";
-import { en, type MessageKey } from "./en";
-import { de } from "./de";
+import { en, type MessageKey } from "./en.ts";
+import { de } from "./de.ts";
 
 export { en, de };
 export type { MessageKey };
