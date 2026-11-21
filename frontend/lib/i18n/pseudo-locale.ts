@@ -100,10 +100,10 @@ export function longWordPseudo(message: string): string {
   return transformIcuLiterals(message, (text) =>
     text.replace(/[A-Za-z]+/g, (word) => {
       let expanded = accentText(word);
-      // Ensure even one-letter words expand, and every word is at least 2x
-      // its source length so the stress locale consistently exercises overflow.
+      // Expand each literal word enough to double the complete message even
+      // when ICU placeholders account for most of its original length.
       const repeat = expanded.slice(-1);
-      while (expanded.length <= word.length * 2) expanded += repeat;
+      while (expanded.length < word.length * 4) expanded += repeat;
       return expanded;
     })
   );
