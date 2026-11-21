@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "schema_fingerprint": "a3f9c2e1b4d7f0e2a1c5b8d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1c4d7e0",
+  "exported_at": 1700000000,
+  "rpc_url": "https://rpc.example.invalid",
+  "contract_id": "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "latest_ledger": 123456,
+  "contract_schema_version": 1,
+  "contract_frozen": false,
+  "governor": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "streams": [],
+  "scheduled_intents": [],
+  "treasuries": [],
+  "stream_fees": [],
+  "sender_indexes": [],
+  "recipient_indexes": []
+}

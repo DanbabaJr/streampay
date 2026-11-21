@@ -104,7 +104,14 @@ export class WebhookStore {
     return endpoint;
   }
 
-  rotateEndpointSecret(endpointId: string): { secret: string; previous_secret: string } {
+  /**
+   * Promote a fresh signing key, keeping the old one in `previous_secret`.
+   *
+   * `at` is the promotion instant. The rotation engine passes its own clock so
+   * the overlap window and the stored `updated_at` agree; callers that omit it
+   * get the current time.
+   */
+  rotateEndpointSecret(endpointId: string, at: Date = new Date()): { secret: string; previous_secret: string } {
     const ep = this.getEndpoint(endpointId);
     if (!ep) {
       throw new Error(`Webhook endpoint ${endpointId} not found`);
@@ -112,7 +119,7 @@ export class WebhookStore {
 
     const newSecret = `whsec_${randomBytes(24).toString("hex")}`;
     const previousSecret = ep.secret;
-    const now = new Date().toISOString();
+    const now = at.toISOString();
 
     this.db
       .prepare(
@@ -123,6 +130,24 @@ export class WebhookStore {
       .run(newSecret, previousSecret, now, endpointId);
 
     return { secret: newSecret, previous_secret: previousSecret };
+  }
+
+  /**
+   * Clear the previous signing secret once its overlap window has elapsed
+   * (issue #615). Rotation is the only writer of `previous_secret`, so retiring
+   * it is a one-column update: the active secret is untouched and deliveries in
+   * flight keep verifying against it.
+   */
+  retirePreviousSecret(endpointId: string, at: Date = new Date()): boolean {
+    const now = at.toISOString();
+    const result = this.db
+      .prepare(
+        `UPDATE webhook_endpoints
+         SET previous_secret = NULL, updated_at = ?
+         WHERE id = ? AND previous_secret IS NOT NULL`
+      )
+      .run(now, endpointId);
+    return result.changes > 0;
   }
 
   getEndpoint(id: string): WebhookEndpoint | undefined {

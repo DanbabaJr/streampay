@@ -156,6 +156,8 @@ describe("locale detection", () => {
     expect(matchLocaleTag("de-AT")).toBe("de");
     expect(matchLocaleTag("DE-de")).toBe("de");
     expect(matchLocaleTag("en-GB")).toBe("en");
+    expect(matchLocaleTag("es-419")).toBe("es");
+    expect(matchLocaleTag("ES-es")).toBe("es");
     expect(matchLocaleTag("pt-BR")).toBeNull();
   });
 
@@ -180,10 +182,11 @@ describe("catalog key integrity", () => {
     }
   });
 
-  it("has no key in one catalog that is missing from the other", () => {
+  it("has no key in one catalog that is missing from another", () => {
     const englishKeys = Object.keys(en).sort();
-    const germanKeys = Object.keys(de).sort();
-    expect(germanKeys).toEqual(englishKeys);
+    for (const locale of SUPPORTED_LOCALES) {
+      expect(Object.keys(CATALOGS[locale]).sort(), locale).toEqual(englishKeys);
+    }
   });
 
   it("every message is a non-empty single line or an explicit multi-line string", () => {

@@ -75,9 +75,99 @@
         "keyFile": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Non-watch status/get: one decoded stream snapshot.",
+      "type": "object",
+      "required": ["schemaVersion", "ok", "command", "network", "contract", "stream"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": { "enum": ["status", "get"] },
+        "network": { "enum": ["testnet", "mainnet"] },
+        "contract": { "type": "string" },
+        "stream": { "$ref": "#/$defs/stream" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Watch mode: one line whenever the decoded stream state changes.",
+      "type": "object",
+      "required": ["schemaVersion", "ok", "command", "event", "sequence", "network", "contract", "stream"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": { "enum": ["status", "get"] },
+        "event": { "const": "change" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "network": { "enum": ["testnet", "mainnet"] },
+        "contract": { "type": "string" },
+        "stream": { "$ref": "#/$defs/stream" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Watch mode: final line flushed on SIGINT.",
+      "type": "object",
+      "required": ["schemaVersion", "ok", "command", "event", "reason", "polls", "changes", "network", "contract", "stream"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": { "enum": ["status", "get"] },
+        "event": { "const": "summary" },
+        "reason": { "const": "sigint" },
+        "polls": { "type": "integer", "minimum": 0 },
+        "changes": { "type": "integer", "minimum": 0 },
+        "network": { "enum": ["testnet", "mainnet"] },
+        "contract": { "type": "string" },
+        "stream": {
+          "anyOf": [
+            { "$ref": "#/$defs/stream" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Result of a `profile` subcommand; each subcommand returns the fields listed for it in README.md.",
+      "required": ["schemaVersion", "ok", "command", "configPath"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "ok": { "const": true },
+        "command": {
+          "enum": ["profile list", "profile show", "profile set", "profile remove", "profile use", "profile resolve"]
+        },
+        "configPath": { "type": "string" },
+        "defaultProfile": { "type": ["string", "null"] },
+        "profiles": { "type": "array", "items": { "type": "object" } },
+        "profile": { "type": ["object", "string", "null"] },
+        "settings": { "type": "object" },
+        "name": { "type": "string" },
+        "revertedToBuiltin": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   ],
   "$defs": {
+    "stream": {
+      "type": "object",
+      "required": ["id", "sender", "recipient", "token", "deposit", "withdrawn", "startTime", "endTime", "cancelable", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9]+$" },
+        "sender": { "type": "string" },
+        "recipient": { "type": "string" },
+        "token": { "type": "string" },
+        "deposit": { "type": "string", "pattern": "^[0-9]+$" },
+        "withdrawn": { "type": "string", "pattern": "^[0-9]+$" },
+        "startTime": { "type": "integer", "minimum": 0 },
+        "endTime": { "type": "integer", "minimum": 0 },
+        "cancelable": { "type": "boolean" },
+        "status": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
     "simulation": {
       "type": "object",
       "required": ["latestLedger", "minResourceFee", "footprint", "eventXdr", "expectedBalances"],

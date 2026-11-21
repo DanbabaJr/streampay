@@ -26,7 +26,10 @@
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
 use crate::errors::StreamError;
-use crate::events::{OracleConfigUpdated, OracleStaleFallback, OracleTimeReported};
+use crate::events::{
+    ConditionExpired, ConditionMet, ConditionRegistered, OracleConfigUpdated, OracleStaleFallback,
+    OracleTimeReported,
+};
 use crate::stream::{DataKey, TTL_EXTEND_LEDGERS, TTL_THRESHOLD_LEDGERS};
 use crate::surface::{self, Branch};
 
@@ -269,4 +272,270 @@ pub fn resolve_stream_time(env: &Env, stream_id: u64, use_oracle: bool) -> Resol
         timestamp: median_time,
         is_oracle: true,
     }
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Typed predicate gating the release of a conditional stream."
+)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConditionPredicate {
+    PriceBand(i128, i128),
+    Boolean(bool),
+    TimeWindow(u64, u64),
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Status of an oracle-attested release condition."
+)]
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ConditionStatus {
+    Pending = 0,
+    Met = 1,
+    Expired = 2,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " A release condition gating whether accrued value is withdrawable."
+)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamCondition {
+    pub condition_id: u64,
+    pub stream_id: u64,
+    pub predicate: ConditionPredicate,
+    pub publishers: Vec<Address>,
+    pub threshold: u32,
+    pub timeout: u64,
+    pub status: ConditionStatus,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " An individual condition attestation from an authorized publisher."
+)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionAttestation {
+    pub publisher: Address,
+    pub predicate: ConditionPredicate,
+    pub ledger_time: u64,
+}
+
+/// Returns the next condition id, incrementing instance storage.
+fn next_condition_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::NextConditionId)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextConditionId, &(id + 1));
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+    id
+}
+
+/// Registers an oracle-attested release condition for a stream.
+pub fn register_condition(
+    env: &Env,
+    caller: Address,
+    stream_id: u64,
+    predicate: ConditionPredicate,
+    publishers: Vec<Address>,
+    threshold: u32,
+    timeout: u64,
+) -> Result<u64, StreamError> {
+    caller.require_auth();
+
+    let s = crate::stream::get_stream(env, stream_id)?;
+
+    if caller != s.sender && caller != s.recipient {
+        return Err(StreamError::NotAuthorized);
+    }
+
+    if threshold == 0 || threshold > publishers.len() {
+        return Err(surface::reject(Branch::InvalidConditionThreshold));
+    }
+
+    let existing: Option<StreamCondition> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::StreamCondition(stream_id));
+    if existing.is_some() {
+        return Err(surface::reject(Branch::ConditionAlreadyRegistered));
+    }
+
+    let now_ledger = env.ledger().timestamp();
+    if timeout <= now_ledger {
+        return Err(surface::reject(Branch::ConditionExpired));
+    }
+
+    let condition_id = next_condition_id(env);
+    let condition = StreamCondition {
+        condition_id,
+        stream_id,
+        predicate,
+        publishers,
+        threshold,
+        timeout,
+        status: ConditionStatus::Pending,
+    };
+
+    let key = DataKey::StreamCondition(stream_id);
+    #[cfg(test)]
+    crate::cei_trace::record(&std::format!(
+        "write persistent StreamCondition({stream_id})"
+    ));
+    env.storage().persistent().set(&key, &condition);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+
+    #[cfg(test)]
+    crate::cei_trace::record("event ConditionRegistered");
+    ConditionRegistered {
+        stream_id,
+        condition_id,
+    }
+    .publish(env);
+
+    Ok(condition_id)
+}
+
+/// Records a publisher's attestation for a stream's release condition.
+pub fn attest_condition(
+    env: &Env,
+    publisher: Address,
+    stream_id: u64,
+    attestation: ConditionPredicate,
+) -> Result<(), StreamError> {
+    publisher.require_auth();
+
+    let mut condition: StreamCondition = env
+        .storage()
+        .persistent()
+        .get(&DataKey::StreamCondition(stream_id))
+        .ok_or_else(|| surface::reject(Branch::ConditionNotFound))?;
+
+    if condition.status == ConditionStatus::Met {
+        return Err(surface::reject(Branch::ConditionAlreadySatisfied));
+    }
+
+    let mut is_authorized = false;
+    for p in condition.publishers.iter() {
+        if p == publisher {
+            is_authorized = true;
+            break;
+        }
+    }
+    if !is_authorized {
+        return Err(surface::reject(Branch::NotConditionPublisher));
+    }
+
+    let now_ledger = env.ledger().timestamp();
+    if now_ledger > condition.timeout {
+        condition.status = ConditionStatus::Expired;
+        env.storage()
+            .persistent()
+            .set(&DataKey::StreamCondition(stream_id), &condition);
+        ConditionExpired {
+            stream_id,
+            condition_id: condition.condition_id,
+        }
+        .publish(env);
+        return Err(surface::reject(Branch::ConditionExpired));
+    }
+
+    if let ConditionPredicate::TimeWindow(_, end) = condition.predicate {
+        if now_ledger > end {
+            return Err(surface::reject(Branch::ConditionAttestationStale));
+        }
+    }
+
+    let attestation_record = ConditionAttestation {
+        publisher: publisher.clone(),
+        predicate: attestation.clone(),
+        ledger_time: now_ledger,
+    };
+
+    let key = DataKey::ConditionAttestation(stream_id, publisher.clone());
+    #[cfg(test)]
+    crate::cei_trace::record(&std::format!(
+        "write persistent ConditionAttestation({stream_id})"
+    ));
+    env.storage().persistent().set(&key, &attestation_record);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+
+    // Quorum check: count fresh matching attestations
+    let max_stale = get_oracle_config(env)
+        .map(|c| c.max_stale_seconds)
+        .unwrap_or(DEFAULT_MAX_STALE_SECONDS);
+
+    let mut matching_count = 0u32;
+    for p in condition.publishers.iter() {
+        let att_key = DataKey::ConditionAttestation(stream_id, p);
+        if let Some(att) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ConditionAttestation>(&att_key)
+        {
+            if now_ledger <= att.ledger_time.saturating_add(max_stale)
+                && att.predicate == condition.predicate
+            {
+                matching_count += 1;
+            }
+        }
+    }
+
+    if matching_count >= condition.threshold {
+        condition.status = ConditionStatus::Met;
+        env.storage()
+            .persistent()
+            .set(&DataKey::StreamCondition(stream_id), &condition);
+
+        #[cfg(test)]
+        crate::cei_trace::record("event ConditionMet");
+        ConditionMet {
+            stream_id,
+            condition_id: condition.condition_id,
+        }
+        .publish(env);
+    }
+
+    Ok(())
+}
+
+/// Checks whether a stream is release-gated by a pending condition.
+/// Returns true if release should be held (conservative fallback: hold release, never auto-release).
+pub fn is_release_gated(env: &Env, stream_id: u64) -> bool {
+    let Some(condition) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, StreamCondition>(&DataKey::StreamCondition(stream_id))
+    else {
+        return false;
+    };
+
+    // If condition is Met, release is allowed. Otherwise, conservative fallback holds release!
+    condition.status != ConditionStatus::Met
+}
+
+/// Returns the condition configuration and status for a stream, if any.
+pub fn get_condition(env: &Env, stream_id: u64) -> Option<StreamCondition> {
+    #[cfg(test)]
+    crate::cei_trace::record(&std::format!(
+        "read persistent StreamCondition({stream_id})"
+    ));
+    env.storage()
+        .persistent()
+        .get(&DataKey::StreamCondition(stream_id))
 }

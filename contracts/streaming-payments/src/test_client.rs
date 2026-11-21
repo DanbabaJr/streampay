@@ -8,13 +8,15 @@
 //! implementation without building Wasm.
 #![cfg(any(test, feature = "testutils"))]
 
-use soroban_sdk::{contractclient, Address, BytesN, Env, Vec};
+use soroban_sdk::{contractclient, Address, BytesN, Env, Symbol, Vec};
 
 use crate::{
-    BatchEntry, Dispute, FeeScan, GovernanceAction, MigrationStatus, PageBounds, PendingOwnership,
-    PendingRateChange, PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment,
-    ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamError, StreamInput, StreamPolicy,
-    TreasuryStatus, WithdrawAllResult, WithdrawEntry,
+    Advance, BatchEntry, ConditionPredicate, Dispute, FeeScan, GovernanceAction, HookEventClass,
+    HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership, PendingRateChange,
+    PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment, ReceivablesConfig,
+    ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamCondition, StreamError,
+    StreamHook, StreamInput, StreamPolicy, StreamTemplate, TemplateLineage, TreasuryStatus,
+    WithdrawAllResult, WithdrawEntry,
 };
 
 /// Interface of the StreamPay streaming-payments contract.
@@ -309,4 +311,84 @@ pub trait StreamingPaymentsApi {
     fn governance_veto_window(env: Env) -> u64;
     fn governance_proposal(env: Env, proposal_id: u64) -> Option<Proposal>;
     fn governance_proposal_count(env: Env) -> u64;
+
+    // ----------------------------------------------------------- receivables
+    fn set_receivables_config(
+        env: Env,
+        caller: Address,
+        max_ltv_bps: u32,
+        fee_bps: u32,
+    ) -> Result<(), StreamError>;
+    fn get_receivables_config(env: Env) -> ReceivablesConfig;
+    fn get_advance(env: Env, stream_id: u64) -> Option<Advance>;
+    fn draw_advance(
+        env: Env,
+        stream_id: u64,
+        lender: Address,
+        amount: i128,
+        repayment_bps: u32,
+    ) -> Result<(), StreamError>;
+    fn repay_advance(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<(), StreamError>;
+
+    // --------------------------------------------------- conditional streams
+    fn register_condition(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        predicate: ConditionPredicate,
+        publishers: Vec<Address>,
+        threshold: u32,
+        timeout: u64,
+    ) -> Result<u64, StreamError>;
+    fn attest_condition(
+        env: Env,
+        publisher: Address,
+        stream_id: u64,
+        attestation: ConditionPredicate,
+    ) -> Result<(), StreamError>;
+    fn get_condition(env: Env, stream_id: u64) -> Option<StreamCondition>;
+    fn is_release_gated(env: Env, stream_id: u64) -> bool;
+
+    // ------------------------------------------------------ stream templates
+    fn approve_template(
+        env: Env,
+        caller: Address,
+        template_id: u32,
+        version: u32,
+        template: StreamTemplate,
+    ) -> Result<(), StreamError>;
+    fn instantiate_template(
+        env: Env,
+        template_id: u32,
+        version: u32,
+        sender: Address,
+        recipient: Address,
+        deposit: i128,
+        start_time: u64,
+    ) -> Result<u64, StreamError>;
+    fn get_template(env: Env, template_id: u32, version: u32) -> Option<StreamTemplate>;
+    fn get_stream_lineage(env: Env, stream_id: u64) -> Option<TemplateLineage>;
+
+    // ------------------------------------------------------ integrator hooks
+    fn register_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+        callback_contract: Address,
+        selector: Symbol,
+        failure_policy: HookFailurePolicy,
+    ) -> Result<(), StreamError>;
+    fn unregister_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+    ) -> Result<(), StreamError>;
+    fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook>;
 }

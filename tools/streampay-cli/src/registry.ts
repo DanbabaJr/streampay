@@ -41,12 +41,16 @@ export const GLOBAL_OPTIONS: readonly OptionSpec[] = [
   { name: "password-env", kind: "value", description: "Env var holding the key file password" },
   { name: "dry-run", kind: "flag", description: "Simulate, report footprint and do not submit" },
   { name: "signed-xdr", kind: "file", description: "Submit a ledger-signed transaction XDR file" },
+  { name: "profile", kind: "value", description: "Use a named profile from the config file" },
+  { name: "config", kind: "file", description: "Config file path (default: platform config dir)" },
   { name: "json", kind: "flag", description: "Emit JSON schema v1" },
   { name: "help", kind: "flag", description: "Show usage" },
 ];
 
 const STREAM_ID: OptionSpec = { name: "stream-id", kind: "value", description: "Stream id" };
 const AMOUNT: OptionSpec = { name: "amount", kind: "value", description: "Amount in smallest token units" };
+const WATCH: OptionSpec = { name: "watch", kind: "flag", description: "Poll and emit JSON Lines, one line per state change" };
+const INTERVAL: OptionSpec = { name: "interval", kind: "value", description: "Watch poll interval in milliseconds (default 5000, minimum 1000)" };
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
@@ -64,6 +68,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "cancel", description: "Cancel a stream", options: [STREAM_ID] },
   { name: "top-up", description: "Top up a stream", options: [STREAM_ID, AMOUNT] },
   { name: "claim-all", description: "Withdraw every claimable recipient stream", options: [] },
+  { name: "status", description: "Read and print one decoded stream snapshot", options: [STREAM_ID, WATCH, INTERVAL] },
+  { name: "get", description: "Alias for status", options: [STREAM_ID, WATCH, INTERVAL] },
   {
     name: "key",
     description: "Manage encrypted signer keys",
@@ -82,6 +88,23 @@ export const COMMANDS: readonly CommandSpec[] = [
     ],
   },
   {
+    name: "profile",
+    description: "Manage named network profiles (secrets are never stored)",
+    options: [],
+    subcommands: [
+      { name: "list", description: "List built-in and configured profiles", options: [] },
+      { name: "show", description: "Show one profile: `profile show <name>`", options: [] },
+      {
+        name: "set",
+        description: "Create or update a profile: `profile set <name> --network ... --contract ...`",
+        options: [{ name: "unset", kind: "value", description: "Comma-separated settings to remove from the profile" }],
+      },
+      { name: "remove", description: "Delete a profile: `profile remove <name>`", options: [] },
+      { name: "use", description: "Make a profile the default: `profile use <name>`", options: [] },
+      { name: "resolve", description: "Show each effective setting and where it came from", options: [] },
+    ],
+  },
+  {
     name: "completion",
     description: "Print a shell completion script",
     options: [],
@@ -92,6 +115,9 @@ export const COMMANDS: readonly CommandSpec[] = [
 
 /** Commands that run a StreamPay contract transaction. */
 export const TRANSACTION_COMMANDS: readonly string[] = ["create", "withdraw", "cancel", "top-up", "claim-all"];
+
+/** Read-only commands: one decoded `get_stream` snapshot, optionally watched. */
+export const READ_COMMANDS: readonly string[] = ["status", "get"];
 
 function allCommandSpecs(commands: readonly CommandSpec[] = COMMANDS): CommandSpec[] {
   return commands.flatMap((command) => [command, ...allCommandSpecs(command.subcommands ?? [])]);
