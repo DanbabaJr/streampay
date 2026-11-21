@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streampay-indexer-ap-south
+  namespace: streampay
+  labels:
+    app.kubernetes.io/name: streampay-indexer
+    app.kubernetes.io/component: indexer
+    streampay.io/region: ap-south
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streampay-indexer
+      streampay.io/region: ap-south
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: streampay-indexer
+        streampay.io/region: ap-south
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: streampay-indexer
+              streampay.io/region: ap-south
+      containers:
+        - name: indexer
+          image: streampay/indexer:latest
+          ports:
+            - containerPort: 9090
+              name: http
+          env:
+            - name: REGION
+              value: ap-south
+            - name: PORT
+              value: "9090"
+            - name: RPC_URL
+              value: https://soroban-testnet.stellar.org
+            - name: READ_FRESHNESS_MAX_LAG_LEDGERS
+              value: "5"
+            - name: DELIVERY_LEASE_MS
+              value: "15000"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streampay-indexer-ap-south
+  namespace: streampay
+  labels:
+    app.kubernetes.io/name: streampay-indexer
+    streampay.io/region: ap-south
+spec:
+  selector:
+    app.kubernetes.io/name: streampay-indexer
+    streampay.io/region: ap-south
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
