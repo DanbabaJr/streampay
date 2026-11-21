@@ -4595,11 +4595,24 @@ export interface StreamRefundTargetChangedEvent extends EventBase {
 
 export type StreamPayEvent = StreamCreatedEvent | StreamsCreatedEvent | WithdrawnEvent | BatchWithdrawSummaryEvent | StreamCancelledEvent | StreamToppedUpEvent | StreamPausedEvent | StreamResumedEvent | StreamScheduledEvent | ScheduledStreamExecutedEvent | ScheduledIntentCancelledEvent | ScheduledIntentExpiredEvent | FeeChargedEvent | FeeWithdrawnEvent | DisputeRaisedEvent | DisputeResolvedEvent | DisputeExpiredEvent | SponsorRegisteredEvent | SponsorActiveSetEvent | BeneficiaryEnrolledEvent | OperatorKeyRotatedEvent | SponsorClaimEvent | PolicyInitializedEvent | PolicyAssetQueuedEvent | PolicyAssetExecutedEvent | PolicyHandoffProposedEvent | PolicyHandoffAcceptedEvent | PolicyHandoffCancelledEvent | UpgradeProposedEvent | UpgradeCancelledEvent | ContractUpgradedEvent | ContractFrozenStateChangedEvent | StorageMigratedEvent | StreamRecordMigratedEvent | StreamPolicySetEvent | OracleConfigUpdatedEvent | OracleTimeReportedEvent | OracleStaleFallbackEvent | OwnershipProposedEvent | OwnershipAcceptedEvent | RateChangeProposedEvent | RateChangeAcceptedEvent | GovernanceSignersSetEvent | GovernanceActionProposedEvent | GovernanceActionSignedEvent | GovernanceActionVetoedEvent | GovernanceActionExecutedEvent | SenderTransferProposedEvent | SenderTransferredEvent | SenderTransferExpiredEvent | StreamRefundTargetChangedEvent;
 
+function readMember<T>(target: unknown, key: string): T {
+  const member = (target as Record<string, unknown> | undefined)?.[key];
+  return (typeof member === "function" ? (member as () => T).call(target) : member) as T;
+}
+
+function unwrapContractId(raw: unknown): unknown {
+  if (raw == null || raw instanceof Uint8Array) return raw;
+  const inner = readMember<unknown>(raw, "value");
+  if (inner != null && inner !== raw) return unwrapContractId(inner);
+  const contractId = readMember<unknown>(raw, "contractId");
+  if (contractId != null) return unwrapContractId(contractId);
+  return raw;
+}
+
 function eventContractId(event: xdr.ContractEvent): string {
-  type ContractIdLike = { value: Uint8Array };
-  const raw = (event as unknown as { contractId?: ContractIdLike }).contractId;
-  if (!raw) throw new Error("event has no contract id");
-  return StrKey.encodeContract(Buffer.from(raw.value));
+  const raw = unwrapContractId(readMember<unknown>(event, "contractId"));
+  if (!(raw instanceof Uint8Array)) throw new Error("event has no contract id");
+  return StrKey.encodeContract(Buffer.from(raw));
 }
 
 function topicValue(topics: xdr.ScVal[], index: number, name: string): xdr.ScVal {
@@ -4621,14 +4634,16 @@ export function contractErrorFromMessage(message: string): number | undefined {
 
 /** Decodes a StreamPay contract event; `null` for foreign events. */
 export function decodeStreamPayEvent(event: xdr.ContractEvent): StreamPayEvent | null {
-  const type = (event as unknown as { type?: { name?: string } }).type;
-  if (type?.name !== "contract") return null;
-  const body = (event as unknown as { body?: { v0?: { topics: xdr.ScVal[]; data: xdr.ScVal } } }).body;
-  if (!body?.v0) throw new Error("unsupported ContractEvent body");
-  const topics = body.v0.topics;
+  const type = readMember<{ name?: string } | string>(event, "type");
+  const typeName = typeof type === "string" ? type : type?.name;
+  if (typeName !== "contract") return null;
+  const body = readMember<{ v0?: unknown }>(event, "body");
+  const v0 = readMember<unknown>(body, "v0") ?? readMember<unknown>(body, "value");
+  if (v0 == null) throw new Error("unsupported ContractEvent body");
+  const topics = readMember<xdr.ScVal[]>(v0, "topics");
   const name = asString(asNative(topicValue(topics, 0, "<unknown>")), "event name");
   const contractId = eventContractId(event);
-  const data = asNative(body.v0.data) as Record<string, unknown>;
+  const data = asNative(readMember<xdr.ScVal>(v0, "data")) as Record<string, unknown>;
   switch (name) {
     case "stream_created": {
       return {

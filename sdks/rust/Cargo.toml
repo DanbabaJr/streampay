@@ -1,0 +1,26 @@
+[package]
+name = "streampay-sdk"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Typed, spec-generated Rust client for the StreamPay streaming-payments Soroban contract."
+license = "Apache-2.0"
+repository = "https://github.com/Neziahtech/streampay"
+documentation = "https://docs.rs/streampay-sdk"
+readme = "README.md"
+keywords = ["stellar", "soroban", "streampay", "payments", "streaming"]
+categories = ["cryptography::cryptocurrencies"]
+
+# Standalone crate: sdks/rust is not a member of the contract workspace.
+[workspace]
+
+[dependencies]
+stellar-xdr = { version = "30.0.0", features = ["base64"] }
+stellar-strkey = "1.0.0"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

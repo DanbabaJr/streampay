@@ -6,7 +6,7 @@ import type {
   DivergenceRecord,
   ReconciliationResult,
   ReaderConfig,
-} from "./types.js";
+} from "../types.js";
 import { AlertingService } from "../alerting.js";
 
 export interface ReconciliationEngineConfig {
@@ -73,7 +73,7 @@ export class ReconciliationEngine {
           "missing_record",
           "critical",
           { streamId: horizonState.streamId, ledger: horizonState.ledger },
-          { streamId: sorobanState?.streamId ?? "N/A", ledger: sorobanState?.ledger ?? 0 },
+          { streamId: "N/A", ledger: 0 },
           horizonState.ledger,
           0 // Soroban lag is infinite, but we'll use 0 as placeholder
         ));
@@ -84,7 +84,7 @@ export class ReconciliationEngine {
           streamId,
           "missing_record",
           "warning", // Less critical - might be indexing delay
-          { streamId: horizonState?.streamId ?? "N/A", ledger: horizonState?.ledger ?? 0 },
+          { streamId: "N/A", ledger: 0 },
           { streamId: sorobanState.streamId, ledger: sorobanState.ledger },
           0, // Horizon lag is infinite
           sorobanState.ledger
@@ -243,8 +243,8 @@ export class ReconciliationEngine {
    * Start continuous reconciliation polling.
    */
   async startContinuousReconciliation(
-    horizonReader: { pollStreams: (ids: string[]) => Promise<StreamState[]>; healthCheck: () => Promise<{ healthy: boolean }> },
-    sorobanReader: { pollStreams: (ids: string[]) => Promise<StreamState[]>; healthCheck: () => Promise<{ healthy: boolean }> },
+    horizonReader: { pollStreams: (ids: string[]) => Promise<StreamState[]>; healthCheck: () => Promise<{ healthy: boolean; error?: string }> },
+    sorobanReader: { pollStreams: (ids: string[]) => Promise<StreamState[]>; healthCheck: () => Promise<{ healthy: boolean; error?: string }> },
     streamIds: string[],
     options: { 
       initialDelayMs?: number; 
@@ -307,7 +307,7 @@ export class ReconciliationEngine {
           
           await new Promise(resolve => setTimeout(resolve, sleepTime));
         } catch (err) {
-          onError(err);
+          onError(err as Error);
           // Continue looping despite errors
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
@@ -319,5 +319,4 @@ export class ReconciliationEngine {
 }
 
 // Re-export types for consumers
-export type { ReconciliationEngineConfig };
-export type { StreamState, DivergenceRecord, ReconciliationResult } from "./types.js";
+export type { StreamState, DivergenceRecord, ReconciliationResult } from "../types.js";

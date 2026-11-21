@@ -1,7 +1,7 @@
 //! Horizon API reader that polls for effects related to StreamPay streams.
 
-import { createHttpAgent } from "./http.js";
-import type { StreamState, HorizonStreamEffect } from "./types.js";
+import { createHttpAgent } from "../http.js";
+import type { StreamState, HorizonStreamEffect } from "../types.js";
 
 export interface HorizonReaderConfig {
   url: string;
@@ -92,8 +92,8 @@ export class HorizonReader {
   async updateLastLedger(): Promise<void> {
     try {
       const response = await this.http.get(`${this.config.url}/ledgers?limit=1&order=desc`);
-      if (response.status === 200 && Array.isArray(response.data._embedded?.records)) {
-        const ledger = response.data._embedded?.records[0]?.sequence;
+      if (response.status === 200 && Array.isArray((response.data as any)._embedded?.records)) {
+        const ledger = (response.data as any)._embedded?.records[0]?.sequence;
         if (ledger && typeof ledger === "number") {
           this.lastLedger = ledger;
           this.healthy = true;
@@ -107,5 +107,4 @@ export class HorizonReader {
 }
 
 // Re-export types for consumers
-export type { HorizonReaderConfig };
-export type { StreamState, HorizonStreamEffect } from "./types.js";
+export type { StreamState, HorizonStreamEffect } from "../types.js";

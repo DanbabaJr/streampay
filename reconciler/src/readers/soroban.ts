@@ -1,7 +1,7 @@
 //! Soroban RPC reader that polls contract state for stream information.
 
-import { createHttpAgent } from "./http.js";
-import type { StreamState, SorobanStreamStorage } from "./types.js";
+import { createHttpAgent } from "../http.js";
+import type { StreamState, SorobanStreamStorage, StreamStatus } from "../types.js";
 
 export interface SorobanRpcReaderConfig {
   url: string;
@@ -111,7 +111,7 @@ export class SorobanRpcReader {
 
       // Validate status
       const status: StreamStatus = 
-        ["Active", "Cancelled", "Depleted"].includes(statusStr as StreamStatus) 
+        ["Active", "Cancelled", "Depleted", "Paused"].includes(statusStr as StreamStatus) 
           ? (statusStr as StreamStatus) 
           : "Active";
 
@@ -182,5 +182,4 @@ export class SorobanRpcReader {
 }
 
 // Re-export types for consumers
-export type { SorobanRpcReaderConfig };
-export type { StreamState, SorobanStreamStorage } from "./types.js";
+export type { StreamState, SorobanStreamStorage } from "../types.js";

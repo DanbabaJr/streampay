@@ -1,9 +1,8 @@
 //! Simple HTTP agent wrapper for making requests with proper error handling.
 
-import { URL } from "node:url";
-
 export interface HttpResponse {
   status: number;
+  statusText: string;
   data: unknown;
   headers: Record<string, string>;
 }
@@ -23,7 +22,7 @@ export function createHttpAgent(): {
   get(url: string, headers?: Record<string, string>): Promise<HttpResponse>;
   post(url: string, body: any, headers?: Record<string, string>): Promise<HttpResponse>;
 } {
-  const fetch = async (url: string, options: RequestInit): Promise<HttpResponse> => {
+  const request = async (url: string, options: RequestInit): Promise<HttpResponse> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30s timeout
 
@@ -33,7 +32,7 @@ export function createHttpAgent(): {
         signal: controller.signal,
         headers: {
           "User-Agent": "streampay-reconciler/1.0.0",
-          ...(options.headers || {}),
+          ...((options.headers as Record<string, string>) || {}),
         },
       });
 
@@ -54,6 +53,7 @@ export function createHttpAgent(): {
 
       return {
         status: response.status,
+        statusText: response.statusText,
         data,
         headers: Object.fromEntries(response.headers.entries()),
       };
@@ -63,18 +63,19 @@ export function createHttpAgent(): {
         throw new HttpError(408, "Request timeout");
       }
       if (err instanceof HttpError) throw err;
-      throw new HttpError(0, `Network error: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      throw new HttpError(0, `Network error: ${message}`);
     }
   };
 
   return {
     async get(url: string, headers = {}): Promise<HttpResponse> {
-      return fetch(url, { method: "GET", headers });
+      return request(url, { method: "GET", headers });
     },
     async post(url: string, body: any, headers = {}): Promise<HttpResponse> {
       const stringBody =
         typeof body === "string" ? body : JSON.stringify(body);
-      return fetch(url, {
+      return request(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
