@@ -516,3 +516,38 @@ checkpoint for an in-flight move.
   as the pipeline sink); the HTTP server in `src/index.ts` still uses a
   single `StreamStore`, and there is no `/metrics` sharding endpoint or
   operator CLI for moves yet. Wiring those up is the natural follow-up.
+
+## 7. Deterministic Replay (issue #584)
+
+`src/replay/` rebuilds the `streams` projection from the journal without
+re-emitting anything: `ReplayEngine` reads ledger ranges, upcasts each payload to
+the schema version the projections expect, redacts addresses exactly as the read
+paths do, and projects through `StreamStore.projectEvent` — no outbox intent and
+no webhook delivery is queued.
+
+- **Upcasters** (`src/replay/upcasters.ts`): per-event chains `vN -> vN+1`,
+  registered next to the canonical registry. A chain may only name an event the
+  registry declares, and `assertUpcastersMatchSchemaRegistry()` checks that at
+  module load. A missing step, an unknown version, or a payload written by a
+  newer contract (`MissingUpcasterError`, `UnknownEventSchemaError`,
+  `FutureSchemaVersionError`) aborts the replay instead of being projected
+  as-is. The shipped chains read pre-registry (`v0`) `stream_created`,
+  `withdrawn` and `stream_topped_up` payloads into v1.
+- **Parallel, ordered, resumable** (`src/replay/engine.ts`): ranges of
+  `rangeSize` ledgers are read and upcast concurrently (`concurrency`), then
+  applied in ascending ledger order, so a stream's events always reach the
+  projection in chain order. After each applied range the engine writes
+  `replay_checkpoints(job, watermark, state_root)`; rerunning the job resumes at
+  the watermark and skips the ranges that already landed.
+- **State root**: `computeReplayStateRoot` hashes one domain-separated leaf per
+  projected stream (fixed field order, stream-id sort) and folds them with the
+  same Merkle builder as the checkpoint proofs, so a replay is reproducible
+  across machines and range layouts.
+- **CI gate**: `src/replay/corpus.test.ts` replays
+  [`fixtures/replay-corpus.json`](fixtures/replay-corpus.json) — pinned
+  historical rows, three of them pre-registry — and asserts its golden
+  `stateRoot`. A change to projection semantics, an upcaster or the corpus fails
+  the gate; regenerate the pin deliberately when a projection change is meant.
+- **Fail closed**: malformed or truncated payloads (`ReplayFixtureError`),
+  including the #486 decoder fixtures, abort the range before it is
+  checkpointed, so a partial replay never looks like a completed one.

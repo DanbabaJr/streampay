@@ -116,7 +116,7 @@ export class StreamStore extends EventEmitter {
   }
 
   ingest(event: DecodedEvent): void {
-    const outcome = this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken))();
+    const outcome = this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "ingest"))();
     // #225: `/events/stream` (SSE) listeners are notified only after the write has
     // committed, so a listener that reads back through the store sees this event,
     // and a throwing listener cannot roll the ingestion transaction back.
@@ -134,7 +134,7 @@ export class StreamStore extends EventEmitter {
     const journalled: DecodedEvent[] = [];
     this.db.transaction(() => {
       for (const event of events) {
-        const outcome = this.ingestWithinTransaction(event, cursor ?? event.pagingToken);
+        const outcome = this.ingestWithinTransaction(event, cursor ?? event.pagingToken, "ingest");
         if (outcome.duplicate) summary.duplicates += 1;
         else {
           summary.inserted += 1;
@@ -152,12 +152,29 @@ export class StreamStore extends EventEmitter {
     return summary;
   }
 
+  /**
+   * Projects one event onto `streams` without the live-ingest side effects:
+   * no outbox intent and no webhook delivery are enqueued. Used by the replay
+   * engine (#584), which rebuilds state from the journal and must never emit a
+   * second notification for an event that was already delivered once.
+   *
+   * The event row is still journalled, so replay stays idempotent (a repeated
+   * range reports duplicates) and the projection keeps its monotonic guard.
+   */
+  projectEvent(event: DecodedEvent): { duplicate: boolean; projectionSkipped: boolean } {
+    return this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "project"))();
+  }
+
   /** The stream row an event concerns; `undefined` for stream-less events. */
   private streamForEvent(event: DecodedEvent): Stream | undefined {
     return event.streamId === null ? undefined : this.getStream(event.streamId);
   }
 
-  private ingestWithinTransaction(event: DecodedEvent, ledgerCursor: string): { duplicate: boolean; projectionSkipped: boolean } {
+  private ingestWithinTransaction(
+    event: DecodedEvent,
+    ledgerCursor: string,
+    mode: "ingest" | "project",
+  ): { duplicate: boolean; projectionSkipped: boolean } {
     // A stream-less event has no `stream.id` to report; the attribute is
     // omitted rather than filled with a placeholder.
     const streamAttributes: Record<string, string | number> = {
@@ -224,23 +241,27 @@ export class StreamStore extends EventEmitter {
         return { duplicate: true, projectionSkipped: false };
       }
 
-      // Transactional outbox: the delivery-intent journal is committed in the
-      // same transaction as the event row, so intents can never be lost.
-      // Deliberately NOT wrapped in try/catch — any failure must roll back the
-      // whole ingestion transaction.
-      this.outbox.enqueueWithinTransaction(newOutboxEventFromDecoded(event, ledgerCursor));
+      // A replay projects only: an event already dispatched once must not be
+      // queued a second time.
+      if (mode === "ingest") {
+        // Transactional outbox: the delivery-intent journal is committed in the
+        // same transaction as the event row, so intents can never be lost.
+        // Deliberately NOT wrapped in try/catch — any failure must roll back the
+        // whole ingestion transaction.
+        this.outbox.enqueueWithinTransaction(newOutboxEventFromDecoded(event, ledgerCursor));
 
-      // Queue webhook deliveries for subscribers
-      try {
-        this.webhooks.queueDeliveriesForEvent({
-          id: event.id,
-          name: event.name,
-          streamId: event.streamId,
-          ledgerClosedAt: event.ledgerClosedAt,
-          data: event.data as Record<string, unknown>,
-        });
-      } catch (err) {
-        console.error("Failed to queue webhook delivery for event:", err);
+        // Queue webhook deliveries for subscribers
+        try {
+          this.webhooks.queueDeliveriesForEvent({
+            id: event.id,
+            name: event.name,
+            streamId: event.streamId,
+            ledgerClosedAt: event.ledgerClosedAt,
+            data: event.data as Record<string, unknown>,
+          });
+        } catch (err) {
+          console.error("Failed to queue webhook delivery for event:", err);
+        }
       }
 
       const d = event.data;
