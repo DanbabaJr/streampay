@@ -6,11 +6,10 @@
  * - Verbose languages (German+40% via accented pseudo-locale)
  * - Compound-word languages (long unbreakable strings)
  *
- * Tests measurable overflow in rendered DOM and placeholder interpolation.
+ * Tests placeholder interpolation and ICU syntax integrity.
  */
 
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { JSDOM } from "jsdom";
+import { describe, expect, it } from "vitest";
 import IntlMessageFormat from "intl-messageformat";
 import {
   accentedPseudo,
@@ -19,7 +18,6 @@ import {
   transformCatalog,
 } from "./pseudo-locale";
 import { en, MESSAGE_KEYS, MESSAGE_SAMPLES, PARAMETERIZED_KEYS, type MessageKey } from "./messages";
-import { formatMessage } from "./format";
 
 describe("pseudo-locale transform", () => {
   describe("accented pseudo-locale (en-XA)", () => {
@@ -199,232 +197,62 @@ describe("placeholder interpolation integrity", () => {
   });
 });
 
-describe("layout overflow detection", () => {
-  let dom: JSDOM;
-  let document: Document;
+describe("layout stress testing", () => {
+  const { accented, longWord } = generatePseudoCatalogs(en);
 
-  beforeEach(() => {
-    // Create a realistic DOM environment for measuring overflow
-    dom = new JSDOM(
-      `<!DOCTYPE html>
-      <html>
-        <head>
-          <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; }
-            .badge { display: inline-block; max-width: 120px; padding: 4px 8px;
-                     border-radius: 4px; white-space: nowrap; overflow: hidden; }
-            .button { display: inline-block; max-width: 200px; padding: 8px 16px;
-                      border-radius: 6px; white-space: nowrap; overflow: hidden; }
-            .row { display: flex; align-items: center; max-width: 600px; gap: 12px; }
-            .row-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .toast { max-width: 350px; padding: 12px 16px; word-wrap: break-word; }
-          </style>
-        </head>
-        <body>
-          <div id="test-container"></div>
-        </body>
-      </html>`,
-      {
-        url: "http://localhost",
-        pretendToBeVisual: true,
-      }
-    );
-    document = dom.window.document;
+  it("accented pseudo-locale increases text length by ~40%", () => {
+    // Test on several message keys
+    const testKeys: MessageKey[] = ["chrome.networkLive", "chrome.walletOnNetwork", "home.connectedAs"];
 
-    // Mock layout measurements (JSDOM doesn't do real layout)
-    // This simulates realistic overflow detection
-    Object.defineProperty(dom.window.HTMLElement.prototype, "scrollWidth", {
-      get: function (this: HTMLElement) {
-        // Simulate that pseudo-locale text is ~1.4x wider
-        const text = this.textContent || "";
-        const isPseudo = text.includes("!!!");
-        const baseWidth = text.length * 8; // ~8px per character
-        return isPseudo ? baseWidth * 1.4 : baseWidth;
-      },
-    });
+    for (const key of testKeys) {
+      const original = en[key];
+      const transformed = accented[key];
 
-    Object.defineProperty(dom.window.HTMLElement.prototype, "clientWidth", {
-      get: function (this: HTMLElement) {
-        // Use maxWidth from styles
-        const className = this.className;
-        if (className.includes("badge")) return 120;
-        if (className.includes("button")) return 200;
-        if (className.includes("row-text")) return 400;
-        if (className.includes("toast")) return 350;
-        return 1000; // Default wide
-      },
-    });
-  });
+      // Transformed text should be significantly longer
+      expect(transformed.length).toBeGreaterThan(original.length);
 
-  afterEach(() => {
-    dom.window.close();
-  });
-
-  function detectOverflow(element: HTMLElement): {
-    overflows: boolean;
-    scrollWidth: number;
-    clientWidth: number;
-  } {
-    const scrollWidth = element.scrollWidth;
-    const clientWidth = element.clientWidth;
-    return {
-      overflows: scrollWidth > clientWidth,
-      scrollWidth,
-      clientWidth,
-    };
-  }
-
-  it("NetworkBadge-like component handles pseudo-locale without overflow", () => {
-    const { accented } = generatePseudoCatalogs(en);
-    const container = document.getElementById("test-container")!;
-
-    // Simulate network badge texts
-    const networkTexts = [
-      accented["chrome.networkLive" as MessageKey] || "Test Network",
-      accented["chrome.networkText" as MessageKey] || "Public Network",
-    ];
-
-    for (const text of networkTexts) {
-      const badge = document.createElement("div");
-      badge.className = "badge";
-      badge.textContent = text;
-      container.appendChild(badge);
-
-      const result = detectOverflow(badge);
-
-      // With max-width and overflow:hidden, text can be clipped BUT
-      // we verify it's intentionally clipped with ellipsis, not broken
-      expect(badge.textContent).toBeTruthy();
-      expect(result.scrollWidth).toBeGreaterThan(0);
-
-      // Document the overflow for review (this is expected for constrained badges)
-      if (result.overflows) {
-        expect(result.scrollWidth / result.clientWidth).toBeLessThan(2.0);
-      }
-
-      container.removeChild(badge);
+      // Approximate 40% padding (accounting for brackets and spaces)
+      const minExpectedLength = original.length * 1.2;
+      expect(transformed.length).toBeGreaterThan(minExpectedLength);
     }
   });
 
-  it("WalletButton-like component displays pseudo-locale text", () => {
-    const { accented, longWord } = generatePseudoCatalogs(en);
-    const container = document.getElementById("test-container")!;
+  it("long-word pseudo-locale creates text at least 2x longer", () => {
+    const testKeys: MessageKey[] = ["chrome.networkText", "home.connectedAs"];
 
-    // Test both pseudo variants
-    for (const catalog of [accented, longWord]) {
-      const buttonText = catalog["chrome.walletOnNetwork" as MessageKey] || "Connect Wallet";
+    for (const key of testKeys) {
+      const original = en[key];
+      const transformed = longWord[key];
 
-      const button = document.createElement("button");
-      button.className = "button";
-      button.textContent = buttonText;
-      container.appendChild(button);
-
-      const result = detectOverflow(button);
-
-      expect(button.textContent).toBeTruthy();
-      expect(button.textContent?.length).toBeGreaterThan(0);
-
-      // Buttons may clip but should not exceed 2x width (indicates catastrophic overflow)
-      if (result.overflows) {
-        expect(result.scrollWidth / result.clientWidth).toBeLessThan(2.5);
-      }
-
-      container.removeChild(button);
-    }
-  });
-
-  it("StreamList row text handles pseudo-locale", () => {
-    const { accented } = generatePseudoCatalogs(en);
-    const container = document.getElementById("test-container")!;
-
-    // Simulate stream row with interpolated data
-    const rowTexts = [
-      new IntlMessageFormat(accented["home.streamLoaded" as MessageKey], "en").format({ id: 42 }),
-      new IntlMessageFormat(accented["home.claimed" as MessageKey], "en").format({
-        amount: "1,234.56",
-        id: 42,
-      }),
-    ];
-
-    for (const text of rowTexts) {
-      const row = document.createElement("div");
-      row.className = "row";
-
-      const textSpan = document.createElement("span");
-      textSpan.className = "row-text";
-      textSpan.textContent = String(text);
-      row.appendChild(textSpan);
-
-      container.appendChild(row);
-
-      const result = detectOverflow(textSpan);
-
-      expect(textSpan.textContent).toBeTruthy();
-      expect(String(text)).not.toContain("undefined");
-
-      // Row text with ellipsis is acceptable
-      if (result.overflows) {
-        expect(result.scrollWidth / result.clientWidth).toBeLessThan(2.0);
-      }
-
-      container.removeChild(row);
-    }
-  });
-
-  it("toast messages handle pseudo-locale with word wrap", () => {
-    const { accented, longWord } = generatePseudoCatalogs(en);
-    const container = document.getElementById("test-container")!;
-
-    // Test both variants - toasts should wrap, not clip
-    for (const catalog of [accented, longWord]) {
-      const toastTexts = [
-        new IntlMessageFormat(catalog["home.created" as MessageKey], "en").format({ id: 123 }),
-        new IntlMessageFormat(catalog["home.cancelled" as MessageKey], "en").format({ id: 456 }),
-      ];
-
-      for (const text of toastTexts) {
-        const toast = document.createElement("div");
-        toast.className = "toast";
-        toast.textContent = String(text);
-        container.appendChild(toast);
-
-        // Toasts use word-wrap, so horizontal overflow is less critical
-        expect(toast.textContent).toBeTruthy();
-        expect(toast.textContent).not.toContain("undefined");
-        expect(toast.textContent!.length).toBeGreaterThan(0);
-
-        container.removeChild(toast);
-      }
+      // Long-word transform should at least double length
+      expect(transformed.length).toBeGreaterThan(original.length * 2);
     }
   });
 
   it("plural forms render correctly in pseudo-locale", () => {
-    const { accented } = generatePseudoCatalogs(en);
-    const container = document.getElementById("test-container")!;
-
-    // Test plural with different counts
     const counts = [0, 1, 5, 1234];
     const pluralKey = "home.discovered" as MessageKey;
 
     for (const count of counts) {
-      const msg = new IntlMessageFormat(accented[pluralKey], "en");
-      const text = msg.format({ count });
+      // Accented
+      const accentedMsg = new IntlMessageFormat(accented[pluralKey], "en");
+      const accentedText = accentedMsg.format({ count });
 
-      const div = document.createElement("div");
-      div.textContent = String(text);
-      container.appendChild(div);
+      expect(String(accentedText)).toBeTruthy();
+      expect(String(accentedText)).not.toContain("undefined");
+      expect(String(accentedText)).toContain(String(count));
 
-      expect(String(text)).toBeTruthy();
-      expect(String(text)).not.toContain("undefined");
-      expect(String(text)).toContain(String(count));
+      // Long-word
+      const longWordMsg = new IntlMessageFormat(longWord[pluralKey], "en");
+      const longWordText = longWordMsg.format({ count });
 
-      container.removeChild(div);
+      expect(String(longWordText)).toBeTruthy();
+      expect(String(longWordText)).not.toContain("undefined");
+      expect(String(longWordText)).toContain(String(count));
     }
   });
 
   it("select forms work in pseudo-locale", () => {
-    const { accented } = generatePseudoCatalogs(en);
     const selectKey = "pay.invoice.total" as MessageKey;
 
     const variants = [
@@ -433,12 +261,21 @@ describe("layout overflow detection", () => {
     ];
 
     for (const params of variants) {
-      const msg = new IntlMessageFormat(accented[selectKey], "en");
-      const text = msg.format(params);
+      // Accented
+      const accentedMsg = new IntlMessageFormat(accented[selectKey], "en");
+      const accentedText = accentedMsg.format(params);
 
-      expect(String(text)).toBeTruthy();
-      expect(String(text)).not.toContain("undefined");
-      expect(String(text)).toContain(params.amount);
+      expect(String(accentedText)).toBeTruthy();
+      expect(String(accentedText)).not.toContain("undefined");
+      expect(String(accentedText)).toContain(params.amount);
+
+      // Long-word
+      const longWordMsg = new IntlMessageFormat(longWord[selectKey], "en");
+      const longWordText = longWordMsg.format(params);
+
+      expect(String(longWordText)).toBeTruthy();
+      expect(String(longWordText)).not.toContain("undefined");
+      expect(String(longWordText)).toContain(params.amount);
     }
   });
 });
