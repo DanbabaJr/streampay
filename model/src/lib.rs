@@ -15,10 +15,15 @@ pub use action::{Action, ActionSequence};
 pub use errors::ModelError;
 pub use events::ModelEvent;
 pub use math::{
-    available_amount, cancel_amounts, elapsed_seconds, fee_amount, streamed_at, validate_capacity,
+    accrual_clock, available_amount, cancel_amounts, elapsed_seconds, fee_amount, resume_shift,
+    streamed_at, streamed_at_rate_schedule, streamed_at_schedule, validate_capacity,
+    ModelRateSegment,
 };
 pub use model::{ModelMutations, StreamPayModel};
-pub use seeds::all_seeded_scenarios;
+pub use seeds::{
+    all_seeded_scenarios, generate_sequence, generate_sequence_with_rng, SeedExpander,
+    GENERATED_SEQUENCE_LEN, SEED_EXPANSION_VERSION,
+};
 pub use types::{
     ModelFeeScan, ModelStream, ModelStreamStatus, ModelTreasury, ModelTreasuryStatus,
     BPS_DENOMINATOR, MAX_DURATION_SECONDS, MAX_FEE_BPS, MAX_PAGE_SIZE,

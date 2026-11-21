@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/operator_key_rotated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a sponsor rotates its authorized operator (relayer) key. The previous operator key stops validating relay signatures immediately.",
+  "properties": {
+    "new_operator_key": {
+      "contentEncoding": "base64",
+      "description": "32-byte hash, base64-encoded on the registry surface.",
+      "type": "string",
+      "x-soroban-type": "BytesN<32>"
+    }
+  },
+  "required": [
+    "new_operator_key"
+  ],
+  "title": "OperatorKeyRotated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "operator_key_rotated",
+    "fingerprint": "sha256:e173c61697b4045d0fb1e94358fe8b4675bfca312369ac887f2ff23f21fb413b",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        },
+        {
+          "description": "Soroban symbol (a short upper-/lower-case tag, not free text).",
+          "type": "string",
+          "x-soroban-type": "Symbol"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "sponsor",
+        "type": "Address"
+      },
+      {
+        "name": "kind",
+        "type": "Symbol"
+      }
+    ]
+  }
+}

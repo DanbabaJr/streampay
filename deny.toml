@@ -8,6 +8,19 @@ ignore = [
     # author but stable, and no fixed version exists. Not in the runtime
     # funds path. Re-review by 2027-04 or when soroban-sdk drops it.
     "RUSTSEC-2024-0436",
+    # RUSTSEC-2026-0387 (`crypto-bigint`, "timing variability in operations
+    # intended to be constant-time"): transitive and unreachable from here. It
+    # enters through soroban-env-host 29.0.1 -> elliptic-curve 0.13.8, and
+    # 0.13.8 requires crypto-bigint 0.5.x, so the upstream fix (>=0.7.6) cannot
+    # be selected: `cargo update -p crypto-bigint` locks 0 packages, and
+    # soroban-sdk 29.0.1 is already the current release. The edge is host-side
+    # only — `cargo tree --target wasm32v1-none -p streampay-contract
+    # -e normal` contains no crypto-bigint, so it is not linked into the
+    # published contract Wasm; it runs in the env host under tests and
+    # simulation, where this arithmetic is public-key signature verification
+    # rather than a secret scalar. Drop the ignore when soroban-sdk moves off
+    # the RustCrypto 0.13 stack.
+    "RUSTSEC-2026-0387",
 ]
 
 [licenses]

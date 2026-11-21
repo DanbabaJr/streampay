@@ -1,0 +1,41 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "cancel-scheduled",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
+  "provenance": "schedule_test::cancel_before_window_refunds_and_blocks_execution: cancelled before execute_after, full (deposit + fee) escrow refunded to the sender; ScheduledIntentCancelled as that test asserts it.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAQY2FuY2VsX3NjaGVkdWxlZAAAAAIAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAABQAAAAAAAAABAAAAAAAAAAAAAAABFEbSLAAAAEDnunFJIH8xqLY5iH5ReR4fWYU29uiyaw7sn+3TzSDHyztRbeD7/uwIY9XvcLKZx0jWXtfTVr9FgRTjr1YJ/iQI",
+  "resultXdr": "AAAAAQ==",
+  "eventsXdr": [
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABwAAAAEAAAAAAAAAAgAAAA8AAAAac2NoZWR1bGVkX2ludGVudF9jYW5jZWxsZWQAAAAAAAUAAAAAAAAAAQAAABEAAAABAAAAAgAAAA8AAAAGcmVmdW5kAAAAAAAKAAAAAAAAAAAAAAACVBsmQAAAAA8AAAAGc2VuZGVyAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD"
+  ],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+      "function": "cancel_scheduled",
+      "args": {
+        "sender": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        "intent_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": null
+    },
+    "events": [
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "name": "ScheduledIntentCancelled",
+        "topics": {
+          "intent_id": "1"
+        },
+        "data": {
+          "refund": "10001000000",
+          "sender": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+read instance Governor
+read persistent Treasury(token)
+write persistent Treasury(token)
+event FeeWithdrawn
+transfer treasury payout

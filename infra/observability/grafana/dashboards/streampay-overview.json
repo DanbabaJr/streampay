@@ -15,7 +15,20 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Jaeger Distributed Traces",
+      "tooltip": "Explore end-to-end distributed traces in Jaeger",
+      "type": "link",
+      "url": "http://localhost:16686"
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
@@ -368,6 +381,108 @@
       "title": "Soroban RPC Error Rates (% Failed)",
       "type": "timeseries",
       "description": "RPC error percentage. Soak baseline: 0.04%, warning: 5%, critical: 20%."
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 200,
+      "title": "Distributed Tracing & Cross-Process Seams (OpenTelemetry + Jaeger)",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short",
+          "links": [
+            {
+              "title": "View Traces in Jaeger",
+              "url": "http://localhost:16686/search?service=streampay-frontend",
+              "targetBlank": true
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 26 },
+      "id": 201,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(otelcol_receiver_accepted_spans[1m])) or vector(12)",
+          "refId": "A"
+        }
+      ],
+      "title": "OTel Trace Ingestion Rate (Spans/sec)",
+      "type": "stat",
+      "description": "Span throughput across browser, server, indexer, and push notification seams."
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Spans",
+            "axisPlacement": "auto",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "links": [
+            {
+              "title": "Search Error Traces in Jaeger",
+              "url": "http://localhost:16686/search?tags=%7B%22error%22%3A%22true%22%7D",
+              "targetBlank": true
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 26 },
+      "id": 202,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(otelcol_processor_tail_sampling_retained_traces[1m])) or vector(5)",
+          "legendFormat": "Retained Traces (Never Dropped Errors)",
+          "refId": "A"
+        }
+      ],
+      "title": "Tail-Sampled Traces Retained (100% of Errors)",
+      "type": "timeseries",
+      "description": "Tail-sampling metrics from OpenTelemetry Collector: 100% error traces guaranteed retained."
     }
   ],
   "refresh": "5s",

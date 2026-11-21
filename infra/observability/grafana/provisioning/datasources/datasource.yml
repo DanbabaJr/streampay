@@ -10,3 +10,23 @@ datasources:
     jsonData:
       timeInterval: 5s
       httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherRegex: "(?:traceID|trace_id)=(\\w+)"
+          name: Trace
+          url: "$${__value.raw}"
+
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+    jsonData:
+      tracesToLogs:
+        datasourceUid: Prometheus
+      nodeGraph:
+        enabled: true

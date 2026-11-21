@@ -4,15 +4,16 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from '../src/config.js';
 import { CLASS_CLIFFS } from '../src/cliff.js';
 
 // dist/test/config-example.test.js → up 2 = infra/ttl-sentinel/
-const EXAMPLE = new URL('../../ttl-sentinel.config.example.json', import.meta.url);
+const EXAMPLE = fileURLToPath(new URL('../../ttl-sentinel.config.example.json', import.meta.url));
 
 test('the example config parses and validates', () => {
-  const cfg = loadConfig({ configPath: EXAMPLE.pathname, env: {} });
+  const cfg = loadConfig({ configPath: EXAMPLE, env: {} });
 
   assert.equal(cfg.contractId.length > 0, true, 'example must set a contract id');
   assert.equal(cfg.extender.enabled, false, 'the extender must ship disabled');
@@ -22,7 +23,7 @@ test('the example config parses and validates', () => {
 });
 
 test('the example schedule keeps warnings inside every class cliff', () => {
-  const cfg = loadConfig({ configPath: EXAMPLE.pathname, env: {} });
+  const cfg = loadConfig({ configPath: EXAMPLE, env: {} });
 
   for (const [cls, s] of Object.entries(cfg.schedules)) {
     const cliff = CLASS_CLIFFS[cls as keyof typeof CLASS_CLIFFS].worstCaseLedgers;
@@ -34,7 +35,7 @@ test('the example schedule keeps warnings inside every class cliff', () => {
 });
 
 test('the example never points the sentinel at a secret baked into the file', () => {
-  const cfg = loadConfig({ configPath: EXAMPLE.pathname, env: {} });
+  const cfg = loadConfig({ configPath: EXAMPLE, env: {} });
 
   // Only the *name* of the env var is configurable; a literal secret in a
   // config file would be committed by accident sooner or later.

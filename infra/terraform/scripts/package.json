@@ -1,0 +1,16 @@
+{
+  "name": "streampay-iac-checks",
+  "private": true,
+  "description": "Offline structural checks for the rendered Terraform bundles: docker-compose hardening, k8s manifests, and a plaintext-secret scan.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "check:bundle": "node check_render.mjs --bundle",
+    "check:manifests": "node check_render.mjs --manifests"
+  },
+  "dependencies": {
+    "yaml": "^2.4.1"
+  }
+}

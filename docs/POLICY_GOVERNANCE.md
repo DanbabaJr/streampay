@@ -47,3 +47,36 @@ The module operates under three core governance pillars:
 | **Admin attempts double initialization** | Transaction panics and reverts | Contract strictly enforces one-time initialization; double-initialization panics with `"policy already initialized"`. |
 | **Non-proposed party attempts to accept handoff** | Transaction panics with auth failure | `policy_accept_handoff` requires `proposed_admin.require_auth()`; only the explicitly nominated address can authorize acceptance. |
 | **Storage TTL expiration of policy entries** | Policy entry archived if untouched for extended periods | Every policy read/mutation extends entry TTLs with `TTL_THRESHOLD_LEDGERS` (200,000 ledgers) and `TTL_EXTEND_LEDGERS` (500,000 ledgers). In addition, the off-chain `infra/ttl-sentinel` monitors live ledger cliff thresholds across all classes. |
+
+---
+
+## 3. Stream Policy Floors and Grandfathering Semantics
+
+To prevent resource-exhaustion attacks, dust spam, and nonsensical configurations (e.g. 1-second streams with astronomical rates or dust deposits), StreamPay includes governance-managed policy floors and ceilings:
+
+### Configuration Parameters
+Stored in `StreamPolicy`:
+- `min_deposit`: Minimum deposit required for a stream.
+- `min_duration`: Minimum stream duration in seconds.
+- `max_duration`: Maximum stream duration in seconds.
+- `min_rate`: Minimum accrual rate (`deposit / duration`) in tokens/second.
+- `max_rate`: Maximum accrual rate (`deposit / duration`) in tokens/second.
+
+### Resolution Hierarchy
+- **Token-Specific Policy**: Persisted under `PolicyDataKey::StreamPolicy(Address)`. Takes highest precedence.
+- **Global Default Policy**: Persisted under `PolicyDataKey::GlobalStreamPolicy`. Used when no token-specific policy is configured.
+- **Unset (Default)**: If neither exists, stream parameters are constrained only by fundamental contract limits (`deposit > 0`, `duration >= 1`, `duration <= MAX_DURATION_SECONDS`, `capacity`).
+
+### Enforcement & Grandfathering Precedence
+1. **Stream Creation (`create_stream`, `create_streams`)**:
+   - Strictly enforces all floors and ceilings: `min_deposit`, `min_duration`, `max_duration`, `min_rate`, `max_rate`.
+   - Violations return typed, append-only errors (`PolicyDepositBelowFloor`, `PolicyDurationBelowFloor`, `PolicyDurationAboveCeiling`, `PolicyRateBelowFloor`, `PolicyRateAboveCeiling`).
+2. **Top-Up (`top_up`)**:
+   - **Grandfathering Guarantee**: Stream duration is fixed at creation time and grandfathered. A subsequent increase in `min_duration` or decrease in `max_duration` does **not** block top-ups on already-running streams.
+   - **Violation Rule**: The new total deposit (`deposit + top_up_amount`) and resulting accrual rate (`new_deposit / duration`) must respect `min_deposit`, `min_rate`, and `max_rate`.
+3. **Cancellation (`cancel_stream`)**:
+   - Under the **anti-brick invariant**, policy changes **never** obstruct or modify stream cancellations. Senders and recipients can always settle and withdraw accrued or unaccrued funds regardless of policy state.
+
+### Governance Timelock Integration Hook
+Currently, `set_stream_policy` is gated by the treasury governor (`treasury::require_governor`). When governance timelocks are fully deployed across administrative operations, `set_stream_policy` will hook into the timelocked proposal and execution queue (analogous to `propose_upgrade` and `execute_upgrade`), ensuring community review periods before parameter changes take effect.
+

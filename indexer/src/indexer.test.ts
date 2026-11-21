@@ -8,26 +8,21 @@ import * as http from "node:http";
 import { StreamStore } from "./store.js";
 import { createApp } from "./index.js";
 import { decodeEvent } from "./decoder.js";
-import type { RpcEvent } from "./types.js";
+import type { DecodedEvent, RpcEvent } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function getFixturePath(): string {
-  const candidates = [
-    path.resolve(__dirname, "../fixtures/events-fixture.json"),
-    path.resolve(__dirname, "../test/events-fixture.json"),
-    path.resolve(process.cwd(), "fixtures/events-fixture.json"),
-    path.resolve(process.cwd(), "test/events-fixture.json"),
-    path.resolve(process.cwd(), "indexer/test/events-fixture.json"),
-    path.resolve(process.cwd(), "indexer/fixtures/events-fixture.json"),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) {
-      return c;
-    }
-  }
-  throw new Error("Cannot locate events-fixture.json in any expected path");
+  // Single source of truth. The former `test/events-fixture.json` copy was
+  // removed (issue #546): a tolerant multi-candidate loader let a second copy
+  // silently satisfy the test while the pipeline consumed the canonical one.
+  // The fixture-dedupe guard test fails if a duplicate path reappears.
+  const canonical = path.resolve(__dirname, "../fixtures/events-fixture.json");
+  if (fs.existsSync(canonical)) return canonical;
+  const fromCwd = path.resolve(process.cwd(), "indexer/fixtures/events-fixture.json");
+  if (fs.existsSync(fromCwd)) return fromCwd;
+  throw new Error(`Cannot locate the canonical events fixture at ${canonical}`);
 }
 
 function fetchJson(url: string): Promise<{ status: number; data: any }> {
@@ -65,7 +60,7 @@ describe("Indexer Integration Tests", () => {
       assert.equal(store.getState("cursor"), undefined);
 
       // Ingest fixture events
-      const decodedEvents = fixtureEvents.map(decodeEvent);
+      const decodedEvents = fixtureEvents.map((event) => decodeEvent(event));
       store.ingestPage(decodedEvents, "120", 120);
 
       // Cursor check
@@ -163,6 +158,165 @@ describe("Indexer Integration Tests", () => {
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
+    } finally {
+      if (fs.existsSync(testDbPath)) {
+        try {
+          fs.unlinkSync(testDbPath);
+        } catch {}
+      }
+    }
+  });
+
+  it("streams events via SSE with live broadcast, address filtering, and Last-Event-ID replay", async () => {
+    const testDbPath = path.resolve(__dirname, `test-indexer-sse-${Date.now()}.sqlite`);
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
+
+    try {
+      const store = new StreamStore(testDbPath);
+      const app = createApp(store);
+      const server = http.createServer(app);
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      const addressInfo = server.address() as { port: number };
+      const baseUrl = `http://127.0.0.1:${addressInfo.port}`;
+
+      const addrA = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4";
+      const addrB = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M";
+      const addrC = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+      // Connect SSE client subscribed to addrA
+      const sseChunksA: string[] = [];
+      const reqA = http.get(`${baseUrl}/events/stream?address=${addrA}`, (res) => {
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.headers["content-type"], "text/event-stream");
+        assert.equal(res.headers["cache-control"], "no-cache, no-transform");
+        assert.equal(res.headers["x-accel-buffering"], "no");
+
+        res.on("data", (chunk) => {
+          sseChunksA.push(chunk.toString());
+        });
+      });
+
+      // Wait a moment for connection to establish
+      await new Promise((r) => setTimeout(r, 100));
+
+      // 1. Ingest event for stream 100 where recipient is addrA
+      const event1: DecodedEvent = {
+        id: "evt-100-create",
+        pagingToken: "100",
+        ledger: 200,
+        ledgerClosedAt: "2026-10-17T12:00:00Z",
+        contractId: "C123",
+        name: "stream_created",
+        streamId: "100",
+        data: {
+          sender: addrB,
+          recipient: addrA,
+          token: "C_XLM",
+          deposit: "5000",
+          start_time: "1000",
+          end_time: "2000",
+          cancelable: true,
+        },
+      };
+
+      store.ingest(event1);
+
+      // Wait for event to arrive at client A
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timeout waiting for SSE event1")), 3000);
+        const check = setInterval(() => {
+          const allText = sseChunksA.join("");
+          if (allText.includes("evt-100-create") && allText.includes("stream_created")) {
+            clearTimeout(timeout);
+            clearInterval(check);
+            resolve();
+          }
+        }, 50);
+      });
+
+      // 2. Ingest event for stream 200 where neither sender nor recipient is addrA (between addrB and addrC)
+      const event2: DecodedEvent = {
+        id: "evt-200-unrelated",
+        pagingToken: "200",
+        ledger: 205,
+        ledgerClosedAt: "2026-10-17T12:05:00Z",
+        contractId: "C123",
+        name: "stream_created",
+        streamId: "200",
+        data: {
+          sender: addrB,
+          recipient: addrC,
+          token: "C_XLM",
+          deposit: "1000",
+          start_time: "1000",
+          end_time: "2000",
+          cancelable: false,
+        },
+      };
+
+      store.ingest(event2);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const textAfterUnrelated = sseChunksA.join("");
+      assert.equal(
+        textAfterUnrelated.includes("evt-200-unrelated"),
+        false,
+        "Scoped subscriber must NOT receive events for other addresses"
+      );
+
+      // Clean up client A
+      reqA.destroy();
+
+      // 3. Test Last-Event-ID replay
+      const event3: DecodedEvent = {
+        id: "evt-100-withdrawn",
+        pagingToken: "300",
+        ledger: 210,
+        ledgerClosedAt: "2026-10-17T12:10:00Z",
+        contractId: "C123",
+        name: "withdrawn",
+        streamId: "100",
+        data: {
+          withdrawn_total: "1500",
+        },
+      };
+      store.ingest(event3);
+
+      // New client reconnecting with Last-Event-ID: evt-100-create
+      const sseReplayChunks: string[] = [];
+      const reqReplay = http.get(
+        `${baseUrl}/events/stream?address=${addrA}`,
+        {
+          headers: {
+            "Last-Event-ID": "evt-100-create",
+          },
+        },
+        (res) => {
+          res.on("data", (chunk) => {
+            sseReplayChunks.push(chunk.toString());
+          });
+        }
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timeout waiting for replayed event")), 3000);
+        const check = setInterval(() => {
+          const replayText = sseReplayChunks.join("");
+          if (replayText.includes("evt-100-withdrawn")) {
+            clearTimeout(timeout);
+            clearInterval(check);
+            resolve();
+          }
+        }, 50);
+      });
+
+      reqReplay.destroy();
+
+      // Close server and store
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      store.close();
     } finally {
       if (fs.existsSync(testDbPath)) {
         try {

@@ -14,6 +14,8 @@ services:
       - RPC_URL=https://soroban-testnet.stellar.org
       - CONTRACT_ID=CDUMMYSTREAMCONTRACT123
       - POLL_INTERVAL_MS=5000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=streampay-indexer
     command: ["node", "dist/src/index.js"]
     ports:
       - "9090:9090"
@@ -22,6 +24,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    depends_on:
+      - otel-collector
     networks:
       - streampay-net
 
@@ -36,6 +40,8 @@ services:
       - NODE_ENV=production
       - PORT=9091
       - SWEEP_INTERVAL_MS=60000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=streampay-reconciler
     command: ["node", "dist/src/index.js"]
     ports:
       - "9091:9091"
@@ -44,6 +50,36 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    depends_on:
+      - otel-collector
+    networks:
+      - streampay-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55.0
+    container_name: streampay-jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger Query UI
+      - "14268:14268" # Jaeger HTTP collector
+    networks:
+      - streampay-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: streampay-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics exporter
+    depends_on:
+      - jaeger
     networks:
       - streampay-net
 
@@ -66,6 +102,7 @@ services:
     depends_on:
       - indexer
       - reconciler
+      - otel-collector
     networks:
       - streampay-net
 
@@ -100,6 +137,7 @@ services:
       - "3001:3000"
     depends_on:
       - prometheus
+      - jaeger
     networks:
       - streampay-net
 

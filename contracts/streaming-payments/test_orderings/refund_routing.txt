@@ -1,0 +1,11 @@
+read instance ContractFrozen
+read persistent Stream(1)
+write persistent RefundTarget(1)
+event StreamRefundTargetChanged
+read instance ContractFrozen
+read persistent Stream(1)
+read persistent StreamPause(1)
+write persistent Stream(1)
+event StreamCancelled
+transfer recipient payout
+transfer sender refund

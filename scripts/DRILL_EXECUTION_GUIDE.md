@@ -71,6 +71,22 @@ This drill:
 
 **Note**: The indexer corruption drill uses a mock SQLite database for simulation. Provide a custom path via the third argument if you have a real indexer instance.
 
+### Scenario 4: Key Rotation Drill
+
+```bash
+cd scripts && npm install && npm run drill:key-rotation
+```
+
+Unlike scenarios 1–3, this drill needs no `<contract_id>` or `<token_id>`: it
+builds the Wasm, deploys a **fresh** contract to testnet, rotates the treasury
+governor and policy admin via the two-step handoffs, and asserts that no
+privileged operation survives an old key. It prints a pass/fail matrix and
+writes it to `logs/key_rotation_matrix_<timestamp>.json`. See
+[docs/rotation-runbook.md](../docs/rotation-runbook.md) for what each row
+means and [`.github/workflows/key-rotation-drill.yml`](../.github/workflows/key-rotation-drill.yml)
+for the quarterly schedule. All keys are generated in-memory and funded by
+friendbot; nothing secret is written anywhere.
+
 ## Execution Notes
 
 ### Network Issues

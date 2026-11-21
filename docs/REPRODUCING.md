@@ -99,6 +99,40 @@ cd streampay
 
 ---
 
+### Option C: Verify a Signed Attestation (no digest to carry around)
+
+Options A and B require you to already possess a trusted digest, which is the
+weak point: `SHA256SUMS` is published next to the artifact it describes, so
+anyone who can rewrite the release can rewrite the sums too. The attestation
+chain replaces "a number you brought with you" with a signature you check
+against a key pinned in your own checkout.
+
+```bash
+# Requires only bash + openssl: no stellar-cli, no Docker, no Rust toolchain
+./scripts/verify_wasm.sh /path/to/streampay_contract.wasm --tag v0.5.0 --require-repro
+```
+
+This recomputes the digest, fetches `attestation.json` and its detached Ed25519
+signature, verifies the signature, and asserts the signed payload names the
+bytes you hold. See [`ATTESTATION.md`](./ATTESTATION.md) for the payload format
+and the component-by-component threat model, and
+[`adr/0011`](adr/0011-attestation-signing-scheme.md) for why a repository key
+rather than cosign keyless.
+
+To prove reproducibility directly rather than trusting the attestation's claim:
+
+```bash
+# Two independent hermetic builds of the same commit, wasm AND spec JSON byte-diffed
+./scripts/reproducible_build.sh --ref v0.5.0
+```
+
+If the builds drift, the report names the component that is non-deterministic,
+gives both digests and the first differing byte offset, and distinguishes a
+length change (embedded path or timestamp) from an equal-length change (codegen
+or link ordering).
+
+---
+
 ## 4. Two Build Paths
 
 ### 1. Hermetic (Docker) Path (Default & Recommended)
@@ -167,7 +201,32 @@ StreamPay release workflows publish GitHub artifact attestations (`actions/attes
 
 ---
 
-## 7. How to Report a Digest Mismatch
+## 7. Expected Digest Changes and Operator Notification
+
+A legitimate source change (feature, refactor, or the size work in
+[`WASM_SIZE.md`](WASM_SIZE.md), issue #58) produces a new Wasm digest by
+design. The workflow for a digest change is:
+
+1. The PR that changes the bytes states so explicitly and links the before/
+   after size report; reviewers approve the digest move as part of the code
+   change — a digest difference against the previous release is *expected*,
+   not an incident.
+2. Operators and integrators pinning `wasm_sha256` / `SHA256SUMS` /
+   `UPGRADE_DIGESTS.txt` must repin to the new release asset **before** the
+   upgrade is promoted. Tools watching deployed code hashes should expect a
+   mismatch between the old pinned digest and the upgraded instance until
+   they refresh.
+3. The canonicalized interface hash (`scripts/contract_interface_hash.sh`)
+   also moves; the promote run must set `schema_change_ack: true` (CLI gate:
+   `SCHEMA_CHANGE_ACK=1`) so `deployments/interface/<env>.sha256` is
+   re-baselined and `canary_check.sh`'s schema-continuity check compares
+   against the new interface.
+4. If a digest mismatch appears on a rebuild of an **existing, unchanged**
+   tag, that is not this flow — follow section 8.
+
+---
+
+## 8. How to Report a Digest Mismatch
 
 If you rebuild the contract from a published release tag and obtain a digest that does not match the published `SHA256SUMS` or `release-metadata.json`:
 

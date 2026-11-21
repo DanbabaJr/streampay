@@ -1,0 +1,16 @@
+{
+  "name": "streampay-conformance-vectors",
+  "private": true,
+  "description": "Deterministic builder for sdks/vectors/*.json (shared conformance fixtures; not a published package).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build-vectors.mjs"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.1"
+  }
+}

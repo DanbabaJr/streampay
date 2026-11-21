@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_cancelled.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a stream is cancelled. The recipient's accrued balance and the sender's refund are both paid atomically in the same transaction.",
+  "properties": {
+    "cancelled_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "recipient_amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender_amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "cancelled_by",
+    "recipient_amount",
+    "sender_amount"
+  ],
+  "title": "StreamCancelled",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_cancelled",
+    "fingerprint": "sha256:2b3062308e34986aea101c7c25e12965e40b9b9143475359a87741417bca71a7",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

@@ -35,7 +35,7 @@ jobs:
           targets: wasm32v1-none
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload rehearsal evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rehearsal-evidence
           path: evidence/rehearsal/

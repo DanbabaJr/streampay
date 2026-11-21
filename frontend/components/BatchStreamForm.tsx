@@ -1,7 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { parseBatchCsv, type BatchStreamEntry } from "@/lib/batch";
+import { fetchAssetMeta, type AssetMeta } from "@/lib/stellar";
+import { formatAmount } from "@/lib/format";
+import { readStreamPolicyAction } from "@/app/actions";
+import type { StreamPolicyView } from "@/lib/stream-types";
+import { useLocale } from "@/lib/i18n/provider";
+import {
+  mapCreationErrorToField,
+  validateBatchCsv,
+  validateTokenContractId,
+  type ValidationOptions,
+} from "@/lib/stream-validation";
 
 export default function BatchStreamForm({
   onCreate,
@@ -13,20 +24,85 @@ export default function BatchStreamForm({
   ) => Promise<boolean>;
 }) {
   const [token, setToken] = useState("");
+  const [loadedMeta, setLoadedMeta] = useState<AssetMeta | null>(null);
   const [csv, setCsv] = useState("");
   const [cancelable, setCancelable] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [policy, setPolicy] = useState<StreamPolicyView | null>(null);
+  // Per-field messages, shown at the field. `formError` is only for
+  // rejections no field can fix. Both stay empty until blur/submit, so the
+  // resting render is unchanged.
+  const [tokenError, setTokenError] = useState("");
+  const [csvError, setCsvError] = useState("");
+  const [formError, setFormError] = useState("");
+
+  const { t, locale, formatToken } = useLocale();
+
+  const assetMeta: AssetMeta = loadedMeta ?? { code: "TOKEN", decimals: 7 };
+
+  const validationOptions: ValidationOptions = {
+    locale,
+    t,
+    policy,
+    decimals: assetMeta.decimals,
+    formatToken,
+  };
+
+  useEffect(() => {
+    let active = true;
+    const trimmed = token.trim();
+    if (trimmed) {
+      fetchAssetMeta(trimmed).then((meta) => {
+        if (active) setLoadedMeta(meta);
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  // Load policy for the shared token, so row bounds are checked pre-submit.
+  useEffect(() => {
+    let active = true;
+    const trimmed = token.trim();
+    const request = trimmed
+      ? readStreamPolicyAction(trimmed)
+      : readStreamPolicyAction();
+    request.then((p) => {
+      if (active) setPolicy(p);
+    });
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  // Stable IDs for ARIA associations (WCAG 1.3.1 / 4.1.2)
+  const formId = useId();
+  const headingId = `${formId}-heading`;
+  const formDescId = `${formId}-desc`;
+  const tokenId = `${formId}-token`;
+  const tokenHintId = `${formId}-token-hint`;
+  const tokenErrorId = `${formId}-token-error`;
+  const csvId = `${formId}-csv`;
+  const csvHintId = `${formId}-csv-hint`;
+  const cancelableId = `${formId}-cancelable`;
+  const errorId = `${formId}-error`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    setError("");
+    setFormError("");
+    const tokenMessage = validateTokenContractId(token, t);
+    setTokenError(tokenMessage ?? "");
+    const csvIssue = validateBatchCsv(csv, validationOptions);
+    setCsvError(csvIssue?.message ?? "");
+    if (tokenMessage || csvIssue) return;
     let entries: BatchStreamEntry[];
     try {
+      // Already parsed by validateBatchCsv; this cannot throw after it passed.
       entries = parseBatchCsv(csv);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setCsvError(reason instanceof Error ? reason.message : String(reason));
       return;
     }
     setBusy(true);
@@ -34,37 +110,105 @@ export default function BatchStreamForm({
       if (await onCreate(token.trim(), entries, cancelable)) {
         setCsv("");
       }
+    } catch (err) {
+      // A rejection after submit maps back to the field that can fix it.
+      const mapped = mapCreationErrorToField(err, t, { kind: "batch" });
+      if (mapped.field === "token") setTokenError(mapped.message);
+      else if (mapped.field === "csv") setCsvError(mapped.message);
+      else setFormError(mapped.message);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form className="card" onSubmit={submit}>
-      <h2>Create payroll batch</h2>
-      <label htmlFor="batch-token">Token contract id (shared by all rows)</label>
+    <form
+      className="card"
+      onSubmit={submit}
+      aria-labelledby={headingId}
+      aria-describedby={formDescId}
+      noValidate
+    >
+      <h2 id={headingId}>Create payroll batch</h2>
+
+      <p id={formDescId} className="sr-only">
+        Create multiple payment streams at once by providing a shared token
+        contract and a CSV list of recipients. Required fields are marked with
+        an asterisk (*).
+      </p>
+
+      {/* Token contract field */}
+      <label htmlFor={tokenId}>
+        Token contract id (shared by all rows){" "}
+        <span aria-hidden="true">*</span>
+        <span className="sr-only">(required)</span>
+      </label>
       <input
-        id="batch-token"
+        id={tokenId}
         type="text"
         required
         placeholder="C… (SAC id)"
         value={token}
-        onChange={(e) => setToken(e.target.value)}
+        onChange={(e) => {
+          setToken(e.target.value);
+          setFormError("");
+          if (tokenError) {
+            setTokenError(validateTokenContractId(e.target.value, t) ?? "");
+          }
+        }}
+        onBlur={() => setTokenError(validateTokenContractId(token, t) ?? "")}
+        aria-describedby={`${tokenHintId} ${tokenErrorId}`}
+        aria-invalid={tokenError ? true : undefined}
+        autoComplete="off"
       />
-      <label htmlFor="batch-csv">CSV rows: address,rate,duration</label>
+      <span id={tokenHintId} className="sr-only">
+        The Stellar Asset Contract ID shared by every stream in this batch.
+        Starts with the letter C.
+      </span>
+      {/* Always present so `aria-describedby` never points at a missing id.
+          The alert role is only set while a message is shown: an empty
+          alert still matches a bare `getByRole("alert")` query. */}
+      <span id={tokenErrorId} className="err" role={tokenError ? "alert" : undefined}>
+        {tokenError}
+      </span>
+
+      {/* CSV field */}
+      <label htmlFor={csvId}>
+        CSV rows: address,rate,duration{" "}
+        <span aria-hidden="true">*</span>
+        <span className="sr-only">(required)</span>
+      </label>
       <textarea
-        id="batch-csv"
+        id={csvId}
         required
         rows={7}
         placeholder={"address,rate,duration\nG…,1000,2592000"}
         value={csv}
-        onChange={(e) => setCsv(e.target.value)}
+        onChange={(e) => {
+          setCsv(e.target.value);
+          setFormError("");
+          if (csvError) {
+            setCsvError(validateBatchCsv(e.target.value, validationOptions)?.message ?? "");
+          }
+        }}
+        onBlur={() =>
+          setCsvError(validateBatchCsv(csv, validationOptions)?.message ?? "")
+        }
+        aria-describedby={`${csvHintId}${csvError ? ` ${errorId}` : ""}`}
+        aria-invalid={csvError ? true : undefined}
       />
+      <span id={csvHintId} className="sr-only">
+        One recipient per line. Columns: Stellar public key, rate in smallest
+        token units per second, duration in seconds. Include a header row
+        (address,rate,duration) or start directly with data rows.
+      </span>
+
+      {/* Cancelable select */}
       <div className="row">
         <div>
-          <label htmlFor="batch-cancelable">Recipients may cancel?</label>
+          <label htmlFor={cancelableId}>Recipients may cancel?</label>
           <select
-            id="batch-cancelable"
+            id={cancelableId}
             value={cancelable ? "yes" : "no"}
             onChange={(e) => setCancelable(e.target.value === "yes")}
           >
@@ -73,13 +217,98 @@ export default function BatchStreamForm({
           </select>
         </div>
       </div>
+
       <p className="muted">
         Rate is in smallest token units per second; duration is in seconds.
         Each deposit is rate × duration and starts immediately. Approve the
         summed deposits (plus any configured fees) before submitting. The
         contract applies this batch atomically.
       </p>
-      {error && <p className="err">{error}</p>}
+
+      {(() => {
+        let previewEntries: BatchStreamEntry[] = [];
+        try {
+          if (csv.trim()) {
+            previewEntries = parseBatchCsv(csv);
+          }
+        } catch {
+          // Incomplete input while typing
+        }
+
+        if (previewEntries.length === 0) return null;
+
+        const totalDeposit = previewEntries.reduce(
+          (sum, e) => sum + BigInt(e.deposit),
+          0n
+        );
+
+        return (
+          <div
+            className="stream-preview"
+            style={{
+              background: "rgba(255, 255, 255, 0.02)",
+              border: "1px solid var(--line)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+              marginTop: "14px",
+              marginBottom: "14px",
+            }}
+            aria-label="Batch stream preview"
+          >
+            <div
+              style={{
+                fontSize: "0.75rem",
+                fontWeight: 700,
+                color: "var(--accent2)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                marginBottom: "8px",
+              }}
+            >
+              Batch Preview
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                gap: "12px",
+              }}
+            >
+              <div>
+                <div className="muted" style={{ fontSize: "0.8rem" }}>
+                  Total Batch Deposit
+                </div>
+                <div className="mono" style={{ fontSize: "1.05rem", fontWeight: 600 }}>
+                  {formatAmount(totalDeposit, assetMeta.decimals)} {assetMeta.code}
+                </div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: "0.8rem" }}>
+                  Streams in Batch
+                </div>
+                <div className="mono" style={{ fontSize: "1.05rem", fontWeight: 600 }}>
+                  {previewEntries.length} stream{previewEntries.length === 1 ? "" : "s"}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* CSV field error — role="alert" so SR reads it immediately (WCAG 4.1.3) */}
+      {csvError && (
+        <p id={errorId} className="err" role="alert" aria-live="assertive">
+          {csvError}
+        </p>
+      )}
+
+      {/* Form-level error, for rejections no field can fix */}
+      {formError && (
+        <p className="err" role="alert" aria-live="assertive">
+          {formError}
+        </p>
+      )}
+
       <button type="submit" disabled={busy}>
         {busy ? "Creating batch…" : "Create batch"}
       </button>

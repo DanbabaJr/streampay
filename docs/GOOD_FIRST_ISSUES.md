@@ -67,7 +67,7 @@ prevents submitting more than available client-side, and calls
 **Difficulty: medium** · TypeScript, Node
 
 UIs need stream history without scanning the chain. Build a small indexer
-worker that polls Soroban RPC `getEvents` for the four StreamPay events
+worker that polls Soroban RPC `getEvents` for the six StreamPay events
 (`stream_id` is the first topic on all of them) and materializes them into a
 queryable store.
 
@@ -79,7 +79,7 @@ the frontend.
 
 **Acceptance criteria:**
 - [ ] Survives restarts: cursor is persisted, no events double-counted.
-- [ ] Handles all four event types, including cancel payouts.
+- [ ] Handles all six event types, including cancel payouts and ownership proposals/acceptances.
 - [ ] Integration test: seed events via the contract test harness or fixture JSON, assert API output.
 - [ ] `README` in `indexer/` with run instructions; CI job runs its tests.
 

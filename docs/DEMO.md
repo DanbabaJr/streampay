@@ -49,17 +49,48 @@ Before starting, ensure your system has the following tools installed:
    ```
 3. **cURL**:
    Required for communicating with Friendbot and Horizon REST endpoints.
-4. **Node.js** ($\ge$ 20, optional for frontend):
+4. **OpenSSL** ($\ge$ 1.1.1):
+   Required to verify the signed release attestation before deploying. Preinstalled
+   on most systems; `openssl version` to check.
+5. **Node.js** ($\ge$ 20, optional for frontend):
    Required only if running the Next.js web application.
 
 ---
 
 ## Option A: One-Command Quickstart
 
-To build the Wasm, fund identities, deploy the contract, create a custom demo asset, and open a live 1-hour stream in a single command:
+To build the Wasm, **prove it against a signed release attestation**, fund
+identities, deploy the contract, create a custom demo asset, and open a live
+1-hour stream in a single command:
 
 ```bash
 ./scripts/deploy_testnet.sh
+```
+
+### The deployment gate
+
+Nothing is deployed until the bytes have been proven — a public chain cannot
+un-deploy, so verification happens *before* the transaction, never after. The
+script runs
+[`scripts/verify_wasm.sh`](../scripts/verify_wasm.sh), which recomputes the
+Wasm digest, fetches the signed attestation for the release, verifies the
+Ed25519 signature against the public key pinned in your own checkout, and
+confirms the attestation names the bytes you hold. See
+[`ATTESTATION.md`](./ATTESTATION.md) for what that does and does not prove.
+
+If you are demoing **unreleased** work, no attestation describes it and the gate
+correctly refuses. Say so deliberately rather than silently:
+
+```bash
+# Deploy the published, provable artifact instead of your local build
+gh release download v0.5.0 --pattern 'streampay_contract.wasm' --dir /tmp
+CONTRACT_WASM=/tmp/streampay_contract.wasm ./scripts/deploy_testnet.sh
+
+# Verify against a specific release tag
+WASM_ATTESTATION_TAG=v0.5.0 ./scripts/deploy_testnet.sh
+
+# Deploy unproven local work to testnet, knowingly (recorded in the summary)
+SKIP_WASM_ATTESTATION=1 ./scripts/deploy_testnet.sh
 ```
 
 ### Expected Terminal Output:
@@ -72,6 +103,19 @@ To build the Wasm, fund identities, deploy the contract, create a custom demo as
 
 ==> Building contract Wasm
     Wasm binary ready at: target/wasm32v1-none/release/streampay_contract.wasm
+
+==> Verifying the Wasm against a signed release attestation
+    no WASM_ATTESTATION_TAG set — resolving the latest published release
+
+==> StreamPay Wasm attestation check
+    artifact : target/wasm32v1-none/release/streampay_contract.wasm
+    sha256   : 7f3c1e9b...  (184320 bytes)
+    attestation: release asset: Neziahtech/streampay@v0.5.0
+    signature  : valid (key attestations/signing-key.pub)
+    digest     : matches the attested wasm_sha256
+============================================================
+  ATTESTATION VERIFIED — this Wasm is the signed release build
+============================================================
 
 ==> Deploying or verifying contract on testnet
     Deploying new contract to testnet (governor: GBUQNYE74F2UKN3J5N2K...)
@@ -139,7 +183,7 @@ curl -sf "https://horizon-testnet.stellar.org/accounts/$(stellar keys address se
 
 ---
 
-### Step 2: Build & Deploy the Contract
+### Step 2: Build, Verify & Deploy the Contract
 
 Build the contract Wasm targeting `wasm32v1-none`:
 
@@ -147,6 +191,27 @@ Build the contract Wasm targeting `wasm32v1-none`:
 cd contracts/streaming-payments
 stellar contract build
 cd ../..
+```
+
+**Verify before you deploy.** A Soroban contract is immutable at its address and
+cannot be un-deployed, so the bytes have to be proven first, not reviewed after.
+This recomputes the digest, fetches the signed attestation, checks the Ed25519
+signature against the key pinned in your checkout, and confirms the attestation
+describes the Wasm you are holding:
+
+```bash
+scripts/verify_wasm.sh target/wasm32v1-none/release/streampay_contract.wasm \
+  --tag v0.5.0 --require-repro
+```
+
+Expect `ATTESTATION VERIFIED`, exit status `0`. **Do not deploy on any other
+result** — a `DIGEST MISMATCH` or a failed signature means the bytes you are
+about to put on chain are not the bytes that were reviewed and signed. If you
+are walking through this on unreleased local code, no attestation describes it;
+reproduce the build yourself instead of deploying blind:
+
+```bash
+scripts/reproducible_build.sh --ref v0.5.0
 ```
 
 Deploy the contract to testnet. The constructor binds the treasury governor at deploy time:
@@ -390,9 +455,76 @@ stellar contract invoke --id "$CONTRACT" --source sender --network testnet -- \
 
 StreamPay maintains on-chain append-only indexes for user streams without requiring an external indexer:
 
+### 10. (Optional) Gas sponsorship — claim for free
+
+Continue from the demo stream (`recipient` still holds no XLM for fees in a
+fresh wallet; that is exactly the case sponsorship solves).
+
+1. **Sponsor registers a budget** — the sponsor account funds its own gas
+   and bounds exposure (here: 500 M units per 1-hour window, 50 M per
+   beneficiary):
+
+   ```bash
+   stellar keys generate sponsor --network testnet
+   curl "https://friendbot.stellar.org?addr=$(stellar keys address sponsor)"
+   stellar contract invoke --id $CONTRACT --source sponsor --network testnet -- \
+     register_sponsor --sponsor $(stellar keys address sponsor) --token $TOKEN \
+     --per_period_limit 500000000 --per_beneficiary_limit 50000000 \
+     --window_seconds 3600 --operator_key <64-hex ed25519 pk>
+   ```
+
+2. **Beneficiary enrolls a consent key** (one-time, paid by the beneficiary;
+   the frontend does this via `enroll_beneficiary` with a generated
+   ed25519 keypair stored in `localStorage`):
+
+   ```bash
+   stellar contract invoke --id $CONTRACT --source recipient --network testnet -- \
+     enroll_beneficiary --beneficiary $(stellar keys address recipient) \
+     --public_key <32-hex ed25519 pk>
+   ```
+
+3. **Relay the claim.** Any funded account can submit; both signatures are
+   over the SHA-256 digest of the canonical message (see
+   `docs/ARCHITECTURE.md` §13.2 — the parity vectors in
+   `sponsor_test.rs` / `lib/sponsor.test.ts` pin the exact bytes):
+
+   ```bash
+   stellar contract invoke --id $CONTRACT --source anyone --network testnet -- \
+     sponsored_withdraw --sponsor $SPONSOR --beneficiary $RECIPIENT \
+     --stream_id 1 --amount 1000000 --nonce 1 --deadline <unix+300> \
+     --operator_sig <64-hex> --beneficiary_sig <64-hex>
+   ```
+
+   Expected: recipient is paid 1 000 000 units, the sponsor's window spend
+   grows by the same amount (`sponsor_period_spend`), and resubmitting the
+   identical call fails with `ClaimNonceReplay` (53). In the frontend this
+   whole step is the **Claim for free** button POSTing
+   `{ intent, beneficiarySig }` to the operator relay.
+
+> **Status:** steps 1–3 are the scripted runbook for this feature; the
+> signature generation was verified end-to-end against the frozen wire
+> vectors in both test suites, but a live testnet run with a screenshot was
+> **not** captured for this PR — it needs a deployed contract, a funded
+> sponsor and a running relay, which the CI environment does not have.
+> `scripts/deploy_testnet.sh` + `npm run dev` reproduce the self-paid demo
+> today; the sponsored path follows the steps above once deployed.
+
 ## Frontend
 
 ```bash
+cd frontend
+cp .env.example .env.local   # paste the contract id (+ sponsor/relay vars for §10)
+npm ci && npm run dev
+```
+
+Connect Freighter (testnet network), import the `sender` seed
+(`stellar keys show sender`) or use any funded testnet account, and create
+streams from the form. The stream list persists across reloads; each row
+links to `/stream/<id>` with a live `available` read and one-click
+**Withdraw max** — or, when a sponsor covers the stream's token
+(`NEXT_PUBLIC_SPONSOR_ADDRESS` + `NEXT_PUBLIC_SPONSOR_RELAY_URL`),
+**Claim for free**: the page shows who pays the network fee and how much of
+the sponsor budget remains before signing the claim intent.
 # Streams where an account is the recipient
 stellar contract invoke --id "$CONTRACT" --source anyone --network testnet -- \
   recipient_streams --recipient "$RECIPIENT" --offset 0 --limit 50
@@ -424,6 +556,33 @@ To view and interact with the stream from the web UI:
    npm run dev
    ```
 3. Open `http://localhost:3000` in your browser. Connect the Freighter browser extension (configured to **Testnet**), import your testnet account seed, and view the live streaming dashboard!
+
+---
+
+## Shareable Payment Links — Freelancer Invoice Walkthrough
+
+Freelancers and DAOs can invoice clients with a single shareable link instead of onboarding payers through a manual wallet tutorial:
+
+### 1. Generating a Payment Link
+From the stream details page (`/stream/[id]`), click **"Copy Shareable Payment Link"**. This generates a deterministic, privacy-blinded URL:
+```text
+https://streampay.finance/pay/eyJkIjp7InZlcnNpb24iOjEsInN0cmVhbUlkIjoiNDIiLCJjb250cmFjdEhpbnQiOiJDRExaRkMiLCJibGluZGVkUmVjaXBpZW50IjoiZjNhOGMyYjQxOTg3ZTIxYSIsInNhbHQiOiI4YzkxYjJjMyJ9LCJjIjoiZDc0MmEzYjEifQ
+```
+
+### 2. Client Opens Invoice (Zero-Login / Zero-Wallet)
+- The client pastes or clicks the link in any browser or messaging app.
+- Messaging apps (Slack, Discord, Telegram, Twitter/X) render rich dynamic OpenGraph cards (e.g. `Active Stream — 500 USDC | StreamPay`).
+- The link resolves directly against the Stellar network client-side.
+- The visitor sees the real-time linear accrual ticker, progress bar, token contract, and stream timeline.
+- **Privacy Guaranteed**: The payee's full Stellar public key is never shown in plain text or leaked to URL unfurlers; it remains protected behind a cryptographic commitment.
+
+### 3. Claiming with Freighter
+1. The freelancer clicks **"Connect Freighter & Claim"**.
+2. Freighter opens to connect the wallet.
+3. StreamPay verifies that the connected wallet address matches the blinded commitment.
+4. If verified, the **"Claim [Amount] Tokens"** action unlocks.
+5. Clicking Claim submits an atomic `withdraw_max` transaction to Stellar Soroban.
+6. A verified **Receipt View** appears with the transaction hash and a direct link to Stellar Expert.
 
 ---
 

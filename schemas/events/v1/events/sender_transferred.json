@@ -1,0 +1,57 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sender_transferred.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the recipient's consent executes a proposed sender transfer. `sender_from` / `sender_to` name both sides of the hop; the accounting fields of the stream are untouched.",
+  "properties": {
+    "nonce": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "refund_rights_transferred": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "sender_from": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "sender_to": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender_from",
+    "sender_to",
+    "nonce",
+    "refund_rights_transferred"
+  ],
+  "title": "SenderTransferred",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sender_transferred",
+    "fingerprint": "sha256:db820aba8791ee0f230ae1ae551812251458457ad061bd13b996b21a2c18cf0d",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

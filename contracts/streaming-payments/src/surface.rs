@@ -8,7 +8,7 @@
 //!
 //! * the generated test matrix (`error_surface_test.rs`) can prove that every
 //!   *reachable* branch fires its declared code, and
-//! * `docs/ERRORS.md` is generated from the same table (see
+//! * `docs/ERROR_SURFACE.md` is generated from the same table (see
 //!   `examples/error_surface_doc.rs`) and diffed in CI.
 //!
 //! Because the table is data, a hand-maintained list of "which test covers
@@ -56,6 +56,13 @@ pub enum Branch {
     // --------------------------------------------------------------- top_up
     TopUpAmountNonPositive,
     TopUpDepositOverflow,
+    // ------------------------------------------------------------- disputes
+    CancelDuringDispute,
+    TopUpDuringDispute,
+    RaiseDisputeAlreadyActive,
+    DisputeNotOpen,
+    ExpireDisputeTooEarly,
+    ResolveCallerNotSender,
     // ------------------------------------------------- shared storage/math
     /// `stream.rs::get_stream` finds no stored entry.
     StreamNotFound,
@@ -84,6 +91,26 @@ pub enum Branch {
     /// `withdraw_treasury`: amount exceeds fees collected minus fees already
     /// withdrawn.
     WithdrawTreasuryExceedsBalance,
+    // ------------------------------------------------------- sponsor registry
+    /// `register_sponsor`: a budget cap (period or per-beneficiary) is <= 0.
+    RegisterLimitNonPositive,
+    // ---------------------------------------------------- sponsored_withdraw
+    SponsoredWithdrawAmountNonPositive,
+    SponsoredWithdrawAmountExceedsAvailable,
+    /// No sponsor budget is registered under the caller-supplied address.
+    SponsorNotFound,
+    /// The sponsor's registered budget is paused.
+    SponsorInactive,
+    /// The beneficiary never enrolled an ed25519 consent key.
+    BeneficiaryNotEnrolled,
+    /// The relayed claim was submitted after its signed `deadline`.
+    ClaimExpired,
+    /// The claim's nonce was already spent for this (sponsor, beneficiary).
+    ClaimNonceReplay,
+    /// The claim would push the sponsor's current-period spend over its cap.
+    SponsorBudgetPeriodExceeded,
+    /// The claim would push this beneficiary's window spend over its cap.
+    SponsorBudgetBeneficiaryExceeded,
     // --------------------------------------------------- scheduled intents
     /// No stored intent exists for the supplied id.
     IntentNotFound,
@@ -147,13 +174,218 @@ pub enum Branch {
     WithdrawDelegatedCapExceededStream,
     /// `revoke_agent`: caller is not the stream recipient.
     RevokeAgentNotRecipient,
+    // ---------------------------------------------------- create_streams_batch
+    /// `create_streams_batch`: entries is empty.
+    CreateBatchEmpty,
+    /// `create_streams_batch`: entries length exceeds MAX_BATCH.
+    CreateBatchTooLarge,
+    // ------------------------------------------------ upgrade & freeze
+    /// The contract is currently frozen for maintenance or upgrade.
+    ContractFrozen,
+    /// Storage migration was invoked while the contract is not frozen.
+    MigrationNotFrozen,
+    /// `execute_upgrade`: no upgrade proposal is pending.
+    ExecuteUpgradeNoPending,
+    /// `cancel_upgrade`: no upgrade proposal is pending.
+    CancelUpgradeNoPending,
+    /// `execute_upgrade`: the timelock delay has not yet expired.
+    TimelockNotExpired,
+    /// `propose_upgrade`: the proposed delay is shorter than MIN_UPGRADE_DELAY_SECONDS.
+    UpgradeDelayTooShort,
+    /// `migrate_storage`: the schema has already been migrated to the target version.
+    AlreadyMigrated,
+    // ------------------------------------------------ stream policy floors
+    PolicyRateBelowFloor,
+    PolicyRateAboveCeiling,
+    PolicyDurationBelowFloor,
+    PolicyDurationAboveCeiling,
+    PolicyDepositBelowFloor,
+    // ------------------------------------------------------------- oracle
+    InvalidOracleThreshold,
+    OraclePublishersNotConfigured,
+    OracleReportTooOld,
+    NotOraclePublisher,
+    // ---------------------------------------------- ownership transfer
+    /// `propose_ownership_transfer`: the caller is neither the sender nor the
+    /// recipient.
+    ProposeNotAuthorized,
+    /// `propose_ownership_transfer`: the target already holds that role.
+    ProposeInvalidTarget,
+    /// `propose_ownership_transfer`: an unexpired proposal already exists.
+    ProposeAlreadyPending,
+    /// `accept_ownership_transfer`: the caller is not the named target.
+    AcceptNotTarget,
+    /// `accept_ownership_transfer`: the proposal's acceptance window elapsed.
+    OwnershipProposalExpired,
+    /// `accept_ownership_transfer` / `cancel_ownership_transfer`: no proposal
+    /// is stored for the stream.
+    NoPendingOwnership,
+    /// `cancel_ownership_transfer`: the caller did not create the proposal.
+    CancelProposalNotProposer,
+    // ------------------------------------------------------------ governance
+    // Issue #119: admin actions behind the two-key timelock. Named after the
+    // rule that refuses the call, because the rule *is* the security property.
+    /// A governance entrypoint called before the signer set was bootstrapped.
+    GovernanceNotInitialized,
+    /// `governance_bootstrap` on a contract that already has a signer set.
+    GovernanceAlreadyInitialized,
+    /// The caller is not in the signer set.
+    NotGovernanceSigner,
+    /// A proposed signer set lists the same address twice — one key in two slots.
+    GovernanceDuplicateSigner,
+    /// A proposed signer set is empty.
+    GovernanceSignerSetEmpty,
+    /// A proposed signer set exceeds MAX_SIGNERS.
+    GovernanceTooManySigners,
+    /// A proposed signer set cannot supply two distinct signatures.
+    GovernanceSignersNotDistinct,
+    /// No proposal is stored under the supplied id.
+    GovernanceProposalNotFound,
+    /// `governance_execute`: the veto window is still open.
+    GovernanceVetoWindowOpen,
+    /// `governance_veto`: the veto window has closed.
+    GovernanceVetoWindowClosed,
+    /// A configured veto window below MIN_VETO_WINDOW_SECONDS.
+    GovernanceVetoWindowTooShort,
+    /// The proposal was vetoed and is dead.
+    GovernanceAlreadyVetoed,
+    /// The proposal has already been executed.
+    GovernanceAlreadyExecuted,
+    /// `governance_sign`: this address already signed the proposal.
+    GovernanceDuplicateSignature,
+    /// `governance_execute`: not enough distinct, still-current signatures.
+    GovernanceSignaturesInsufficient,
+    /// A migrated admin entry point called directly after bootstrap.
+    GovernanceTimelockRequired,
+    // ---------------------------------------------- rate renegotiation
+    /// `propose_rate_change`: the caller is neither the sender nor the
+    /// recipient.
+    RateProposeNotAuthorized,
+    /// `propose_rate_change`: the proposed rate is zero or negative.
+    RateProposalAmountNonPositive,
+    /// `propose_rate_change`: the stream window has already elapsed, so there is
+    /// no future rate to agree on.
+    RateProposalWindowElapsed,
+    /// `propose_rate_change`: an unexpired rate proposal already exists.
+    RateProposalPending,
+    /// `accept_rate_change`: the caller is not the proposal's named counterparty.
+    RateAcceptNotTarget,
+    /// `accept_rate_change`: a proposal participant no longer holds a stream
+    /// role (an ownership transfer took the proposal out of scope).
+    RateAcceptStaleParties,
+    /// `accept_rate_change`: the proposal's acceptance window elapsed.
+    RateProposalExpired,
+    /// `accept_rate_change` / `cancel_rate_change`: no proposal is stored for
+    /// the stream.
+    NoPendingRateChange,
+    /// `cancel_rate_change`: the caller did not create the proposal.
+    RateCancelNotProposer,
+    /// `accept_rate_change`: `rate * remaining_seconds` (or the resulting
+    /// deposit) does not fit `i128`.
+    RateReserveOverflow,
+    /// `streamed_amount_at_segments`: the per-segment terms would overflow
+    /// `i128` when summed.
+    RateSegmentSumOverflow,
+    /// `accept_rate_change`: `deposit - owed` would underflow (an
+    /// invariant-violating stored stream).
+    RateHeadroomUnderflow,
+    /// `accept_rate_change`: the stream would exceed `MAX_RATE_SEGMENTS`.
+    RateSegmentLimitReached,
+    /// `accept_rate_change`: the new rate is below the governance policy floor.
+    RatePolicyBelowFloor,
+    /// `accept_rate_change`: the new rate exceeds the governance policy ceiling.
+    RatePolicyAboveCeiling,
+    /// `accept_rate_change`: the token refused the pull of the shortfall the
+    /// rate increase requires.
+    RateTopUpTransferFailed,
+    /// `accept_rate_change`: the token refused the refund of the freed escrow.
+    RateRefundFailed,
+    // ------------------------------------------------ schema versioning
+    /// `stream::get_stream_record`: the stored record is tagged with a layout
+    /// version this build does not understand (or has a shape that matches
+    /// neither the current versioned layout nor the legacy one).
+    SchemaVersionUnsupported,
+    // ------------------------------------------ sender-role transfer
+    /// `accept_sender_transfer` / `expire_sender_transfer`: no proposal is
+    /// stored for the stream.
+    SenderTransferNotFound,
+    /// `accept_sender_transfer`: the acceptance window elapsed.
+    SenderTransferExpired,
+    /// `expire_sender_transfer`: the proposal is still inside its window.
+    SenderTransferNotExpired,
+    /// `accept_sender_transfer`: the presented nonce is not the stored one.
+    SenderTransferNonceMismatch,
+    /// `propose_sender_transfer`: an unexpired proposal already exists.
+    SenderTransferPending,
+    /// `accept_sender_transfer`: the caller is not the stream's recipient.
+    SenderTransferNotConsenter,
+    // ------------------------------------------------ refund routing
+    /// `set_refund_target`: the caller is not the stream's current sender, so
+    /// they cannot re-route a deposit they did not fund.
+    RefundTargetNotSender,
+    /// `create_stream_with_refund` / `set_refund_target`: the address already
+    /// holds the refund claim, so the routing changes nothing.
+    RefundTargetUnchanged,
+    // ------------------------------------------------ batch withdraw (#205)
+    /// `withdraw_many`: the id vector is empty. Rejected with its own code
+    /// rather than the creation-batch `BatchEmpty` so clients can tell which
+    /// batch API they mis-called.
+    WithdrawManyEmpty,
+    /// `withdraw_many`: the id vector exceeds `MAX_WITHDRAW_BATCH`.
+    WithdrawManyTooLarge,
+    /// `withdraw_many`: the same stream id appears more than once, so the
+    /// second entry would claim against state the first one already rewrote.
+    WithdrawManyDuplicateIds,
+    /// `withdraw_many`: an entry belongs to a recipient other than the caller.
+    /// One holder can never claim another's stream through a batch.
+    WithdrawManyNotStreamRecipient,
+    /// `withdraw_many`: summing the per-entry amounts into the summary's
+    /// `total` would overflow `i128`.
+    WithdrawManyTotalOverflow,
+    // ------------------------------------------------------- pause / resume
+    /// `pause_stream` / `resume_stream`: the caller is not the stream sender.
+    PauseNotAuthorized,
+    /// `pause_stream`: the stream is already paused.
+    PauseAlreadyPaused,
+    /// `resume_stream`: the stream is not paused.
+    ResumeNotPaused,
+    // ----------------------------------------------------------- receivables
+    AdvanceExceedsMaxLtv,
+    AdvanceAmountNonPositive,
+    AdvanceAlreadyActive,
+    AdvanceNotFound,
+    AdvanceRepaymentNonPositive,
+    AdvanceRepaymentExceedsBalance,
+    InvalidLtvBps,
+    StreamNotEligibleForAdvance,
+    // --------------------------------------------------- conditional streams
+    ConditionNotMet,
+    ConditionExpired,
+    ConditionAlreadyRegistered,
+    ConditionNotFound,
+    ConditionAlreadySatisfied,
+    InvalidConditionThreshold,
+    NotConditionPublisher,
+    ConditionAttestationStale,
+    // ------------------------------------------------------ stream templates
+    TemplateNotFound,
+    TemplateAlreadyApproved,
+    TemplateVersionMismatch,
+    TemplateValidationFailed,
+    TemplateRateInvalid,
+    // ------------------------------------------------------ integrator hooks
+    HookAlreadyRegistered,
+    HookNotFound,
+    HookReentrancyBlocked,
+    HookExecutionFailed,
+    InvalidHookSelector,
 }
 
 impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 51] = [
+    pub const ALL: [Branch; 168] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -165,6 +397,12 @@ impl Branch {
         Branch::CancelStreamNotAuthorized,
         Branch::TopUpAmountNonPositive,
         Branch::TopUpDepositOverflow,
+        Branch::CancelDuringDispute,
+        Branch::TopUpDuringDispute,
+        Branch::RaiseDisputeAlreadyActive,
+        Branch::DisputeNotOpen,
+        Branch::ExpireDisputeTooEarly,
+        Branch::ResolveCallerNotSender,
         Branch::StreamNotFound,
         Branch::StreamNotActive,
         Branch::CapacityOverflow,
@@ -178,6 +416,16 @@ impl Branch {
         Branch::AcceptGovernorNotNominee,
         Branch::WithdrawTreasuryAmountNonPositive,
         Branch::WithdrawTreasuryExceedsBalance,
+        Branch::RegisterLimitNonPositive,
+        Branch::SponsoredWithdrawAmountNonPositive,
+        Branch::SponsoredWithdrawAmountExceedsAvailable,
+        Branch::SponsorNotFound,
+        Branch::SponsorInactive,
+        Branch::BeneficiaryNotEnrolled,
+        Branch::ClaimExpired,
+        Branch::ClaimNonceReplay,
+        Branch::SponsorBudgetPeriodExceeded,
+        Branch::SponsorBudgetBeneficiaryExceeded,
         Branch::IntentNotFound,
         Branch::IntentNotPending,
         Branch::IntentNotYetExecutable,
@@ -205,6 +453,107 @@ impl Branch {
         Branch::WithdrawDelegatedCapExceededPeriod,
         Branch::WithdrawDelegatedCapExceededStream,
         Branch::RevokeAgentNotRecipient,
+        Branch::CreateBatchEmpty,
+        Branch::CreateBatchTooLarge,
+        Branch::ContractFrozen,
+        Branch::MigrationNotFrozen,
+        Branch::ExecuteUpgradeNoPending,
+        Branch::CancelUpgradeNoPending,
+        Branch::TimelockNotExpired,
+        Branch::UpgradeDelayTooShort,
+        Branch::AlreadyMigrated,
+        Branch::PolicyRateBelowFloor,
+        Branch::PolicyRateAboveCeiling,
+        Branch::PolicyDurationBelowFloor,
+        Branch::PolicyDurationAboveCeiling,
+        Branch::PolicyDepositBelowFloor,
+        Branch::InvalidOracleThreshold,
+        Branch::OraclePublishersNotConfigured,
+        Branch::OracleReportTooOld,
+        Branch::NotOraclePublisher,
+        Branch::ProposeNotAuthorized,
+        Branch::ProposeInvalidTarget,
+        Branch::ProposeAlreadyPending,
+        Branch::AcceptNotTarget,
+        Branch::OwnershipProposalExpired,
+        Branch::NoPendingOwnership,
+        Branch::CancelProposalNotProposer,
+        Branch::GovernanceNotInitialized,
+        Branch::GovernanceAlreadyInitialized,
+        Branch::NotGovernanceSigner,
+        Branch::GovernanceDuplicateSigner,
+        Branch::GovernanceSignerSetEmpty,
+        Branch::GovernanceTooManySigners,
+        Branch::GovernanceSignersNotDistinct,
+        Branch::GovernanceProposalNotFound,
+        Branch::GovernanceVetoWindowOpen,
+        Branch::GovernanceVetoWindowClosed,
+        Branch::GovernanceVetoWindowTooShort,
+        Branch::GovernanceAlreadyVetoed,
+        Branch::GovernanceAlreadyExecuted,
+        Branch::GovernanceDuplicateSignature,
+        Branch::GovernanceSignaturesInsufficient,
+        Branch::GovernanceTimelockRequired,
+        Branch::RateProposeNotAuthorized,
+        Branch::RateProposalAmountNonPositive,
+        Branch::RateProposalWindowElapsed,
+        Branch::RateProposalPending,
+        Branch::RateAcceptNotTarget,
+        Branch::RateAcceptStaleParties,
+        Branch::RateProposalExpired,
+        Branch::NoPendingRateChange,
+        Branch::RateCancelNotProposer,
+        Branch::RateReserveOverflow,
+        Branch::RateSegmentSumOverflow,
+        Branch::RateHeadroomUnderflow,
+        Branch::RateSegmentLimitReached,
+        Branch::RatePolicyBelowFloor,
+        Branch::RatePolicyAboveCeiling,
+        Branch::RateTopUpTransferFailed,
+        Branch::RateRefundFailed,
+        Branch::SchemaVersionUnsupported,
+        Branch::SenderTransferNotFound,
+        Branch::SenderTransferExpired,
+        Branch::SenderTransferNotExpired,
+        Branch::SenderTransferNonceMismatch,
+        Branch::SenderTransferPending,
+        Branch::SenderTransferNotConsenter,
+        Branch::RefundTargetNotSender,
+        Branch::RefundTargetUnchanged,
+        Branch::WithdrawManyEmpty,
+        Branch::WithdrawManyTooLarge,
+        Branch::WithdrawManyDuplicateIds,
+        Branch::WithdrawManyNotStreamRecipient,
+        Branch::WithdrawManyTotalOverflow,
+        Branch::PauseNotAuthorized,
+        Branch::PauseAlreadyPaused,
+        Branch::ResumeNotPaused,
+        Branch::AdvanceExceedsMaxLtv,
+        Branch::AdvanceAmountNonPositive,
+        Branch::AdvanceAlreadyActive,
+        Branch::AdvanceNotFound,
+        Branch::AdvanceRepaymentNonPositive,
+        Branch::AdvanceRepaymentExceedsBalance,
+        Branch::InvalidLtvBps,
+        Branch::StreamNotEligibleForAdvance,
+        Branch::ConditionNotMet,
+        Branch::ConditionExpired,
+        Branch::ConditionAlreadyRegistered,
+        Branch::ConditionNotFound,
+        Branch::ConditionAlreadySatisfied,
+        Branch::InvalidConditionThreshold,
+        Branch::NotConditionPublisher,
+        Branch::ConditionAttestationStale,
+        Branch::TemplateNotFound,
+        Branch::TemplateAlreadyApproved,
+        Branch::TemplateVersionMismatch,
+        Branch::TemplateValidationFailed,
+        Branch::TemplateRateInvalid,
+        Branch::HookAlreadyRegistered,
+        Branch::HookNotFound,
+        Branch::HookReentrancyBlocked,
+        Branch::HookExecutionFailed,
+        Branch::InvalidHookSelector,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -216,44 +565,132 @@ impl Branch {
             | Branch::CreateStartTimeInPast
             | Branch::CreateInvalidTimeRange
             | Branch::CreateDurationTooLong => &["create_stream", "create_streams"],
+            Branch::CreateBatchEmpty | Branch::CreateBatchTooLarge => &["create_streams_batch"],
             Branch::WithdrawAmountNonPositive | Branch::WithdrawAmountExceedsAvailable => {
                 &["withdraw"]
             }
-            Branch::WithdrawMaxNothingToWithdraw => &["withdraw_max"],
+            Branch::WithdrawMaxNothingToWithdraw => {
+                &["withdraw_max", "withdraw_many", "withdraw_all"]
+            }
+            Branch::WithdrawManyEmpty
+            | Branch::WithdrawManyTooLarge
+            | Branch::WithdrawManyDuplicateIds => &["withdraw_many"],
+            Branch::WithdrawManyNotStreamRecipient => &["withdraw_many", "withdraw_all"],
+            Branch::WithdrawManyTotalOverflow => &["withdraw_many", "withdraw_all"],
             Branch::CancelStreamNotCancellable | Branch::CancelStreamNotAuthorized => {
                 &["cancel_stream"]
             }
             Branch::TopUpAmountNonPositive | Branch::TopUpDepositOverflow => &["top_up"],
+            Branch::CancelDuringDispute => &["cancel_stream"],
+            Branch::TopUpDuringDispute => &["top_up"],
+            Branch::RaiseDisputeAlreadyActive => &["raise_dispute"],
+            Branch::DisputeNotOpen => &["get_dispute", "resolve_dispute", "expire_dispute"],
+            Branch::ExpireDisputeTooEarly => &["expire_dispute"],
+            Branch::ResolveCallerNotSender => &["resolve_dispute"],
             Branch::StreamNotFound => &[
                 "get_stream",
                 "available",
                 "withdraw",
                 "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
                 "cancel_stream",
                 "top_up",
+                "raise_dispute",
+                "expire_dispute",
+                "resolve_dispute",
+                "required_dispute_bond",
+                "sponsored_withdraw",
+                "propose_ownership_transfer",
+                "accept_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
+                "propose_sender_transfer",
+                "accept_sender_transfer",
+                "set_refund_target",
+                "stream_record_version",
+                "migrate_stream_version",
+                "refund_target",
+                "sender_history",
+                "pause_stream",
+                "resume_stream",
             ],
-            Branch::StreamNotActive => &["withdraw", "withdraw_max", "cancel_stream", "top_up"],
-            Branch::CapacityOverflow => &["create_stream", "create_streams", "top_up"],
+            Branch::StreamNotActive => &[
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+                "cancel_stream",
+                "top_up",
+                "raise_dispute",
+                "sponsored_withdraw",
+                "propose_ownership_transfer",
+                "accept_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
+                "propose_sender_transfer",
+                "accept_sender_transfer",
+                "set_refund_target",
+                "pause_stream",
+                "resume_stream",
+            ],
+            Branch::CapacityOverflow => &["create_stream", "top_up", "accept_rate_change"],
             Branch::RateProductOverflow => &[
                 "streamed_at",
                 "available",
                 "withdraw",
                 "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
                 "cancel_stream",
+                "sponsored_withdraw",
+                "accept_rate_change",
             ],
-            Branch::AvailableBalanceOverflow => &["available", "withdraw", "withdraw_max"],
+            Branch::AvailableBalanceOverflow => &[
+                "available",
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+            ],
             Branch::CancelSplitOverflow => &["cancel_stream"],
-            Branch::PayoutOverflow => &["withdraw", "withdraw_max"],
             Branch::SetFeeRateTooHigh => &["set_fee_bps"],
-            Branch::GovernorNotAllowed => {
-                &["set_fee_bps", "nominate_governor", "withdraw_treasury"]
-            }
+            Branch::GovernorNotAllowed => &[
+                "set_fee_bps",
+                "nominate_governor",
+                "withdraw_treasury",
+                "set_frozen",
+                "propose_upgrade",
+                "cancel_upgrade",
+                "execute_upgrade",
+                "migrate_storage",
+                "set_stream_policy",
+                "governance_bootstrap",
+            ],
             Branch::AcceptGovernorNoPending | Branch::AcceptGovernorNotNominee => {
                 &["accept_governor"]
             }
             Branch::WithdrawTreasuryAmountNonPositive | Branch::WithdrawTreasuryExceedsBalance => {
                 &["withdraw_treasury"]
             }
+            Branch::PayoutOverflow => &[
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+                "sponsored_withdraw",
+            ],
+            // ----------------------------------------------------- sponsor module
+            Branch::RegisterLimitNonPositive => &["register_sponsor"],
+            Branch::SponsoredWithdrawAmountNonPositive
+            | Branch::SponsoredWithdrawAmountExceedsAvailable
+            | Branch::SponsorNotFound
+            | Branch::SponsorInactive
+            | Branch::BeneficiaryNotEnrolled
+            | Branch::ClaimExpired
+            | Branch::ClaimNonceReplay
+            | Branch::SponsorBudgetPeriodExceeded
+            | Branch::SponsorBudgetBeneficiaryExceeded => &["sponsored_withdraw"],
             Branch::IntentNotFound => &[
                 "get_intent",
                 "execute_scheduled",
@@ -271,7 +708,13 @@ impl Branch {
             Branch::IntentNotExpired => &["reclaim_expired"],
             Branch::CreateDepositTransferFailed => &["create_stream", "create_streams"],
             Branch::TopUpTransferFailed => &["top_up"],
-            Branch::RecipientPayoutFailed => &["withdraw", "withdraw_max", "cancel_stream"],
+            Branch::RecipientPayoutFailed => &[
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+                "cancel_stream",
+            ],
             Branch::SenderRefundFailed => &["cancel_stream"],
             Branch::TreasuryPayoutFailed => &["withdraw_treasury"],
             Branch::PolicyAssetNotAllowed => &["create_stream", "create_streams"],
@@ -296,6 +739,180 @@ impl Branch {
             | Branch::WithdrawDelegatedCapExceededPeriod
             | Branch::WithdrawDelegatedCapExceededStream => &["withdraw_delegated"],
             Branch::RevokeAgentNotRecipient => &["revoke_agent"],
+            Branch::ContractFrozen => &[
+                "create_stream",
+                "create_streams",
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+                "cancel_stream",
+                "top_up",
+                "propose_ownership_transfer",
+                "accept_ownership_transfer",
+                "cancel_ownership_transfer",
+                "propose_rate_change",
+                "accept_rate_change",
+                "cancel_rate_change",
+                "propose_sender_transfer",
+                "accept_sender_transfer",
+                "expire_sender_transfer",
+                "set_refund_target",
+                "create_stream_with_refund",
+                "migrate_stream_version",
+            ],
+            Branch::MigrationNotFrozen | Branch::AlreadyMigrated => &["migrate_storage"],
+            Branch::ExecuteUpgradeNoPending | Branch::TimelockNotExpired => &["execute_upgrade"],
+            Branch::CancelUpgradeNoPending => &["cancel_upgrade"],
+            Branch::UpgradeDelayTooShort => &["propose_upgrade"],
+            Branch::PolicyDepositBelowFloor
+            | Branch::PolicyRateBelowFloor
+            | Branch::PolicyRateAboveCeiling => &["create_stream", "create_streams", "top_up"],
+            Branch::PolicyDurationBelowFloor | Branch::PolicyDurationAboveCeiling => {
+                &["create_stream", "create_streams"]
+            }
+            Branch::InvalidOracleThreshold => &["set_oracle_config"],
+            Branch::OraclePublishersNotConfigured
+            | Branch::OracleReportTooOld
+            | Branch::NotOraclePublisher => &["submit_oracle_time"],
+            Branch::ProposeNotAuthorized | Branch::ProposeInvalidTarget => {
+                &["propose_ownership_transfer", "propose_sender_transfer"]
+            }
+            Branch::ProposeAlreadyPending => &["propose_ownership_transfer"],
+            Branch::AcceptNotTarget | Branch::OwnershipProposalExpired => {
+                &["accept_ownership_transfer"]
+            }
+            Branch::NoPendingOwnership => {
+                &["accept_ownership_transfer", "cancel_ownership_transfer"]
+            }
+            Branch::CancelProposalNotProposer => &["cancel_ownership_transfer"],
+            // ------------------------------------------------------------ governance
+            Branch::GovernanceNotInitialized => &[
+                "governance_propose",
+                "governance_sign",
+                "governance_veto",
+                "governance_execute",
+            ],
+            Branch::GovernanceAlreadyInitialized => &["governance_bootstrap"],
+            Branch::NotGovernanceSigner => {
+                &["governance_propose", "governance_sign", "governance_veto"]
+            }
+            Branch::GovernanceDuplicateSigner
+            | Branch::GovernanceSignerSetEmpty
+            | Branch::GovernanceTooManySigners
+            | Branch::GovernanceSignersNotDistinct => &[
+                "governance_bootstrap",
+                "governance_propose",
+                "governance_execute",
+            ],
+            Branch::GovernanceVetoWindowTooShort => &["governance_bootstrap", "governance_propose"],
+            Branch::GovernanceProposalNotFound => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceVetoWindowOpen | Branch::GovernanceSignaturesInsufficient => {
+                &["governance_execute"]
+            }
+            Branch::GovernanceVetoWindowClosed => &["governance_veto"],
+            Branch::GovernanceAlreadyVetoed => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceAlreadyExecuted => {
+                &["governance_sign", "governance_veto", "governance_execute"]
+            }
+            Branch::GovernanceDuplicateSignature => &["governance_sign"],
+            Branch::GovernanceTimelockRequired => &[
+                "set_fee_bps",
+                "nominate_governor",
+                "withdraw_treasury",
+                "set_stream_policy",
+                "set_frozen",
+                "propose_upgrade",
+                "execute_upgrade",
+                "migrate_storage",
+                "set_oracle_config",
+            ],
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized
+            | Branch::RateProposalAmountNonPositive
+            | Branch::RateProposalPending => &["propose_rate_change"],
+            // A stream can reach `end_time` while an offer is open, so both
+            // sides of the handshake can find the window already elapsed.
+            Branch::RateProposalWindowElapsed => &["propose_rate_change", "accept_rate_change"],
+            Branch::RateAcceptNotTarget
+            | Branch::RateAcceptStaleParties
+            | Branch::RateProposalExpired
+            | Branch::RateReserveOverflow
+            | Branch::RateHeadroomUnderflow
+            | Branch::RateSegmentLimitReached
+            | Branch::RatePolicyBelowFloor
+            | Branch::RatePolicyAboveCeiling
+            | Branch::RateTopUpTransferFailed
+            | Branch::RateRefundFailed => &["accept_rate_change"],
+            // ------------------------------------------------------- pause / resume
+            Branch::PauseNotAuthorized => &["pause_stream", "resume_stream"],
+            Branch::PauseAlreadyPaused => &["pause_stream"],
+            Branch::ResumeNotPaused => &["resume_stream"],
+            Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
+            Branch::RateCancelNotProposer => &["cancel_rate_change"],
+            Branch::RateSegmentSumOverflow => &[
+                "available",
+                "withdraw",
+                "withdraw_max",
+                "cancel_stream",
+                "sponsored_withdraw",
+                "accept_rate_change",
+                "top_up",
+            ],
+            Branch::SchemaVersionUnsupported => &[
+                "get_stream",
+                "available",
+                "withdraw",
+                "withdraw_max",
+                "withdraw_many",
+                "withdraw_all",
+                "cancel_stream",
+                "top_up",
+                "sponsored_withdraw",
+                "stream_record_version",
+                "migrate_stream_version",
+            ],
+            Branch::SenderTransferNotFound => &["accept_sender_transfer", "expire_sender_transfer"],
+            Branch::SenderTransferExpired | Branch::SenderTransferNonceMismatch => {
+                &["accept_sender_transfer"]
+            }
+            Branch::SenderTransferNotExpired => &["expire_sender_transfer"],
+            Branch::SenderTransferPending => &["propose_sender_transfer"],
+            Branch::SenderTransferNotConsenter => &["accept_sender_transfer"],
+            Branch::RefundTargetNotSender => &["set_refund_target"],
+            Branch::RefundTargetUnchanged => &["create_stream_with_refund", "set_refund_target"],
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv
+            | Branch::AdvanceAmountNonPositive
+            | Branch::AdvanceAlreadyActive
+            | Branch::StreamNotEligibleForAdvance => &["draw_advance"],
+            Branch::AdvanceNotFound
+            | Branch::AdvanceRepaymentNonPositive
+            | Branch::AdvanceRepaymentExceedsBalance => &["repay_advance"],
+            Branch::InvalidLtvBps => &["set_receivables_config", "draw_advance"],
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => &["withdraw", "withdraw_max"],
+            Branch::ConditionExpired => &["register_condition", "attest_condition"],
+            Branch::ConditionAlreadyRegistered => &["register_condition"],
+            Branch::ConditionNotFound => &["attest_condition"],
+            Branch::ConditionAlreadySatisfied => &["attest_condition"],
+            Branch::InvalidConditionThreshold => &["register_condition"],
+            Branch::NotConditionPublisher => &["attest_condition"],
+            Branch::ConditionAttestationStale => &["attest_condition"],
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => &["instantiate_template"],
+            Branch::TemplateAlreadyApproved
+            | Branch::TemplateVersionMismatch
+            | Branch::TemplateValidationFailed
+            | Branch::TemplateRateInvalid => &["approve_template"],
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered | Branch::InvalidHookSelector => &["register_hook"],
+            Branch::HookNotFound => &["unregister_hook"],
+            Branch::HookReentrancyBlocked | Branch::HookExecutionFailed => &["dispatch_hook"],
         }
     }
 
@@ -315,6 +932,12 @@ impl Branch {
             Branch::CancelStreamNotAuthorized => StreamError::NotAuthorized,
             Branch::TopUpAmountNonPositive => StreamError::ZeroAmount,
             Branch::TopUpDepositOverflow => StreamError::MathOverflow,
+            Branch::CancelDuringDispute => StreamError::DisputeActive,
+            Branch::TopUpDuringDispute => StreamError::DisputeActive,
+            Branch::RaiseDisputeAlreadyActive => StreamError::DisputeActive,
+            Branch::DisputeNotOpen => StreamError::DisputeNotFound,
+            Branch::ExpireDisputeTooEarly => StreamError::DisputeNotExpired,
+            Branch::ResolveCallerNotSender => StreamError::NotAuthorized,
             Branch::StreamNotFound => StreamError::StreamNotFound,
             Branch::StreamNotActive => StreamError::StreamNotActive,
             Branch::CapacityOverflow => StreamError::MathOverflow,
@@ -329,6 +952,16 @@ impl Branch {
             Branch::AcceptGovernorNoPending => StreamError::NoPendingGovernor,
             Branch::WithdrawTreasuryAmountNonPositive => StreamError::ZeroAmount,
             Branch::WithdrawTreasuryExceedsBalance => StreamError::InsufficientTreasuryBalance,
+            Branch::RegisterLimitNonPositive => StreamError::ZeroAmount,
+            Branch::SponsoredWithdrawAmountNonPositive => StreamError::ZeroAmount,
+            Branch::SponsoredWithdrawAmountExceedsAvailable => StreamError::AmountExceedsAvailable,
+            Branch::SponsorNotFound => StreamError::SponsorNotFound,
+            Branch::SponsorInactive => StreamError::SponsorInactive,
+            Branch::BeneficiaryNotEnrolled => StreamError::BeneficiaryNotEnrolled,
+            Branch::ClaimExpired => StreamError::ClaimExpired,
+            Branch::ClaimNonceReplay => StreamError::ClaimNonceReplay,
+            Branch::SponsorBudgetPeriodExceeded => StreamError::SponsorBudgetExceeded,
+            Branch::SponsorBudgetBeneficiaryExceeded => StreamError::BeneficiaryBudgetExceeded,
             Branch::IntentNotFound => StreamError::IntentNotFound,
             Branch::IntentNotPending => StreamError::IntentNotPending,
             Branch::IntentNotYetExecutable => StreamError::IntentNotYetExecutable,
@@ -356,10 +989,121 @@ impl Branch {
             Branch::WithdrawDelegatedCapExceededPeriod => StreamError::CapExceededPeriod,
             Branch::WithdrawDelegatedCapExceededStream => StreamError::CapExceededStream,
             Branch::RevokeAgentNotRecipient => StreamError::NotAuthorized,
+            Branch::CreateBatchEmpty => StreamError::BatchEmpty,
+            Branch::CreateBatchTooLarge => StreamError::BatchTooLarge,
+            Branch::ContractFrozen => StreamError::ContractFrozen,
+            Branch::MigrationNotFrozen => StreamError::ContractNotFrozen,
+            Branch::ExecuteUpgradeNoPending | Branch::CancelUpgradeNoPending => {
+                StreamError::NoPendingUpgrade
+            }
+            Branch::TimelockNotExpired => StreamError::TimelockNotExpired,
+            Branch::UpgradeDelayTooShort => StreamError::UpgradeDelayTooShort,
+            Branch::AlreadyMigrated => StreamError::AlreadyMigrated,
+            Branch::PolicyRateBelowFloor => StreamError::PolicyRateBelowFloor,
+            Branch::PolicyRateAboveCeiling => StreamError::PolicyRateAboveCeiling,
+            Branch::PolicyDurationBelowFloor => StreamError::PolicyDurationBelowFloor,
+            Branch::PolicyDurationAboveCeiling => StreamError::PolicyDurationAboveCeiling,
+            Branch::PolicyDepositBelowFloor => StreamError::PolicyDepositBelowFloor,
+            Branch::InvalidOracleThreshold => StreamError::InvalidOracleThreshold,
+            Branch::OraclePublishersNotConfigured => StreamError::OraclePublishersNotConfigured,
+            Branch::OracleReportTooOld => StreamError::OracleReportTooOld,
+            Branch::NotOraclePublisher => StreamError::NotOraclePublisher,
+            Branch::ProposeNotAuthorized
+            | Branch::AcceptNotTarget
+            | Branch::CancelProposalNotProposer => StreamError::NotAuthorized,
+            Branch::ProposeInvalidTarget => StreamError::InvalidTransferTarget,
+            Branch::ProposeAlreadyPending => StreamError::OwnershipProposalPending,
+            Branch::OwnershipProposalExpired => StreamError::OwnershipProposalExpired,
+            Branch::NoPendingOwnership => StreamError::NoPendingOwnership,
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized
+            | Branch::RateAcceptNotTarget
+            | Branch::RateAcceptStaleParties
+            | Branch::RateCancelNotProposer => StreamError::NotAuthorized,
+            Branch::RateProposalAmountNonPositive => StreamError::ZeroAmount,
+            Branch::RateProposalWindowElapsed => StreamError::InvalidTimeRange,
+            Branch::RateProposalPending => StreamError::RateProposalPending,
+            Branch::RateProposalExpired => StreamError::RateProposalExpired,
+            Branch::NoPendingRateChange => StreamError::NoPendingRateChange,
+            Branch::RateReserveOverflow
+            | Branch::RateSegmentSumOverflow
+            | Branch::RateHeadroomUnderflow => StreamError::MathOverflow,
+            Branch::RateSegmentLimitReached => StreamError::TooManyRateSegments,
+            Branch::RatePolicyBelowFloor => StreamError::PolicyRateBelowFloor,
+            Branch::RatePolicyAboveCeiling => StreamError::PolicyRateAboveCeiling,
+            Branch::RateTopUpTransferFailed => StreamError::TopUpTransferFailed,
+            Branch::RateRefundFailed => StreamError::SenderRefundFailed,
+            // ------------------------------------------------------- pause / resume
+            Branch::PauseNotAuthorized => StreamError::NotAuthorized,
+            Branch::PauseAlreadyPaused | Branch::ResumeNotPaused => {
+                StreamError::InvalidPauseTransition
+            }
+            Branch::GovernanceNotInitialized => StreamError::GovernanceNotInitialized,
+            Branch::GovernanceAlreadyInitialized => StreamError::GovernanceAlreadyInitialized,
+            Branch::NotGovernanceSigner => StreamError::NotGovernanceSigner,
+            Branch::GovernanceDuplicateSigner => StreamError::GovernanceDuplicateSigner,
+            Branch::GovernanceSignerSetEmpty => StreamError::GovernanceSignerSetEmpty,
+            Branch::GovernanceTooManySigners => StreamError::GovernanceTooManySigners,
+            Branch::GovernanceSignersNotDistinct => StreamError::GovernanceSignersNotDistinct,
+            Branch::GovernanceProposalNotFound => StreamError::GovernanceProposalNotFound,
+            Branch::GovernanceVetoWindowOpen => StreamError::GovernanceVetoWindowOpen,
+            Branch::GovernanceVetoWindowClosed => StreamError::GovernanceVetoWindowClosed,
+            Branch::GovernanceVetoWindowTooShort => StreamError::GovernanceVetoWindowTooShort,
+            Branch::GovernanceAlreadyVetoed => StreamError::GovernanceAlreadyVetoed,
+            Branch::GovernanceAlreadyExecuted => StreamError::GovernanceAlreadyExecuted,
+            Branch::GovernanceDuplicateSignature => StreamError::GovernanceDuplicateSignature,
+            Branch::GovernanceSignaturesInsufficient => {
+                StreamError::GovernanceSignaturesInsufficient
+            }
+            Branch::GovernanceTimelockRequired => StreamError::GovernanceTimelockRequired,
+            Branch::SchemaVersionUnsupported => StreamError::SchemaVersionUnsupported,
+            Branch::SenderTransferNotFound => StreamError::SenderTransferNotFound,
+            Branch::SenderTransferExpired => StreamError::SenderTransferExpired,
+            Branch::SenderTransferNotExpired => StreamError::SenderTransferNotExpired,
+            Branch::SenderTransferNonceMismatch => StreamError::SenderTransferNonceMismatch,
+            Branch::SenderTransferPending => StreamError::SenderTransferPending,
+            Branch::SenderTransferNotConsenter => StreamError::SenderTransferNotConsenter,
+            Branch::RefundTargetNotSender => StreamError::RefundTargetNotSender,
+            Branch::RefundTargetUnchanged => StreamError::RefundTargetUnchanged,
+            Branch::WithdrawManyEmpty => StreamError::WithdrawBatchEmpty,
+            Branch::WithdrawManyTooLarge => StreamError::WithdrawBatchTooLarge,
+            Branch::WithdrawManyDuplicateIds => StreamError::WithdrawDuplicateStreamIds,
+            Branch::WithdrawManyNotStreamRecipient => StreamError::NotAuthorized,
+            Branch::WithdrawManyTotalOverflow => StreamError::MathOverflow,
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv => StreamError::AdvanceExceedsMaxLtv,
+            Branch::AdvanceAmountNonPositive => StreamError::AdvanceAmountNonPositive,
+            Branch::AdvanceAlreadyActive => StreamError::AdvanceAlreadyActive,
+            Branch::AdvanceNotFound => StreamError::AdvanceNotFound,
+            Branch::AdvanceRepaymentNonPositive => StreamError::AdvanceRepaymentNonPositive,
+            Branch::AdvanceRepaymentExceedsBalance => StreamError::AdvanceRepaymentExceedsBalance,
+            Branch::InvalidLtvBps => StreamError::InvalidLtvBps,
+            Branch::StreamNotEligibleForAdvance => StreamError::StreamNotEligibleForAdvance,
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => StreamError::ConditionNotMet,
+            Branch::ConditionExpired => StreamError::ConditionExpired,
+            Branch::ConditionAlreadyRegistered => StreamError::ConditionAlreadyRegistered,
+            Branch::ConditionNotFound => StreamError::ConditionNotFound,
+            Branch::ConditionAlreadySatisfied => StreamError::ConditionAlreadySatisfied,
+            Branch::InvalidConditionThreshold => StreamError::InvalidConditionThreshold,
+            Branch::NotConditionPublisher => StreamError::NotConditionPublisher,
+            Branch::ConditionAttestationStale => StreamError::ConditionAttestationStale,
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => StreamError::TemplateNotFound,
+            Branch::TemplateAlreadyApproved => StreamError::TemplateAlreadyApproved,
+            Branch::TemplateVersionMismatch => StreamError::TemplateVersionMismatch,
+            Branch::TemplateValidationFailed => StreamError::TemplateValidationFailed,
+            Branch::TemplateRateInvalid => StreamError::TemplateRateInvalid,
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered => StreamError::HookAlreadyRegistered,
+            Branch::HookNotFound => StreamError::HookNotFound,
+            Branch::HookReentrancyBlocked => StreamError::HookReentrancyBlocked,
+            Branch::HookExecutionFailed => StreamError::HookExecutionFailed,
+            Branch::InvalidHookSelector => StreamError::InvalidHookSelector,
         }
     }
 
-    /// Human-readable condition, used to generate `docs/ERRORS.md`.
+    /// Human-readable condition, used to generate `docs/ERROR_SURFACE.md`.
     pub const fn condition(self) -> &'static str {
         match self {
             Branch::CreateDepositNonPositive => "deposit_amount is zero or negative",
@@ -383,6 +1127,14 @@ impl Branch {
             }
             Branch::TopUpAmountNonPositive => "top-up amount is zero or negative",
             Branch::TopUpDepositOverflow => "deposit + amount would overflow i128",
+            Branch::CancelDuringDispute => "an open dispute freezes cancel_stream",
+            Branch::TopUpDuringDispute => "an open dispute freezes top_up",
+            Branch::RaiseDisputeAlreadyActive => "raise_dispute called while a dispute is open",
+            Branch::DisputeNotOpen => "no open dispute exists on the stream",
+            Branch::ExpireDisputeTooEarly => {
+                "expire_dispute called before the dispute timelock elapsed"
+            }
+            Branch::ResolveCallerNotSender => "resolve_dispute called by a non-sender",
             Branch::StreamNotFound => "no stream is stored under the id",
             Branch::StreamNotActive => "the stream status is Cancelled or Depleted",
             Branch::CapacityOverflow => "deposit * duration would overflow u128",
@@ -401,6 +1153,28 @@ impl Branch {
             }
             Branch::WithdrawTreasuryExceedsBalance => {
                 "amount exceeds fees collected minus fees already withdrawn"
+            }
+            Branch::RegisterLimitNonPositive => {
+                "a sponsor budget cap (per-period or per-beneficiary) is zero or negative"
+            }
+            Branch::SponsoredWithdrawAmountNonPositive => {
+                "a sponsored claim requests a zero or negative payout"
+            }
+            Branch::SponsoredWithdrawAmountExceedsAvailable => {
+                "a sponsored claim exceeds the stream's accrued-but-unwithdrawn balance"
+            }
+            Branch::SponsorNotFound => "no sponsor budget is registered for the address",
+            Branch::SponsorInactive => "the sponsor's budget is paused (inactive)",
+            Branch::BeneficiaryNotEnrolled => {
+                "the beneficiary has not enrolled an ed25519 consent key"
+            }
+            Branch::ClaimExpired => "the relayed claim was submitted after its deadline",
+            Branch::ClaimNonceReplay => "the claim's nonce was already spent for this pair",
+            Branch::SponsorBudgetPeriodExceeded => {
+                "the claim would exceed the sponsor's per-period budget cap"
+            }
+            Branch::SponsorBudgetBeneficiaryExceeded => {
+                "the claim would exceed the per-beneficiary budget cap"
             }
             Branch::IntentNotFound => "no scheduled intent is stored under the id",
             Branch::IntentNotPending => "the intent is already executed, cancelled, or expired",
@@ -463,6 +1237,234 @@ impl Branch {
             Branch::RevokeAgentNotRecipient => {
                 "caller revoking agent is not the stream recipient"
             }
+            Branch::CreateBatchEmpty => "entries is empty",
+            Branch::CreateBatchTooLarge => "entries length exceeds MAX_BATCH",
+            Branch::ContractFrozen => "the contract is frozen for maintenance or upgrade",
+            Branch::MigrationNotFrozen => "storage migration requires the contract to be frozen",
+            Branch::ExecuteUpgradeNoPending => "execute_upgrade called with no upgrade pending",
+            Branch::CancelUpgradeNoPending => "cancel_upgrade called with no upgrade pending",
+            Branch::TimelockNotExpired => "upgrade timelock delay has not yet expired",
+            Branch::UpgradeDelayTooShort => {
+                "proposed upgrade delay is shorter than MIN_UPGRADE_DELAY_SECONDS"
+            }
+            Branch::AlreadyMigrated => {
+                "storage has already been migrated to the target schema version"
+            }
+            Branch::PolicyRateBelowFloor => "stream rate is below the governance policy floor",
+            Branch::PolicyRateAboveCeiling => "stream rate exceeds the governance policy ceiling",
+            Branch::PolicyDurationBelowFloor => {
+                "stream duration is below the governance policy floor"
+            }
+            Branch::PolicyDurationAboveCeiling => {
+                "stream duration exceeds the governance policy ceiling"
+            }
+            Branch::PolicyDepositBelowFloor => {
+                "stream deposit is below the governance policy floor"
+            }
+            Branch::InvalidOracleThreshold => {
+                "oracle threshold is invalid (e.g. zero or exceeds publisher count)"
+            }
+            Branch::OraclePublishersNotConfigured => "oracle publishers are not configured",
+            Branch::OracleReportTooOld => "oracle report timestamp is too far in the past or future",
+            Branch::NotOraclePublisher => "the caller is not an authorized oracle publisher",
+            Branch::ProposeNotAuthorized => {
+                "the caller is neither the current sender nor the current recipient"
+            }
+            Branch::ProposeInvalidTarget => "the proposed target already holds that role",
+            Branch::ProposeAlreadyPending => {
+                "an unexpired ownership proposal already exists for the stream"
+            }
+            Branch::AcceptNotTarget => "the caller is not the proposal's named new owner",
+            Branch::OwnershipProposalExpired => {
+                "the proposal's acceptance window has elapsed"
+            }
+            Branch::NoPendingOwnership => "no ownership proposal is stored for the stream",
+            Branch::CancelProposalNotProposer => {
+                "the caller did not create the pending ownership proposal"
+            }
+            // ---------------------------------------------- rate renegotiation
+            Branch::RateProposeNotAuthorized => {
+                "the caller is neither the current sender nor the current recipient"
+            }
+            Branch::RateProposalAmountNonPositive => {
+                "the proposed amount_per_second is zero or negative"
+            }
+            Branch::RateProposalWindowElapsed => {
+                "the stream's end_time is at or before the current time, so no window is left to re-rate"
+            }
+            Branch::RateProposalPending => {
+                "an unexpired rate-change proposal already exists for the stream"
+            }
+            Branch::RateAcceptNotTarget => {
+                "the caller is not the proposal's named counterparty"
+            }
+            Branch::RateAcceptStaleParties => {
+                "the proposal's proposer or counterparty no longer holds a role on the stream"
+            }
+            Branch::RateProposalExpired => {
+                "the rate proposal's acceptance window has elapsed"
+            }
+            Branch::NoPendingRateChange => "no rate-change proposal is stored for the stream",
+            Branch::RateCancelNotProposer => {
+                "the caller did not create the pending rate-change proposal"
+            }
+            Branch::RateReserveOverflow => {
+                "amount_per_second * remaining_seconds (or owed + that reserve) would overflow i128"
+            }
+            Branch::RateSegmentSumOverflow => {
+                "adding a per-segment term would overflow i128 (accrual sum, or a top-up onto a segment's allocation)"
+            }
+            Branch::RateHeadroomUnderflow => {
+                "deposit - owed would underflow (an invariant-violating stored stream)"
+            }
+            Branch::RateSegmentLimitReached => {
+                "the stream already carries MAX_RATE_SEGMENTS rate-change segments"
+            }
+            Branch::RatePolicyBelowFloor => {
+                "the new rate is below the governance policy rate floor"
+            }
+            Branch::RatePolicyAboveCeiling => {
+                "the new rate exceeds the governance policy rate ceiling"
+            }
+            Branch::RateTopUpTransferFailed => {
+                "the token refuses the pull of the shortfall a rate increase requires"
+            }
+            Branch::RateRefundFailed => {
+                "the token refuses the refund of the escrow a rate decrease frees"
+            }
+            // ------------------------------------------------------- pause / resume
+            Branch::PauseNotAuthorized => "the caller is not the stream's sender",
+            Branch::PauseAlreadyPaused => "the stream is already paused",
+            Branch::ResumeNotPaused => "the stream is not paused",
+            // ------------------------------------------------------------ governance
+            Branch::GovernanceNotInitialized => {
+                "the governance signer set has not been bootstrapped"
+            }
+            Branch::GovernanceAlreadyInitialized => {
+                "governance_bootstrap was called but a signer set already exists"
+            }
+            Branch::NotGovernanceSigner => "the caller is not a member of the signer set",
+            Branch::GovernanceDuplicateSigner => {
+                "the signer set lists the same address twice (one key in two slots)"
+            }
+            Branch::GovernanceSignerSetEmpty => "the signer set is empty",
+            Branch::GovernanceTooManySigners => "the signer set exceeds MAX_SIGNERS",
+            Branch::GovernanceSignersNotDistinct => {
+                "the signer set holds fewer than two distinct keys"
+            }
+            Branch::GovernanceProposalNotFound => "no proposal is stored under the id",
+            Branch::GovernanceVetoWindowOpen => {
+                "execution was attempted before the veto window closed"
+            }
+            Branch::GovernanceVetoWindowClosed => {
+                "a veto was attempted after the veto window closed"
+            }
+            Branch::GovernanceVetoWindowTooShort => {
+                "the veto window is shorter than MIN_VETO_WINDOW_SECONDS"
+            }
+            Branch::GovernanceAlreadyVetoed => "the proposal was vetoed and is dead",
+            Branch::GovernanceAlreadyExecuted => "the proposal has already been executed",
+            Branch::GovernanceDuplicateSignature => {
+                "this address already signed the proposal; execution needs two distinct keys"
+            }
+            Branch::GovernanceSignaturesInsufficient => {
+                "fewer than the required distinct, still-current signatures are recorded"
+            }
+            Branch::GovernanceTimelockRequired => {
+                "the action requires an executed governance proposal now that governance is bootstrapped"
+            }
+            Branch::SchemaVersionUnsupported => {
+                "the stored record carries a layout version this build does not understand"
+            }
+            Branch::SenderTransferNotFound => {
+                "no sender-transfer proposal is stored for the stream"
+            }
+            Branch::SenderTransferExpired => {
+                "the sender transfer's acceptance window has elapsed"
+            }
+            Branch::SenderTransferNotExpired => {
+                "the sender transfer is still inside its acceptance window"
+            }
+            Branch::SenderTransferNonceMismatch => {
+                "the presented nonce does not match the stored proposal's nonce"
+            }
+            Branch::SenderTransferPending => {
+                "an unexpired sender-transfer proposal already exists for the stream"
+            }
+            Branch::SenderTransferNotConsenter => {
+                "the caller is not the stream's recipient"
+            }
+            Branch::RefundTargetNotSender => {
+                "the caller is not the stream's current sender, so they do not own the deposit being routed"
+            }
+            Branch::RefundTargetUnchanged => {
+                "the address already holds the refund claim, so routing to it changes nothing"
+            }
+            Branch::WithdrawManyEmpty => "the batch withdraw was requested with zero stream ids",
+            Branch::WithdrawManyTooLarge => {
+                "the batch withdraw exceeds MAX_WITHDRAW_BATCH stream ids"
+            }
+            Branch::WithdrawManyDuplicateIds => {
+                "the same stream id appears more than once in the batch"
+            }
+            Branch::WithdrawManyNotStreamRecipient => {
+                "a stream in the batch belongs to a different recipient than the caller"
+            }
+            Branch::WithdrawManyTotalOverflow => {
+                "summing the batch's per-stream payouts into the summary total would overflow"
+            }
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv => {
+                "draw_advance requested amount exceeds maximum loan-to-value threshold"
+            }
+            Branch::AdvanceAmountNonPositive => "draw_advance amount is zero or negative",
+            Branch::AdvanceAlreadyActive => "an advance is already active on the stream",
+            Branch::AdvanceNotFound => "no active advance found for the stream",
+            Branch::AdvanceRepaymentNonPositive => "repay_advance amount is zero or negative",
+            Branch::AdvanceRepaymentExceedsBalance => {
+                "repayment amount exceeds remaining advance balance"
+            }
+            Branch::InvalidLtvBps => {
+                "receivables configuration or repayment basis points exceed bounds"
+            }
+            Branch::StreamNotEligibleForAdvance => {
+                "stream is paused, cancelled, or not active for advance draw"
+            }
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => {
+                "release condition has not been attested as met by oracle quorum"
+            }
+            Branch::ConditionExpired => {
+                "release condition has passed its timeout without satisfaction"
+            }
+            Branch::ConditionAlreadyRegistered => {
+                "a release condition is already registered for this stream"
+            }
+            Branch::ConditionNotFound => "no release condition found for the stream",
+            Branch::ConditionAlreadySatisfied => "release condition is already satisfied",
+            Branch::InvalidConditionThreshold => {
+                "condition quorum threshold is zero or exceeds publisher count"
+            }
+            Branch::NotConditionPublisher => "caller is not an authorized condition publisher",
+            Branch::ConditionAttestationStale => "condition attestation timestamp is too old",
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => "template id and version not found",
+            Branch::TemplateAlreadyApproved => "template version has already been approved",
+            Branch::TemplateVersionMismatch => "template version must be exactly next in sequence",
+            Branch::TemplateValidationFailed => "template parameters fail validation against policy",
+            Branch::TemplateRateInvalid => "template stream rate evaluates to zero or overflow",
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered => {
+                "a callback hook is already registered for this event class"
+            }
+            Branch::HookNotFound => "no callback hook found to unregister",
+            Branch::HookReentrancyBlocked => {
+                "nested contract entry into stream blocked by reentrancy lock"
+            }
+            Branch::HookExecutionFailed => {
+                "callback contract invocation failed or reverted under Revert failure policy"
+            }
+            Branch::InvalidHookSelector => "callback selector is invalid",
         }
     }
 
@@ -477,9 +1479,25 @@ impl Branch {
             //     a corrupt entry but never below `i128::MIN` (it equals
             //     `-withdrawn`, and `withdrawn <= i128::MAX`).
             //   * `cancel_amounts`: same bound on both subtractions.
+            //   * `streamed_amount_at_segments`: segment accrual is monotonic in
+            //     `now` and each window is elapsed at most once, so every partial
+            //     sum is bounded by the schedule at `end_time` — which is
+            //     `owed + reserved`, the deposit `accept_rate_change` just checked
+            //     against `i128::MAX`.
+            //   * `segments_after_topup`: `allocation + amount <= new_deposit`,
+            //     which the caller already checked against `i128::MAX`.
+            //   * `accept_rate_change`'s `deposit - owed`: `owed` is the accrued
+            //     amount at the boundary, so the difference is the unaccrued
+            //     remainder and cannot go negative.
+            //   * `withdraw_many`: every entry pays out through `pay_out`, so
+            //     the batch total is the recipient's balance increase and is
+            //     likewise bounded by `i128::MAX`.
             Branch::PayoutOverflow
             | Branch::AvailableBalanceOverflow
-            | Branch::CancelSplitOverflow => Reachability::Defensive,
+            | Branch::CancelSplitOverflow
+            | Branch::RateSegmentSumOverflow
+            | Branch::RateHeadroomUnderflow
+            | Branch::WithdrawManyTotalOverflow => Reachability::Defensive,
             _ => Reachability::Reachable,
         }
     }

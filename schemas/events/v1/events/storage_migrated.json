@@ -1,0 +1,62 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/storage_migrated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a batch of streams is migrated to a new storage schema version.",
+  "properties": {
+    "end_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "is_complete": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "start_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "start_id",
+    "end_id",
+    "is_complete"
+  ],
+  "title": "StorageMigrated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "storage_migrated",
+    "fingerprint": "sha256:3e0dc77f4cd7ab650f0239a9420df76cb30b78707cd25dcbdabe542c9d37baae",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u32"
+        },
+        {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u32"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "from_version",
+        "type": "u32"
+      },
+      {
+        "name": "to_version",
+        "type": "u32"
+      }
+    ]
+  }
+}

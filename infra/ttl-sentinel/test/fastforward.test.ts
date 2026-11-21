@@ -243,3 +243,145 @@ test('an off-chain extension (the optional funded component) lifts a never-exten
     entry.liveUntil - entry.lastModified,
   );
 });
+
+test('planner: 90-day simulated month with churn proves live streams stay above cliff with 1 tx per account per window', async () => {
+  const { planRenewals } = await import('../src/planner.js');
+  const chain = new FakeChain({ startLedger: 1_000_000 });
+  const h = new Harness(chain, { scanIntervalSec: SCAN_SEC });
+
+  // 90 days = ~1,555,200 ledgers at 5s cadence
+  // We simulate in steps of 50,000 ledgers (~2.9 days per step = ~31 steps)
+  const TOTAL_STEPS = 31;
+  const LEDGERS_PER_STEP = 50_000;
+  const accounts = ['G_CORP_1', 'G_CORP_2', 'G_CORP_3'];
+
+  // Seed initial streams
+  for (let i = 1; i <= 6; i++) {
+    chain.createStream({ id: i }, chain.ledger);
+  }
+
+  let nextStreamId = 7;
+  for (let step = 0; step < TOTAL_STEPS; step++) {
+    // Churn: create new stream every 2 steps
+    if (step % 2 === 0 && nextStreamId < 25) {
+      chain.createStream({ id: nextStreamId++ }, chain.ledger);
+    }
+
+    // Churn: cancel/complete a stream every 5 steps
+    if (step % 5 === 0 && step > 0) {
+      const cancelId = Math.max(1, nextStreamId - 5);
+      chain.writeStream(cancelId, { status: 'Cancelled' }, chain.ledger);
+    }
+
+    // Advance ledgers
+    chain.advanceLedgers(LEDGERS_PER_STEP, CADENCE_SEC);
+
+    // Run sentinel scan and build inventory
+    const scanResult = await h.scan();
+    const inventory = scanResult.projections
+      .filter((p) => p.remainingLedgers > 0)
+      .map((p, idx) => ({
+        id: p.id,
+        cls: p.cls,
+        keyB64: Buffer.from(p.id).toString('base64'),
+        account: accounts[idx % accounts.length]!,
+        remainingLedgers: p.remainingLedgers,
+        sizeBytes: 400,
+        isDemo: idx % 4 === 0,
+        deadlineLedger: chain.ledger + p.remainingLedgers,
+      }));
+
+    // Run pure planner
+    const schedule = planRenewals(inventory, undefined, chain.ledger);
+
+    // Prove at most 1 tx per account per window
+    const accountsScheduled = schedule.transactions.map((tx) => tx.account);
+    const uniqueAccounts = new Set(accountsScheduled);
+    assert.equal(
+      accountsScheduled.length,
+      uniqueAccounts.size,
+      'Planner must produce at most 1 tx per account per window',
+    );
+
+    // Apply planned extensions off-chain to keep live entries renewed
+    for (const tx of schedule.transactions) {
+      for (const key of tx.keys) {
+        chain.extendOffchain(key.id, CONTRACT_TTL_EXTEND_LEDGERS);
+      }
+    }
+  }
+
+  // After 90 days, all active live streams must remain well above the critical cliff
+  const finalScan = await h.scan();
+  for (const p of finalScan.projections) {
+    if (p.id.startsWith('stream:')) {
+      assert.ok(
+        p.remainingLedgers >= 50_000,
+        `Stream ${p.id} must stay above critical cliff throughout 90-day simulation (got ${p.remainingLedgers})`,
+      );
+    }
+  }
+});
+
+test('chaos: batch failures mid-window isolate errors without stalling queue', async () => {
+  const { Extender } = await import('../src/extender.js');
+  let attempt = 0;
+
+  // Mock submitter where the first account fails with an RPC error
+  const chaoticSubmitter = {
+    async submit(keys: string[], _extendTo: number) {
+      attempt++;
+      if (keys.includes('KEY_FAILING')) {
+        return { status: 'RpcTimeoutError', hash: null, feeStroops: null };
+      }
+      return { status: 'success', hash: `0xabc_${attempt}`, feeStroops: 10_000n };
+    },
+  };
+
+  const plan = {
+    extendTo: 500_000,
+    thresholdLedgers: 200_000,
+    healthy: 10,
+    estimatedTotalStroops: 50_000n,
+    batches: [
+      {
+        targets: [{ id: 'fail:1', cls: 'stream' as const, keyB64: 'KEY_FAILING', remainingLedgers: 100_000, sizeBytes: 400 }],
+        estimatedRentStroops: 10_000n,
+        account: 'POISON_ACCOUNT',
+      },
+      {
+        targets: [{ id: 'ok:2', cls: 'stream' as const, keyB64: 'KEY_GOOD_1', remainingLedgers: 120_000, sizeBytes: 400 }],
+        estimatedRentStroops: 10_000n,
+        account: 'GOOD_ACCOUNT_1',
+      },
+      {
+        targets: [{ id: 'ok:3', cls: 'stream' as const, keyB64: 'KEY_GOOD_2', remainingLedgers: 130_000, sizeBytes: 400 }],
+        estimatedRentStroops: 10_000n,
+        account: 'GOOD_ACCOUNT_2',
+      },
+    ],
+  };
+
+  const spender = { month: '2026-10', spentStroops: 0n };
+  const extender = new Extender(
+    {
+      enabled: true,
+      dryRun: false,
+      thresholdLedgers: 200_000,
+      extendTo: 500_000,
+      maxEntriesPerTx: 50,
+      monthlyBudgetXlm: '100',
+      secretKeyEnv: 'EXTENDER_KEY',
+    },
+    chaoticSubmitter,
+    spender,
+    { isolateFailures: true, quarantineThreshold: 2 },
+  );
+
+  const result = await extender.run(plan);
+
+  // Failure isolation: 1 failed batch does not halt the queue; the other 2 succeed
+  assert.equal(result.failedBatches?.length, 1, 'Only the poison account batch should fail');
+  assert.equal(result.submitted.length, 2, 'Remaining non-poison batches must be processed successfully');
+  assert.equal(result.stoppedBy, null, 'Queue must not halt on isolated batch error');
+});

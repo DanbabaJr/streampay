@@ -1,0 +1,48 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_record_migrated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a single stream's storage record is re-encoded under a new layout version. Only fired when a rewrite actually happened: an already-current record migrates as a silent no-op, so the absence of this event is what makes repeated `migrate_stream_version` calls idempotent.",
+  "properties": {
+    "from_version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "to_version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "from_version",
+    "to_version"
+  ],
+  "title": "StreamRecordMigrated",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_record_migrated",
+    "fingerprint": "sha256:e1a41c8e2201e81e259bd5f52b1fc85482d3657d3dc15b8385ef9a6ec16c5659",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

@@ -79,3 +79,13 @@ pub struct ModelFeeScan {
     pub next_start_id: u64,
     pub done: bool,
 }
+
+/// Governance-managed policy floors and ceilings for streams.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelStreamPolicy {
+    pub min_rate: i128,
+    pub max_rate: i128,
+    pub min_duration: u64,
+    pub max_duration: u64,
+    pub min_deposit: i128,
+}

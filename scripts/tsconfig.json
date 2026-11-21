@@ -7,8 +7,9 @@
     "strict": true,
     "noUncheckedIndexedAccess": false,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["verify-fees.ts"]
+  "include": ["verify-fees.ts", "key_rotation_drill.ts", "migrate_audit.ts", "../frontend/lib/migration-report.ts"]
 }

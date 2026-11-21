@@ -1,0 +1,75 @@
+name: Fuzz Gate
+
+# The PR-time half of docs/FUZZ_CAMPAIGN.md. Everything else that builds the
+# fuzz workspace is scheduled: `fuzz.yml` (Mondays, `continue-on-error: true`)
+# and `nightly-fuzz.yml` (02:00 UTC). Nothing in `ci.yml` ever compiles `fuzz/`,
+# which is why two classes of breakage reached main unnoticed: `rate_schedule`
+# sat un-compilable for a day after the 2026-10-26 merges (cargo fuzz build died
+# with E0308 in a nightly run, not in the pull request), and the conservation
+# oracle went on pricing paused streams at ledger time after pause/resume
+# merged, so the first person to see the divergence was the 2026-10-27 nightly.
+# This job is the one that blocks: it builds every fuzz target, then replays
+# every seed in `fuzz/regressions/<target>/` with `-runs=0` — the same
+# deterministic replay the Saturday campaign runs before it starts searching
+# (docs/FUZZ_CAMPAIGN.md: "When the fix lands, the same PR adds seed.bin to
+# fuzz/regressions/<target>/").
+#
+# It is deliberately narrow: build + replay only, no searching. A fuzz session
+# on a pull request is non-deterministic, and a check that fails at random is a
+# check that gets ignored. `fuzz/` is its own cargo workspace (fuzz/Cargo.toml
+# declares `[workspace]`), so `cargo test --workspace` on the Contract job does
+# not even see these targets.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz_gate:
+    name: Fuzz build + regression replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install nightly toolchain + cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Build every fuzz target
+        working-directory: fuzz
+        # `campaign_wasm` is skipped by cargo here, not by us: it carries
+        # `required-features = ["wasm"]` and needs the release wasm plus
+        # stellar-cli, which the campaign workflow builds for it.
+        run: cargo +nightly fuzz build
+
+      - name: Replay triaged regressions
+        # -runs=0 executes every input in the directory once and exits: a fixed
+        # bug that comes back fails here, on the pull request that brought it
+        # back, instead of on a nightly. A target with no directory is a hole in
+        # the floor, so the step says so instead of passing quietly.
+        run: |
+          shopt -s nullglob
+          replayed=0
+          for dir in fuzz/regressions/*/; do
+            target="$(basename "$dir")"
+            echo "== replaying $target ($(find "$dir" -type f | wc -l) seed(s))"
+            (cd fuzz && cargo +nightly fuzz run "$target" "regressions/$target" -- -runs=0)
+            replayed=$((replayed + 1))
+          done
+          if [ "$replayed" = 0 ]; then
+            echo "::error::fuzz/regressions/ has no target directories, so this gate replays nothing. A fixed crasher belongs here (docs/FUZZ_CAMPAIGN.md); if the removal was deliberate, replace this step with the reason instead of shipping a vacuous gate."
+            exit 1
+          fi

@@ -1,0 +1,318 @@
+/**
+ * Code-first OpenAPI 3.1.0 Specification Definition for StreamPay Accrual API.
+ * Generated from TypeScript schemas and route definitions.
+ */
+
+export interface OpenApiSpec {
+  openapi: string;
+  info: {
+    title: string;
+    version: string;
+    description: string;
+    contact?: {
+      name: string;
+      url: string;
+    };
+    license?: {
+      name: string;
+      url: string;
+    };
+  };
+  servers: Array<{
+    url: string;
+    description: string;
+  }>;
+  paths: Record<string, unknown>;
+  components: {
+    schemas: Record<string, unknown>;
+    headers: Record<string, unknown>;
+    responses: Record<string, unknown>;
+  };
+}
+
+export function generateOpenApiSpec(): OpenApiSpec {
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "StreamPay Accrual Curve API",
+      version: "1.0.0",
+      description:
+        "High-performance, rate-budgeted time-series accrual curve endpoint for StreamPay continuous payment streams. Computes linear per-second accrual directly from contract state without persisting points, with full ETag caching and honest staleness headers.",
+      license: {
+        name: "Apache-2.0",
+        url: "https://www.apache.org/licenses/LICENSE-2.0.html",
+      },
+    },
+    servers: [
+      {
+        url: "/",
+        description: "Local / current host",
+      },
+      {
+        url: "https://streampay.finance",
+        description: "Production Gateway",
+      },
+    ],
+    paths: {
+      "/accrual/{id}": {
+        get: {
+          summary: "Get computed accrual curve for a stream",
+          description:
+            "Derives the time-series accrued amount curve for stream `{id}` over `[from, to]` with step size `step`. Computed on-the-fly from on-chain state and pure math; never stored.",
+          operationId: "getAccrualCurve",
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              description: "Numeric stream ID (u64)",
+              schema: {
+                type: "string",
+                pattern: "^[0-9]+$",
+                example: "1",
+              },
+            },
+            {
+              name: "from",
+              in: "query",
+              required: true,
+              description: "Start timestamp in Unix seconds (must be <= to)",
+              schema: {
+                type: "integer",
+                minimum: 0,
+                example: 1700000000,
+              },
+            },
+            {
+              name: "to",
+              in: "query",
+              required: true,
+              description: "End timestamp in Unix seconds (must be >= from)",
+              schema: {
+                type: "integer",
+                minimum: 0,
+                example: 1700003600,
+              },
+            },
+            {
+              name: "step",
+              in: "query",
+              required: true,
+              description:
+                "Sampling interval in seconds (> 0). (to - from)/step + 1 cannot exceed 1000 points.",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                example: 60,
+              },
+            },
+            {
+              name: "If-None-Match",
+              in: "header",
+              required: false,
+              description:
+                "Client-provided entity tag for conditional validation. Returns 304 if unchanged.",
+              schema: {
+                type: "string",
+                example: 'W/"4f2a7b8c9d0e1f2a3b4c5d6e7f8a9b0c"',
+              },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successfully computed accrual curve.",
+              headers: {
+                ETag: { $ref: "#/components/headers/ETag" },
+                "X-State-Hash": { $ref: "#/components/headers/X-State-Hash" },
+                "X-As-Of-Ledger": { $ref: "#/components/headers/X-As-Of-Ledger" },
+                "X-As-Of-Timestamp": { $ref: "#/components/headers/X-As-Of-Timestamp" },
+                Age: { $ref: "#/components/headers/Age" },
+                "X-Indexer-Lag": { $ref: "#/components/headers/X-Indexer-Lag" },
+                Warning: { $ref: "#/components/headers/Warning" },
+                "X-Cache": { $ref: "#/components/headers/X-Cache" },
+                "Cache-Control": { $ref: "#/components/headers/Cache-Control" },
+                "X-RateLimit-Remaining": { $ref: "#/components/headers/X-RateLimit-Remaining" },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AccrualCurveResponse" },
+                },
+              },
+            },
+            "304": {
+              description:
+                "Not Modified. The stream state and query parameters match the provided ETag. No body returned.",
+              headers: {
+                ETag: { $ref: "#/components/headers/ETag" },
+                "X-State-Hash": { $ref: "#/components/headers/X-State-Hash" },
+                "Cache-Control": { $ref: "#/components/headers/Cache-Control" },
+              },
+            },
+            "400": {
+              description: "Invalid query parameters or requested point limit exceeded.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            "404": {
+              description: "Stream ID not found on-chain.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            "429": {
+              description:
+                "Rate budget exhausted (client rate limit or shared upstream Soroban RPC node budget).",
+              headers: {
+                "Retry-After": { $ref: "#/components/headers/Retry-After" },
+                "X-RateLimit-Remaining": { $ref: "#/components/headers/X-RateLimit-Remaining" },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/RateLimitErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        CurvePoint: {
+          type: "object",
+          required: ["timestamp", "accrued"],
+          properties: {
+            timestamp: {
+              type: "integer",
+              description: "Sample timestamp in Unix seconds",
+              example: 1700000000,
+            },
+            accrued: {
+              type: "string",
+              description: "Accrued token amount in stroops (i128 string)",
+              example: "500000000",
+            },
+          },
+        },
+        AccrualCurveResponse: {
+          type: "object",
+          required: [
+            "streamId",
+            "asOfLedger",
+            "asOfTimestamp",
+            "stateHash",
+            "params",
+            "points",
+          ],
+          properties: {
+            streamId: {
+              type: "string",
+              example: "1",
+            },
+            asOfLedger: {
+              type: "integer",
+              description: "Ledger sequence number as of which state was read",
+              example: 1045230,
+            },
+            asOfTimestamp: {
+              type: "integer",
+              description: "Unix timestamp in seconds corresponding to as-of state",
+              example: 1700000000,
+            },
+            stateHash: {
+              type: "string",
+              description: "Cryptographic SHA-256 digest of contract state",
+              example:
+                "6dcd4ce23d88e2ee9568ba546c007c63d9131c1b7f7e8ef6e3a9c7b123456789",
+            },
+            params: {
+              type: "object",
+              properties: {
+                from: { type: "integer", example: 1700000000 },
+                to: { type: "integer", example: 1700003600 },
+                step: { type: "integer", example: 60 },
+                count: { type: "integer", example: 61 },
+              },
+            },
+            points: {
+              type: "array",
+              items: { $ref: "#/components/schemas/CurvePoint" },
+            },
+          },
+        },
+        ErrorResponse: {
+          type: "object",
+          required: ["error", "message"],
+          properties: {
+            error: { type: "string", example: "INVALID_QUERY_PARAMS" },
+            message: { type: "string", example: "Query parameter 'step' must be greater than zero." },
+          },
+        },
+        RateLimitErrorResponse: {
+          type: "object",
+          required: ["error", "message", "retryAfter"],
+          properties: {
+            error: { type: "string", example: "TooManyRequests" },
+            message: {
+              type: "string",
+              example: "Client rate budget exhausted. Please retry after 12 seconds.",
+            },
+            retryAfter: { type: "integer", example: 12 },
+          },
+        },
+      },
+      headers: {
+        ETag: {
+          description: "Entity tag derived from stateHash and query parameters",
+          schema: { type: "string" },
+        },
+        "X-State-Hash": {
+          description: "Exact SHA-256 state hash the curve was derived against",
+          schema: { type: "string" },
+        },
+        "X-As-Of-Ledger": {
+          description: "Ledger sequence number of the indexed state",
+          schema: { type: "integer" },
+        },
+        "X-As-Of-Timestamp": {
+          description: "ISO-8601 timestamp of indexed contract state",
+          schema: { type: "string" },
+        },
+        Age: {
+          description: "Age in seconds of the indexed state compared to wall-clock time",
+          schema: { type: "integer" },
+        },
+        "X-Indexer-Lag": {
+          description: "Lag in seconds between indexed state and current network tip",
+          schema: { type: "integer" },
+        },
+        Warning: {
+          description: "RFC 9110 Warning header emitted when indexer exceeds lag threshold",
+          schema: { type: "string" },
+        },
+        "X-Cache": {
+          description: "Cache status ('STALE' when served under degraded or budget-exhausted conditions)",
+          schema: { type: "string" },
+        },
+        "Cache-Control": {
+          description: "HTTP caching directive",
+          schema: { type: "string" },
+        },
+        "Retry-After": {
+          description: "Seconds to wait before retrying after 429 exhaustion",
+          schema: { type: "integer" },
+        },
+        "X-RateLimit-Remaining": {
+          description: "Remaining requests in current client budget window",
+          schema: { type: "integer" },
+        },
+      },
+      responses: {},
+    },
+  };
+}

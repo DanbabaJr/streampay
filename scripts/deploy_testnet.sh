@@ -7,11 +7,13 @@
 #   1. Preflight checks: stellar CLI, cargo, and funded testnet accounts.
 #      Exits non-zero with actionable errors if any prerequisite fails.
 #   2. Builds the contract Wasm via `stellar contract build`.
-#   3. Deploys the contract with deployer as treasury governor (or reuses active deployment).
-#   4. Prepares and verifies funded sender, recipient, and demo issuer identities.
-#   5. Deploys a SAC (Stellar Asset Contract) for custom demo asset and mints tokens to sender.
-#   6. Approves contract allowance and opens a 1-hour cancelable demo stream.
-#   7. Verifies initial accrual and prints a structured summary.
+#   3. Verifies those bytes against a signed release attestation and refuses to
+#      deploy if they are not proven (see docs/ATTESTATION.md).
+#   4. Deploys the contract with deployer as treasury governor (or reuses active deployment).
+#   5. Prepares and verifies funded sender, recipient, and demo issuer identities.
+#   6. Deploys a SAC (Stellar Asset Contract) for custom demo asset and mints tokens to sender.
+#   7. Approves contract allowance and opens a 1-hour cancelable demo stream.
+#   8. Verifies initial accrual and prints a structured summary.
 #
 # Environment variables (optional overrides for idempotency):
 #   DEPLOYER_KEY: Stellar identity alias for deployer (default: "deployer")
@@ -19,13 +21,24 @@
 #   TOKEN_ID:     Pre-deployed demo token address to reuse
 #   STREAM_ID:    Pre-created stream ID to reuse
 #
-# Requires: stellar-cli (>=25.2, tested on 28.1.0), cargo, curl, internet access.
+# Attestation gate:
+#   CONTRACT_WASM:                 deploy this artifact instead of building one
+#   WASM_ATTESTATION_TAG:          verify against this release (default: latest)
+#   WASM_ATTESTATION_FINGERPRINT:  pin the signing key, e.g. sha256:<hex>
+#   VERIFY_REQUIRE_REPRO:          0 to accept an attestation without a passing
+#                                  double build (default: 1)
+#   SKIP_WASM_ATTESTATION:         1 to deploy unverified local work, knowingly
+#
+# Requires: stellar-cli (>=25.2, tested on 28.1.0), cargo, curl, openssl,
+#           internet access.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NETWORK="testnet"
 WASM="target/wasm32v1-none/release/streampay_contract.wasm"
+WASM_ABS=""
+ATTESTATION_STATUS="NOT CHECKED"
 DEPLOYER_KEY="${DEPLOYER_KEY:-deployer}"
 CACHE_FILE="$REPO_ROOT/.testnet_contract_id"
 
@@ -109,10 +122,67 @@ DEPLOYER_ADDR="$(stellar keys address "$DEPLOYER_KEY" | clean_str | tail -n 1)"
 
 # ------------------------------------------------------------------- 2. build
 say "Building contract Wasm"
-# soroban-sdk 28 requires the stellar-cli build path for spec-shaking v2
-(cd "$REPO_ROOT/contracts/streaming-payments" && stellar contract build)
-[ -f "$REPO_ROOT/$WASM" ] || die "expected Wasm at $WASM after build"
-info "Wasm binary ready at: $WASM"
+if [ -n "${CONTRACT_WASM:-}" ]; then
+  [ -f "$CONTRACT_WASM" ] || die "CONTRACT_WASM not found: $CONTRACT_WASM"
+  WASM_ABS="$CONTRACT_WASM"
+  info "Using the supplied artifact instead of a local build: $WASM_ABS"
+else
+  # soroban-sdk 28 requires the stellar-cli build path for spec-shaking v2
+  (cd "$REPO_ROOT/contracts/streaming-payments" && stellar contract build)
+  [ -f "$REPO_ROOT/$WASM" ] || die "expected Wasm at $WASM after build"
+  WASM_ABS="$REPO_ROOT/$WASM"
+  info "Wasm binary ready at: $WASM"
+fi
+
+# ---------------------------------------------------- 2b. verify before deploy
+# A public chain cannot un-deploy, so the bytes are proven *before* they go on,
+# never after. This runs the same check an independent auditor would: recompute
+# the digest, fetch the signed attestation, verify the Ed25519 signature against
+# the key pinned in this checkout, and confirm the payload names these bytes.
+say "Verifying the Wasm against a signed release attestation"
+if [ "${SKIP_WASM_ATTESTATION:-0}" = "1" ]; then
+  warn "SKIP_WASM_ATTESTATION=1 — deploying WITHOUT attestation verification."
+  warn "Nothing proves these bytes match a reviewed, signed release."
+  ATTESTATION_STATUS="SKIPPED (SKIP_WASM_ATTESTATION=1)"
+else
+  verify_args=("$WASM_ABS")
+  if [ -n "${WASM_ATTESTATION_TAG:-}" ]; then
+    verify_args+=(--tag "$WASM_ATTESTATION_TAG")
+    info "pinned to release: $WASM_ATTESTATION_TAG"
+  else
+    info "no WASM_ATTESTATION_TAG set — resolving the latest published release"
+  fi
+  if [ "${VERIFY_REQUIRE_REPRO:-1}" = "1" ]; then
+    verify_args+=(--require-repro)
+  fi
+  if [ -n "${WASM_ATTESTATION_FINGERPRINT:-}" ]; then
+    verify_args+=(--fingerprint "$WASM_ATTESTATION_FINGERPRINT")
+  fi
+
+  if bash "$REPO_ROOT/scripts/verify_wasm.sh" "${verify_args[@]}"; then
+    ATTESTATION_STATUS="VERIFIED"
+  else
+    ATTESTATION_STATUS="FAILED"
+    die "attestation verification failed — refusing to deploy.
+
+  This local build is not the artifact any signed attestation describes. That is
+  the normal state when you are working on unreleased code, and it is also
+  exactly what a tampered build looks like, so this script cannot tell the two
+  apart for you. Choose deliberately:
+
+    • deploy the published, provable artifact instead of your local build:
+        gh release download <tag> --pattern 'streampay_contract.wasm' --dir /tmp
+        CONTRACT_WASM=/tmp/streampay_contract.wasm $0
+
+    • verify against a specific release:
+        WASM_ATTESTATION_TAG=v0.5.0 $0
+
+    • deploy unreleased local work to testnet anyway, knowingly:
+        SKIP_WASM_ATTESTATION=1 $0
+
+  See docs/ATTESTATION.md for what the check does and does not prove."
+  fi
+fi
 
 # ------------------------------------------------------------------ 3. deploy
 CONTRACT_ID="${CONTRACT_ID:-}"
@@ -136,7 +206,7 @@ if [ -n "$CONTRACT_ID" ] && is_contract_active "$CONTRACT_ID"; then
 else
   info "Deploying new contract to $NETWORK (governor: $DEPLOYER_ADDR)"
   CONTRACT_ID="$(stellar contract deploy \
-    --wasm "$REPO_ROOT/$WASM" \
+    --wasm "$WASM_ABS" \
     --source "$DEPLOYER_KEY" --network "$NETWORK" \
     -- --governor "$DEPLOYER_ADDR" | clean_str | tail -n 1)"
   [ -n "$CONTRACT_ID" ] || die "stellar contract deploy returned no contract id"
@@ -227,6 +297,7 @@ cat <<EOF
   Stream ID     : $STREAM_ID
   Token Address : $TOKEN
   Available Now : $AVAILABLE units
+  Attestation   : $ATTESTATION_STATUS
 
   Accounts:
     • Governor / Deployer : $DEPLOYER_ADDR

@@ -1,0 +1,244 @@
+# @streampay/sdk
+
+Typed TypeScript client for the StreamPay Soroban contract, generated from
+[`sdks/spec/streampay.spec.json`](../spec/streampay.spec.json).
+
+**This package is not published to npm.** Use the workspace or an `npm pack`
+tarball:
+
+```bash
+# from a checkout of this repository
+cd sdks/typescript
+npm ci
+npm run build          # emits dist/
+
+# in another project: pack it here, install the tarball there
+npm pack               # streampay-sdk-0.3.0.tgz
+npm install /path/to/streampay-sdk-0.3.0.tgz @stellar/stellar-sdk
+```
+
+If it is ever published, the StreamPay maintainers (the Neziahtech organisation
+owners) are the ones who hold the npm scope and run the release. Until then,
+`npm install @streampay/sdk` will 404 and is not the documented path.
+
+Requires Node 20+.
+
+## Quickstart against testnet
+
+```ts
+import { Keypair, Networks } from "@stellar/stellar-sdk";
+import { StreamPayClient, signerFromKeypair } from "@streampay/sdk";
+
+const keypair = Keypair.fromSecret(process.env.STELLAR_SECRET!);
+
+const client = new StreamPayClient({
+  contractId: process.env.STREAM_CONTRACT_ID!,
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: Networks.TESTNET,
+  signer: signerFromKeypair(keypair),
+});
+
+// Every operation takes one named-argument object; reads need no signer.
+const stream = await client.getStream({ streamId: 1n });
+console.log(stream.deposit, stream.status, stream.startTime, stream.useOracle);
+// `useOracle` is `boolean | null` (the contract's `Option<bool>`): `null` is a
+// record written before the oracle clock existed and settles on ledger time,
+// exactly like `false`. The `create_stream_with_oracle` / `resolve_time`
+// arguments stay a plain `boolean`.
+
+// Mutating calls: build -> simulate -> sign -> send -> poll -> decode
+const id = await client.createStream({
+  sender: keypair.publicKey(),
+  recipient: "G…recipient",
+  token: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", // testnet native SAC
+  depositAmount: 10_000_000n,
+  startTime: Math.floor(Date.now() / 1000) + 1,
+  endTime: Math.floor(Date.now() / 1000) + 3600,
+  cancelable: true,
+});
+
+const paid = await client.withdrawMax({ streamId: id });
+```
+
+Oracle-settled streams use the same shape with `createStreamWithOracle`:
+
+```ts
+await client.createStreamWithOracle({ ...createStreamArgs, useOracle: true });
+```
+
+The client exposes every contract entrypoint in the spec (`createStreams`,
+`createStreamsBatch`, `scheduleStream`, treasury/fee, the `policy_*` set,
+governor rotation and upgrades, freeze, disputes, rate changes, the sponsor
+relay, ownership transfer, oracle configuration, the `governance_*` timelock,
+…) with the same one-object calling convention. `FUNCTIONS` and `METHODS`
+export the generated operation metadata.
+
+Contract enums follow the contract's wire encoding: unit enums are string
+unions (`"Active" | "Cancelled" | "Depleted"`, encoded `Vec[Symbol]`), and
+payload enums such as `GovernanceAction` are tagged objects:
+
+```ts
+await client.governancePropose({
+  caller: signerAddress,
+  action: { variant: "SetFeeBps", payload: [25] },
+});
+```
+
+For a browser wallet, pass any object implementing `Signer`:
+
+```ts
+import { signTransaction } from "@stellar/freighter-api";
+import type { Signer } from "@streampay/sdk";
+
+const freighter: Signer = {
+  publicKey: () => address, // from freighter requestAccess()
+  async signTransaction(xdr, { networkPassphrase }) {
+    const { signedTxXdr } = await signTransaction(xdr, { networkPassphrase });
+    return { signedTxXdr };
+  },
+};
+```
+
+The pipeline mirrors `frontend/lib/stellar.ts`: simulate first (early typed
+contract errors), assemble, sign, submit, poll, then decode the return value.
+
+## Method examples
+
+Every example under [`examples/`](./examples) is a complete, copy-pasteable
+script against testnet, written with the SDK's own generated types. Each row
+below links its runnable file, and the files are typechecked in CI
+(`npm run typecheck`), so they cannot drift from the API.
+
+| Method | Example | Returns |
+|---|---|---|
+| `createStream` | [`examples/create-stream.ts`](./examples/create-stream.ts) | `bigint` — new stream id |
+| `topUp` | [`examples/top-up.ts`](./examples/top-up.ts) | `void` — deposit grows; read it back with `getStream` |
+| `withdraw` | [`examples/withdraw.ts`](./examples/withdraw.ts) | `void` — `Stream.withdrawn` grows |
+| `withdrawMax` | [`examples/withdraw-max.ts`](./examples/withdraw-max.ts) | `bigint` — amount paid |
+| `pauseStream` / `resumeStream` | [`examples/pause-resume.ts`](./examples/pause-resume.ts) | `void` — `endTime` shifts on resume |
+| `cancelStream` | [`examples/cancel-stream.ts`](./examples/cancel-stream.ts) | `void` — pro-rata split to both sides |
+| `createStreams` / `createStreamsBatch` | [`examples/batch.ts`](./examples/batch.ts) | `bigint[]` / per-entry `{ ok }` or `{ error }` |
+| `getStream`, `available`, `recipientStreams`, `streamIds`, `streamsFor` | [`examples/reads.ts`](./examples/reads.ts) | typed `Stream`, `bigint` accrual, index pages |
+| `decodeEvent` / `decodeEvents` | [`examples/decode-events.ts`](./examples/decode-events.ts) | `StreamPayEvent[]` |
+
+Each script reads its configuration from the environment:
+
+| Variable | Used by |
+|---|---|
+| `STREAM_CONTRACT_ID` | all examples |
+| `TOKEN_CONTRACT_ID` | `create`, `top-up`, `batch` |
+| `STELLAR_SECRET` | `create`, `top-up`, `pause/resume`, `cancel`, `batch` (sender) |
+| `RECIPIENT_ADDRESS` | `create`, `batch`, `reads` |
+| `RECIPIENT_SECRET` | `withdraw`, `withdrawMax` |
+
+Mutating examples need a funded sender. Fund it with Friendbot and approve the
+contract as a spender before running (the whole funded walkthrough, including
+the demo token, is in [`docs/DEMO.md`](../../docs/DEMO.md#step-1-generate--fund-keypairs)):
+
+```bash
+curl -s "https://friendbot.stellar.org?addr=$STELLAR_PUBLIC" >/dev/null
+stellar contract invoke --id "$TOKEN_CONTRACT_ID" --source sender --network testnet \
+  -- approve --spender "$STREAM_CONTRACT_ID" --amount 10000000 --expiration_ledger +5000
+```
+
+The examples are typechecked, not executed, by CI. To paste one into a project
+that installed the SDK tarball, keep the snippets as they are — the imports are
+`@streampay/sdk` in both the README and the example files.
+
+## Events
+
+Events from RPC are base64 `ContractEvent` XDR. `rpc.Server._getEvents`
+returns that raw shape (`event.value`); `getEvents` parses it into ScVals:
+
+```ts
+import { decodeEvents } from "@streampay/sdk";
+
+const events = decodeEvents(rawGetEventsResponse.events.map((event) => event.value));
+// StreamCreatedEvent | WithdrawnEvent | … (all contract events)
+for (const event of events) {
+  if (event.type === "StreamCreated") {
+    console.log(event.streamId, event.deposit, event.sender);
+  }
+}
+```
+
+Malformed XDR throws; events from other contracts are not returned.
+
+### Resumable indexer subscription
+
+Configure the indexer's SSE endpoint on the client to subscribe to one stream:
+
+```ts
+const client = new StreamPayClient({
+  contractId: process.env.STREAM_CONTRACT_ID!,
+  eventFeedUrl: "https://indexer.example/events/stream",
+});
+const controller = new AbortController();
+
+for await (const event of client.subscribeEvents(1n, {
+  fromCursor: "evt-123",
+  signal: controller.signal,
+  onError: (error) => console.warn("Event feed reconnecting:", error),
+})) {
+  // `event.type` is the generated event discriminator.
+  // The feed may replay events, so deduplicate by `event.id` before applying
+  // non-idempotent state changes.
+  console.log(event.id, event.type, event.data);
+}
+
+// Stop the iterator from another task:
+controller.abort();
+```
+
+The indexer feed is at-least-once: a reconnect may replay the last event.
+`id`/`cursor` is the stable deduplication key. The subscription reconnects
+from its latest received ID with exponential backoff; unknown event names are
+skipped, matching the generated decoder's `null` result for unregistered
+events.
+
+## Index pagination
+
+```ts
+const ids = await client.streamIds("recipient", address);
+const streams = await client.streamsFor("recipient", address);
+```
+
+`streamIds` follows the on-chain `recipient_streams` / `sender_streams` pages
+until exhausted, clamping the page size to `MAX_PAGE_SIZE`. `streamsFor` skips
+ids that no longer resolve.
+
+## Errors
+
+`StreamPayError` carries the failing stage and the catalog-backed contract code:
+
+```ts
+import { StreamPayError } from "@streampay/sdk";
+
+try {
+  await client.withdraw({ streamId: 1n, amount: 1n });
+} catch (error) {
+  if (error instanceof StreamPayError) {
+    console.log(error.kind);      // simulation | submission | inclusion | decode | transport
+    console.log(error.contract);  // { code: 10, name: "AmountExceedsAvailable" }
+    console.log(error.transactionXdr);
+  }
+}
+```
+
+The error table is generated from the canonical catalog
+(`frontend/lib/errors.ts`), not restated by this package.
+
+## Conformance
+
+`npm test` runs the vector suite plus codec round-trips, pagination, event, and
+error tests. `npm run conformance -- ../vectors` prints this SDK's canonical
+decode for the shared fixtures.
+
+## Versioning and publishing
+
+The package version tracks the contract release line (currently `0.3.0`).
+Whether `@streampay/sdk` is published at all is undecided and is the StreamPay
+maintainers' call; if it is, they hold the npm scope and run the release.
+Until then `npm pack` / the workspace path is the supported distribution.
+CI runs `npm pack --dry-run` only; no registry credentials are used by pull
+requests.

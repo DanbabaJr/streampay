@@ -1,7 +1,7 @@
 {
   "name": "streampay-scripts",
   "private": true,
-  "description": "Standalone audit tooling for StreamPay: scripts/verify-fees.ts reconciles the on-chain protocol-fee ledger against its event trail.",
+  "description": "Standalone audit tooling for StreamPay: scripts/verify-fees.ts reconciles the on-chain protocol-fee ledger against its event trail; scripts/key_rotation_drill.ts runs the quarterly key-rotation drill on a fresh testnet deploy.",
   "type": "module",
   "engines": {
     "node": ">=22.6"
@@ -9,6 +9,10 @@
   "scripts": {
     "verify-fees": "node verify-fees.ts",
     "demo-anchor": "node anchor_offramp_demo.js",
+    "clock-skew-probe": "node clock-skew-probe.mjs",
+    "drill:key-rotation": "node --experimental-strip-types key_rotation_drill.ts",
+    "migrate-audit": "node --experimental-strip-types migrate_audit.ts",
+    "lint:docs-links": "node check_docs_links.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

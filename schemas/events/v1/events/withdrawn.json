@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/withdrawn.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the recipient withdraws accrued funds.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "withdrawn_total": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "recipient",
+    "amount",
+    "withdrawn_total"
+  ],
+  "title": "Withdrawn",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "withdrawn",
+    "fingerprint": "sha256:f236ec39ef8dd77ec1e7b30edbfc08ea71734a2ddc55d234bc8e434f8dcf3277",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

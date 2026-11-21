@@ -7,8 +7,23 @@ export interface DecodedEvent {
   ledgerClosedAt: string;
   contractId: string;
   name: string;
-  streamId: string;
+  /**
+   * The stream this event is about, from the registry-declared `stream_id`
+   * topic — `null` for the events that have no stream (admin, oracle, sponsor,
+   * policy and governance traffic). Never inferred from another topic: the
+   * first positional value of `contract_frozen_state_changed` is a bool, so
+   * inference used to index such events under a stream id of "true".
+   */
+  streamId: string | null;
   data: Record<string, EventValue>;
+  txHash?: string;
+  traceId?: string;
+  spanId?: string;
+  linkedSpanContext?: {
+    traceId: string;
+    spanId: string;
+    traceFlags: number;
+  };
 }
 
 export interface RpcEvent {
@@ -19,6 +34,8 @@ export interface RpcEvent {
   contractId: string;
   topic: (string | unknown)[];
   value: string | unknown;
+  txHash?: string;
+  transactionHash?: string;
 }
 
 export interface Stream {
@@ -36,6 +53,17 @@ export interface Stream {
   cancelled_by?: string | null;
   recipient_amount?: string | null;
   sender_amount?: string | null;
+  refund_target?: string | null;
   lastLedger: number;
   updatedAt: string;
+}
+
+export interface StreamServerEvent {
+  id: string;
+  streamId: string;
+  eventType: string;
+  ledger: number;
+  ledgerClosedAt: string;
+  data: Record<string, EventValue>;
+  stream?: Stream;
 }

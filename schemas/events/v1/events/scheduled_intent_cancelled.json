@@ -1,0 +1,45 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/scheduled_intent_cancelled.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a sender cancels a not-yet-executable intent and is refunded the escrow for all outstanding occurrences.",
+  "properties": {
+    "refund": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender",
+    "refund"
+  ],
+  "title": "ScheduledIntentCancelled",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "scheduled_intent_cancelled",
+    "fingerprint": "sha256:fe727619a69c546daa9f512a6cbe4162453a8404bd8dba614384557f162e5f0e",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "intent_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

@@ -40,16 +40,39 @@ pub enum ModelError {
     NoPendingGovernor = 16,
     /// Treasury withdrawal exceeds collectible balance.
     InsufficientTreasuryBalance = 17,
+    /// No scheduled intent exists with the provided id.
+    IntentNotFound = 18,
+    /// The scheduled intent is not pending (already executed, cancelled, or
+    /// expired), so the operation is not permitted.
+    IntentNotPending = 19,
+    /// Execution was attempted before the intent's `execute_after` (for the
+    /// next outstanding occurrence).
+    IntentNotYetExecutable = 20,
+    /// Execution or cancellation was attempted at/after the intent's
+    /// `expires_at`; the funds are reclaimable via `reclaim_expired`.
+    IntentExpired = 21,
+    /// The sender tried to cancel an intent whose execution window has already
+    /// opened; cancellation is only allowed before `execute_after`.
+    IntentNotCancellable = 22,
+    /// The scheduling parameters are inconsistent (bad occurrence/interval
+    /// combination, negative fee budget, ordering of `execute_after` /
+    /// `start_time` / `expires_at`, or an overflowing recurrence window).
+    InvalidScheduleParameters = 23,
+    /// A defensive integrity check failed: the stored intent's parameters no
+    /// longer hash to the commitment recorded when it was scheduled.
+    IntentParamsMismatch = 24,
+    /// `reclaim_expired` was called before the intent's `expires_at`.
+    IntentNotExpired = 25,
     /// Token pull in create_stream failed.
-    DepositTransferFailed = 18,
+    DepositTransferFailed = 26,
     /// Token pull in top_up failed.
-    TopUpTransferFailed = 19,
+    TopUpTransferFailed = 27,
     /// Payout of accrued funds to recipient failed.
-    RecipientPayoutFailed = 20,
+    RecipientPayoutFailed = 28,
     /// Refund of unaccrued funds to sender failed.
-    SenderRefundFailed = 21,
+    SenderRefundFailed = 29,
     /// Payout of collected fees in withdraw_treasury failed.
-    TreasuryPayoutFailed = 22,
+    TreasuryPayoutFailed = 30,
 }
 
 impl ModelError {

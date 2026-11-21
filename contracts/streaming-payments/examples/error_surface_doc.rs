@@ -1,4 +1,4 @@
-//! Generates `docs/ERRORS.md` from the error-surface branch registry.
+//! Generates `docs/ERROR_SURFACE.md` from the error-surface branch registry.
 //!
 //! Run from the workspace root:
 //!
@@ -6,7 +6,7 @@
 //! cargo run -p streampay-contract --example error_surface_doc
 //! ```
 //!
-//! CI runs this and then `git diff --exit-code docs/ERRORS.md`, so the table can
+//! CI runs this and then `git diff --exit-code docs/ERROR_SURFACE.md`, so the table can
 //! never drift from `surface.rs` / `errors.rs`. Because the document is emitted
 //! from the same table the tests are generated from, there is no hand-maintained
 //! mapping to keep in sync.
@@ -163,7 +163,7 @@ fn main() {
         out.push_str(".\n");
     }
 
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ERRORS.md");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ERROR_SURFACE.md");
     std::fs::write(&path, out).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     println!("wrote {}", path.display());
 }

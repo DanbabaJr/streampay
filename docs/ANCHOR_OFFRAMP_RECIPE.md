@@ -2,7 +2,7 @@
 
 > **Document Status**: Production Architecture Recipe & Prototyping Guide  
 > **Target Audience**: Integrators, Payroll Ops, Frontend Engineers building StreamPay payout flows.  
-> **Demo Reference Script**: [`scripts/anchor_offramp_demo.js`](file:///c:/Users/oguekemma%20afoma/drips/kosi/streampay/scripts/anchor_offramp_demo.js)
+> **Demo Reference Script**: [`scripts/anchor_offramp_demo.js`](../scripts/anchor_offramp_demo.js)
 
 ---
 
@@ -202,7 +202,7 @@ When pitching or deploying StreamPay as a payroll backbone, clear boundaries bet
 
 ## 6. Running the Demo Script
 
-The repository includes a working, zero-dependency demonstration script: [`scripts/anchor_offramp_demo.js`](file:///c:/Users/oguekemma%20afoma/drips/kosi/streampay/scripts/anchor_offramp_demo.js).
+The repository includes a working, zero-dependency demonstration script: [`scripts/anchor_offramp_demo.js`](../scripts/anchor_offramp_demo.js).
 
 ### Execution
 

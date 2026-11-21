@@ -2,7 +2,10 @@
 resolver = "2"
 members = [
     "contracts/streaming-payments",
+    "contracts/passkey-signer",
+    "contracts/vault",
     "model",
+    "tools/streampay-state",
 ]
 # The fuzz harness is its own workspace (cargo-fuzz needs nightly-only
 # settings that must not leak into the contract build).
