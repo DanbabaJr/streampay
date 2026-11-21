@@ -212,4 +212,68 @@ export const es: Record<MessageKey, string> = {
   "form.amountTooPrecise":
     "Este token tiene como máximo {decimals, number} decimales: el importe que escribiste tendría que redondearse.",
   "form.amountInvalid": "Ese importe no se puede leer.",
+
+  "form.recipientRequired": "Introduce una dirección de beneficiario.",
+  "form.recipientInvalid":
+    "Introduce una dirección de Stellar válida (G… con una suma de comprobación válida).",
+  "form.tokenRequired": "Introduce un ID de contrato de token.",
+  "form.tokenInvalid":
+    "Introduce un ID de contrato de token válido (C… con una suma de comprobación válida).",
+  "form.durationInvalid":
+    "Introduce una duración en días mayor que cero (hasta 36.500 días).",
+  "form.durationTooLong":
+    "La duración supera el máximo del protocolo de {max, number} segundos.",
+  "form.depositTooSmallForDuration":
+    "El depósito es demasiado pequeño para esta duración: se necesitan al menos {min} para que el stream acumule.",
+  "form.depositTooLarge":
+    "El depósito es demasiado grande para esta duración: reduce el depósito o acorta la duración.",
+  "form.depositTransferFailed":
+    "No se pudo tomar el depósito: comprueba tu saldo y la autorización del token para el depósito más la comisión.",
+  "form.recipientPayoutFailed":
+    "No se pudo pagar al beneficiario: comprueba que la dirección tenga una trustline válida y esté autorizada.",
+  "form.assetNotAllowed":
+    "Este token no está en la lista de permitidos de la política de gobernanza.",
+  "form.batchEmpty": "Añade al menos una fila del CSV.",
+  "form.batchTooLarge": "El lote tiene demasiadas filas (máximo {max, number}).",
+  "form.batchRowIssue": "Fila {row, number}: {detail}",
+
+  "notFound.notFound": "No encontrado",
+  "notFound.badRequest": "Problema en la solicitud",
+  "notFound.stream.title": "Stream no encontrado",
+  "notFound.stream.lookedFor": "Hemos buscado el ID del stream en esta URL.",
+  "notFound.stream.why":
+    "No existe ningún stream con ese ID en esta red. Puede que nunca se haya creado o que el enlace esté incompleto.",
+  "notFound.stream.next":
+    "Comprueba el ID del stream o vuelve al panel y ábrelo desde tu lista de streams.",
+  "notFound.stream.malformedTitle": "ID de stream no válido",
+  "notFound.stream.malformedBody":
+    "«{id}» no es un ID de stream válido. Los ID de stream son números enteros.",
+  "notFound.address.title": "Dirección no encontrada",
+  "notFound.address.lookedFor": "Hemos buscado la dirección de Stellar en esta URL.",
+  "notFound.address.why":
+    "Esta dirección no ha creado ni recibido ningún stream de pagos en esta red.",
+  "notFound.address.next":
+    "Comprueba si hay errores en la dirección o empieza desde el panel y abre tus propios streams.",
+  "notFound.address.malformedTitle": "Dirección no válida",
+  "notFound.address.malformedBody":
+    "«{address}» no es una dirección de Stellar válida. Debe ser una clave pública de 56 caracteres que empiece por G.",
+  "notFound.pay.title": "Enlace de pago no encontrado",
+  "notFound.pay.lookedFor": "Hemos buscado la referencia de pago en este enlace.",
+  "notFound.pay.why":
+    "Este enlace es desconocido. Puede que se haya escrito mal o esté truncado.",
+  "notFound.pay.next":
+    "Pide al pagador que vuelva a enviarte el enlace o abre el panel.",
+  "notFound.pay.malformedTitle": "Enlace de pago no válido",
+  "notFound.pay.malformedBody": "Este enlace de pago está mal formado o dañado.",
+
+  "share.heading": "Comparte este enlace de pago",
+  "share.body":
+    "Escanea el código QR o copia el enlace. La referencia se genera en tu navegador y nunca se envía a terceros.",
+  "share.qrLabel": "Código QR de este enlace de pago",
+  "share.copy": "Copiar enlace",
+  "share.copyLabel": "Copiar el enlace de pago al portapapeles",
+  "share.copied": "Enlace de pago copiado al portapapeles.",
+  "share.copiedButton": "¡Copiado!",
+  "share.copyFailed":
+    "No se pudo copiar el enlace. Selecciónalo y cópialo manualmente.",
 };
