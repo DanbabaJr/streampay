@@ -6,6 +6,22 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
+## v1.0.4 — 2026-11-20 (receivables advances, release conditions, stream templates and callback hooks, #620)
+
+Eleven additive events; no existing event changed shape (entry count 51 → 62).
+
+- `AdvanceDrawn`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `fee`, `repayment_bps`) — emitted when `draw_advance` lends against a recipient's unaccrued stream value.
+- `AdvanceRepaid`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `remaining_owed`) — emitted when `repay_advance` settles part or all of an outstanding advance.
+- `AdvanceLiquidated`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `remaining_unpaid`) — emitted when a cancellation intercepts the refund to settle an advance that outlived its stream.
+- `ConditionRegistered`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when `register_condition` attaches an oracle-attested release predicate to a stream.
+- `ConditionMet`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when quorum attestations satisfy a registered condition and the release gate opens.
+- `ConditionExpired`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when a condition passes its horizon unmet and stops gating withdrawals.
+- `TemplateApproved`: added event (topic `template_id:u32`, data `version`, `token`, `duration`) — emitted when an admin approves a template revision for instantiation.
+- `TemplateInstantiated`: added event (topic `template_id:u32`, data `version`, `stream_id`, `sender`, `recipient`, `deposit`) — emitted when `instantiate_template` opens a stream from an approved template, recording the lineage edge.
+- `HookRegistered`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`, `selector`) — emitted when a stream attaches a post-action callback to an event class.
+- `HookInvoked`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`) — emitted after the hook-bearing action's state is committed and the callback ran successfully.
+- `HookFailed`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`, `error_code`) — emitted when a callback traps; the guarded action's fate follows the hook's failure policy.
+
 ## v1.0.3 — 2026-10-25 (stream pause / resume, issue #24)
 
 Two additive events; no existing event changed shape (entry count 49 → 51).

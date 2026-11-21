@@ -214,6 +214,63 @@ export const en = {
   "form.amountTooPrecise":
     "This token has at most {decimals, number} decimal places — the amount you typed would have to be rounded.",
   "form.amountInvalid": "That is not a readable amount.",
+  "form.recipientRequired": "Enter a recipient address.",
+  "form.recipientInvalid": "Enter a valid Stellar address (G… with a valid checksum).",
+  "form.tokenRequired": "Enter a token contract id.",
+  "form.tokenInvalid": "Enter a valid token contract id (C… with a valid checksum).",
+  "form.durationInvalid": "Enter a duration in days greater than zero (up to 36,500 days).",
+  "form.durationTooLong": "Duration exceeds the protocol maximum of {max, number} seconds.",
+  "form.depositTooSmallForDuration":
+    "Deposit is too small for this duration — at least {min} is needed so the stream accrues.",
+  "form.depositTooLarge":
+    "Deposit is too large for this duration — reduce the deposit or shorten the duration.",
+  "form.depositTransferFailed":
+    "The deposit could not be pulled — check your balance and token allowance for the deposit plus fee.",
+  "form.recipientPayoutFailed":
+    "The recipient could not be paid — check that the address has a valid trustline and is authorized.",
+  "form.assetNotAllowed": "This token is not on the governance policy allowlist.",
+  "form.batchEmpty": "Add at least one CSV row.",
+  "form.batchTooLarge": "The batch has too many rows (maximum {max, number}).",
+  "form.batchRowIssue": "Row {row, number}: {detail}",
+
+  "notFound.notFound": "Not found",
+  "notFound.badRequest": "Request problem",
+  "notFound.stream.title": "Stream not found",
+  "notFound.stream.lookedFor": "We looked for the stream id in this URL.",
+  "notFound.stream.why":
+    "No stream with that id exists on this network. It may never have been created, or the link may be incomplete.",
+  "notFound.stream.next":
+    "Check the stream id, or head back to the dashboard and open it from your stream list.",
+  "notFound.stream.malformedTitle": "Invalid stream id",
+  "notFound.stream.malformedBody":
+    "“{id}” is not a valid stream id. Stream ids are whole numbers.",
+  "notFound.address.title": "Address not found",
+  "notFound.address.lookedFor": "We looked for the Stellar address in this URL.",
+  "notFound.address.why":
+    "This address has not created or received any payment streams on this network.",
+  "notFound.address.next":
+    "Check the address for typos, or start from the dashboard and open your own streams.",
+  "notFound.address.malformedTitle": "Invalid address",
+  "notFound.address.malformedBody":
+    "“{address}” is not a valid Stellar address. It must be a 56-character public key starting with G.",
+  "notFound.pay.title": "Payment link not found",
+  "notFound.pay.lookedFor": "We looked for the payment reference in this link.",
+  "notFound.pay.why":
+    "This link is unknown. It may have been mistyped or truncated.",
+  "notFound.pay.next":
+    "Ask the payer to send the link again, or open the dashboard.",
+  "notFound.pay.malformedTitle": "Invalid payment link",
+  "notFound.pay.malformedBody": "This payment link is malformed or corrupted.",
+
+  "share.heading": "Share this payment link",
+  "share.body":
+    "Scan the QR code or copy the link. The reference is generated in your browser and never sent to a third party.",
+  "share.qrLabel": "QR code for this payment link",
+  "share.copy": "Copy link",
+  "share.copyLabel": "Copy payment link to clipboard",
+  "share.copied": "Payment link copied to clipboard.",
+  "share.copiedButton": "Copied!",
+  "share.copyFailed": "Could not copy the link. Select it and copy manually.",
 } as const;
 
 export type MessageKey = keyof typeof en;

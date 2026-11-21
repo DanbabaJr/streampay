@@ -82,6 +82,62 @@ of the projection: it accrues every second and is not stored contract state.
 `--interval` is in milliseconds. Values below **1000 ms** are rejected with
 exit code 2 so a forgotten flag cannot burn an RPC budget at sub-second
 cadence. The default is 5000 ms.
+## Profiles
+
+Named profiles store the settings you otherwise repeat on every call.
+
+```bash
+# A custom profile: a local sandbox RPC with its own passphrase.
+streampay profile set sandbox --network testnet \
+  --rpc-url http://localhost:8000/soroban/rpc \
+  --passphrase "Standalone Network ; February 2017" \
+  --contract <CONTRACT_ID> --signer env --secret-env MY_STELLAR_KEY
+
+streampay profile use sandbox                  # make it the default
+streampay claim-all                            # uses the default profile
+streampay --profile testnet --contract <ID> --dry-run --signer ledger \
+  --source <G...> claim-all                    # another profile, flags still win
+
+streampay profile list | show <name> | remove <name> | resolve
+```
+
+`testnet` and `mainnet` are built in and always exist; a profile with the same
+name overrides individual settings (`profile remove` reverts it). A profile must
+name its `network`; `contract`, `rpc-url`, `passphrase`, `signer`, `source`,
+`key-file`, `secret-env` and `password-env` are optional.
+
+**Precedence** for every setting is *flag > profile > built-in default*.
+`streampay profile resolve [--profile <name>] [flags]` prints each effective
+setting with its source (`flag`, `profile:<name>` or `default`), so you can see
+exactly what a command would use. The profile is picked by `--profile`, else the
+config's default (`profile use`), else none. A command whose profile has no
+contract fails with exit code 2 before any RPC call, as does an unknown profile
+(the error lists the known ones) or an invalid setting.
+
+**Secrets are never stored.** A profile holds *references*: the **name** of an
+environment variable (`--secret-env`, `--password-env`) or the path of an
+encrypted key file (`--key-file`, see `key encrypt`). Anything that looks like a
+secret key (a Stellar `S...` seed or a 64-character hex key) is rejected, both
+when you save a profile and when the config is loaded, wherever in the file it
+appears; so are credentials embedded in an RPC URL and settings named `secret`,
+`password`, `seed`, `mnemonic` or `private-key`. The error says how to reference
+a secret instead and never repeats it. If a secret ever ends up in the file,
+remove it and rotate the key. The config is written atomically, readable only by
+you (mode `0600`).
+
+**Config file location** (override with `--config <path>` or
+`$STREAMPAY_CONFIG`):
+
+| Platform | Path |
+|---|---|
+| Linux, macOS | `$XDG_CONFIG_HOME/streampay/config.json`, else `~/.config/streampay/config.json` |
+| Windows | `%APPDATA%\streampay\config.json` |
+
+The file is JSON: `{ "version": 1, "defaultProfile": "sandbox", "profiles": { ... } }`.
+A malformed config (invalid JSON, wrong version, unknown setting, bad value, a
+secret) fails with error code `CONFIG` and exit code 2, names the file, and is
+**never overwritten**: fix or delete it. `profile` commands emit the same
+`schemaVersion: 1` JSON with `--json`.
 
 ## Shell completions
 
@@ -154,7 +210,7 @@ Exit codes:
 |---:|---|
 | 0 | Success, simulation, preparation, no eligible claims, or a clean SIGINT shutdown of `--watch` |
 | 1 | RPC or on-chain submission failure |
-| 2 | Invalid command or arguments (including a sub-minimum `--interval`) |
+| 2 | Invalid command or arguments (including a sub-minimum `--interval`), or an invalid profile/config (`error.code` `USAGE` or `CONFIG`) |
 | 3 | Signer or encrypted key failure |
 | 4 | Soroban simulation rejected the operation (e.g. `get_stream` on a missing stream) |
 | 5 | Transaction inclusion timeout |

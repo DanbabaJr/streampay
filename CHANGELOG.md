@@ -10,6 +10,32 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- `streampay-state verify --format json` (#522): a versioned, machine-readable
+  verify report with a published JSON Schema (`tools/streampay-state/json-schema-v1.json`,
+  draft 2020-12; additive-only within v1), per-violation `check` identifiers and
+  a field reference in `tools/streampay-state/README.md`. The default text
+  output and exit codes are unchanged. Tests validate every report emitted for
+  the new snapshot fixtures against the schema. `jsonschema` is a dev-dependency.
+- `streampay-state diff --a <file> --b <file>` (#521): deterministic comparison
+  of two state snapshots, reporting added / removed / changed records per key
+  family with field-level deltas, as a human summary or a JSON report
+  (`--format json`). Exit codes: 0 identical, 1 differences, 2 error (nothing is
+  written to stdout on error). Export provenance (`exported_at`, `rpc_url`,
+  `latest_ledger`) is reported but ignored unless `--include-provenance`.
+  Documented in `tools/streampay-state/DIFF.md`.
+- `docs/WAVE_CONTRIBUTORS.md`: contributor guide for Drips Wave issues (claim,
+  branch/PR conventions, CI job to local command map, review and resolution),
+  cross-linked from the README and CONTRIBUTING.
+- CLI network profiles (#520): `streampay profile set|list|show|remove|use|resolve`
+  and `--profile` / `--config`. Named profiles (built-in `testnet` and `mainnet`
+  plus your own, e.g. a sandbox RPC) store network, RPC, contract and signer
+  settings in a config file (`$XDG_CONFIG_HOME/streampay/config.json`, or
+  `%APPDATA%\streampay\config.json` on Windows). Precedence is flag > profile >
+  default; `profile resolve` shows where each setting comes from. Secret material
+  is never stored: only environment-variable names and key-file paths are
+  accepted, and anything that looks like a key is rejected on save and on load.
+  Invalid, unknown or contract-less profiles fail with exit code 2 before any RPC
+  call. Existing invocations are unchanged.
 - CLI shell completions (#518): `streampay completion <bash|zsh|fish>` prints a
   static completion script generated from the CLI's command registry
   (`tools/streampay-cli/src/registry.ts`), which the argument parser and

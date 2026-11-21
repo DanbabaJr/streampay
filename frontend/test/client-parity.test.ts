@@ -14,6 +14,11 @@ import {
 } from "../../tools/streampay-cli/src/cli.ts";
 import { durationSecondsFromDays as canonicalDurationSecondsFromDays } from "../../scripts/lib/duration.ts";
 import { durationSecondsFromDays as frontendDurationSecondsFromDays } from "../lib/duration.ts";
+import {
+  MAX_BATCH,
+  MAX_DURATION_SECONDS,
+  MIN_BATCH,
+} from "../lib/protocol-limits.ts";
 
 const fixtures = JSON.parse(readFileSync(new URL("../../tests/client-parity/fixtures.json", import.meta.url), "utf8")) as {
   operationAddresses: { contract: string; token: string; sender: string; recipient: string };
@@ -150,4 +155,16 @@ test("frontend create-stream duration path builds canonical XDR for duration fix
     );
     assert.equal(operation.toXDR("base64"), expected.toXDR("base64"));
   }
+});
+
+test("frontend protocol ceilings match the SDK spec constants", () => {
+  // The validation bounds in lib/protocol-limits.ts are the frontend's copy
+  // of the contract constants; the spec is what generates the SDK's, so a
+  // contract change fails here instead of validating against a stale bound.
+  const spec = JSON.parse(
+    readFileSync(new URL("../../sdks/spec/streampay.spec.json", import.meta.url), "utf8")
+  ) as { constants: Record<string, { value: number }> };
+  assert.equal(MAX_DURATION_SECONDS, spec.constants.MAX_DURATION_SECONDS.value);
+  assert.equal(MAX_BATCH, spec.constants.MAX_BATCH.value);
+  assert.equal(MIN_BATCH, spec.constants.MIN_BATCH.value);
 });

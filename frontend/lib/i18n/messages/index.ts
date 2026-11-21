@@ -67,6 +67,12 @@ export interface MessageParams {
   "form.policyDurationHigh": { actual: number; max: number };
   "form.policyRateLow": { rate: string; min: string };
   "form.policyRateHigh": { rate: string; max: string };
+  "form.durationTooLong": { max: number };
+  "form.depositTooSmallForDuration": { min: string };
+  "form.batchTooLarge": { max: number };
+  "form.batchRowIssue": { row: number; detail: string };
+  "notFound.stream.malformedBody": { id: string };
+  "notFound.address.malformedBody": { address: string };
 }
 
 export type ParamsOf<K extends MessageKey> = K extends keyof MessageParams
@@ -121,6 +127,12 @@ export const MESSAGE_SAMPLES: { [K in keyof MessageParams]: MessageParams[K] } =
   "form.policyDurationHigh": { actual: 60, max: 300 },
   "form.policyRateLow": { rate: "1", min: "10" },
   "form.policyRateHigh": { rate: "100", max: "10" },
+  "form.durationTooLong": { max: 3155760000 },
+  "form.depositTooSmallForDuration": { min: "2,592" },
+  "form.batchTooLarge": { max: 25 },
+  "form.batchRowIssue": { row: 2, detail: "Enter a valid Stellar address." },
+  "notFound.stream.malformedBody": { id: "abc" },
+  "notFound.address.malformedBody": { address: "GABC" },
 };
 
 /** Every key, in catalog order. Used by the snapshot suite and the CI check. */
