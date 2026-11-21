@@ -135,14 +135,15 @@ the source, then regenerate.
 | `docs/ERROR_SURFACE.md` | `contracts/streaming-payments/src/errors.rs` + `surface.rs`, via the `error_surface_doc` cargo example | "Error-surface table is up to date" (Contract) |
 | `docs/errors.md`, `docs/errors/<code>.md`, `frontend/lib/errors.ts` | the same error surface, via `tooling/generate-error-catalog.mjs` | "Error catalog is up to date" (Perf budgets) |
 | `tests/vectors/accrual_vectors.json` | the Rust reference model, via `scripts/generate-vectors.mjs` | "Differential vectors are up to date" (Frontend) |
+| `docs/openapi.json`, `frontend/public/openapi.json` | `frontend/lib/openapi.ts` (the same source the runtime route `frontend/app/openapi.json/route.ts` serves), via `frontend/scripts/generate-openapi.ts` | "OpenAPI spec is up to date" (Frontend) |
 
-All three gates call the same script —
+All four gates call the same script —
 [`scripts/check_generated.sh`](./scripts/check_generated.sh) — so you can run
 every one of them locally, before pushing:
 
 ```bash
-npm run generated:check        # all three areas
-npm run generated:surface      # or one area: surface | catalog | vectors
+npm run generated:check        # all four areas
+npm run generated:surface      # or one area: surface | catalog | vectors | events | openapi
 ```
 
 The script regenerates in place and then fails on any diff, so a failing run has

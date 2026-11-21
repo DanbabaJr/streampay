@@ -33,6 +33,7 @@
     "generated:catalog": "bash scripts/check_generated.sh catalog",
     "generated:vectors": "bash scripts/check_generated.sh vectors",
     "generated:events": "bash scripts/check_generated.sh events",
+    "generated:openapi": "bash scripts/check_generated.sh openapi",
     "schema:bless": "bash scripts/schema_bless.sh",
     "events:compat": "node scripts/event_compat_check.mjs --base",
     "events:compat:test": "node --test scripts/event_compat_check.test.mjs",
