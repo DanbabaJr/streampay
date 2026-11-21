@@ -550,7 +550,8 @@ fn challenge_expiry_boundary_matrix() {
         });
         std::println!(
             "Advanced to ledger {} (offset: {})",
-            target_ledger, tc.ledger_offset
+            target_ledger,
+            tc.ledger_offset
         );
 
         // Check if nonce is still marked as used at this ledger
@@ -571,10 +572,7 @@ fn challenge_expiry_boundary_matrix() {
             tc.name, target_ledger
         );
 
-        std::println!(
-            "✓ is_used={}, replay_result={:?}",
-            is_used, replay_result
-        );
+        std::println!("✓ is_used={}, replay_result={:?}", is_used, replay_result);
     }
 
     // Additional test: verify a fresh nonce can be registered after the original expires
