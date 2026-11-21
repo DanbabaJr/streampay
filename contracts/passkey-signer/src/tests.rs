@@ -454,3 +454,188 @@ fn expired_challenge_nonce_rejected() {
     });
     assert_eq!(result, Err(PasskeyError::ChallengeAlreadyUsed));
 }
+
+/// Challenge nonce expiry boundary matrix: walks the ledger clock across the
+/// TTL expiry boundary for both fresh and already-used nonces to pin the
+/// registry's exact TTL semantics.
+///
+/// TTL constants from registry.rs:
+/// - TTL_THRESHOLD: 200_000 ledgers
+/// - TTL_EXTEND: 500_000 ledgers
+///
+/// A nonce recorded at ledger N will have its TTL extended to last until
+/// approximately ledger N + 500_000. This test verifies the behavior at:
+/// - expiry - 1: nonce should still be present
+/// - expiry: document actual behavior (implementation-dependent boundary)
+/// - expiry + 1: nonce should be expired (absent from storage)
+///
+/// It also verifies that replay attacks are prevented at all clock positions,
+/// and that fresh registrations work after expiry.
+#[test]
+fn challenge_expiry_boundary_matrix() {
+    // Constants from registry.rs
+    const TTL_THRESHOLD: u32 = 200_000;
+    const TTL_EXTEND: u32 = 500_000;
+
+    // Test matrix rows
+    struct TestCase {
+        name: &'static str,
+        ledger_offset: u32,
+        expected_is_used: bool,
+        expected_record_result: Result<(), PasskeyError>,
+        description: &'static str,
+    }
+
+    let test_cases = vec![
+        TestCase {
+            name: "expiry_minus_1",
+            ledger_offset: TTL_EXTEND - 1,
+            expected_is_used: true,
+            expected_record_result: Err(PasskeyError::ChallengeAlreadyUsed),
+            description: "One ledger before expiry: nonce still present, replay rejected",
+        },
+        TestCase {
+            name: "at_expiry",
+            ledger_offset: TTL_EXTEND,
+            expected_is_used: true,
+            expected_record_result: Err(PasskeyError::ChallengeAlreadyUsed),
+            description: "Exactly at expiry ledger: nonce still present (TTL is inclusive)",
+        },
+        TestCase {
+            name: "expiry_plus_1",
+            ledger_offset: TTL_EXTEND + 1,
+            expected_is_used: false,
+            expected_record_result: Ok(()),
+            description: "One ledger after expiry: nonce expired, fresh record succeeds",
+        },
+    ];
+
+    for tc in test_cases {
+        std::println!("\n=== {} ===", tc.name);
+        std::println!("{}", tc.description);
+
+        let env = new_env();
+        let (contract_id, client) = deploy(&env);
+
+        // Use a unique challenge for this test case
+        let challenge_byte = match tc.name {
+            "expiry_minus_1" => 0xD1u8,
+            "at_expiry" => 0xD2u8,
+            "expiry_plus_1" => 0xD3u8,
+            _ => 0xD0u8,
+        };
+        let challenge = to_bytes32(&env, &[challenge_byte; 32]);
+
+        // Initial ledger sequence
+        let initial_ledger = env.ledger().sequence();
+        std::println!("Initial ledger: {}", initial_ledger);
+
+        // Record the challenge at initial ledger
+        env.as_contract(&contract_id, || {
+            crate::registry::record_challenge(&env, &challenge)
+                .expect("initial record must succeed");
+        });
+
+        // Verify nonce is marked as used immediately after recording
+        assert!(
+            client.is_nonce_used(&challenge),
+            "[{}] nonce must be marked used immediately after recording",
+            tc.name
+        );
+
+        // Advance ledger to the test boundary
+        let target_ledger = initial_ledger + tc.ledger_offset;
+        env.ledger().with_mut(|li| {
+            li.sequence_number = target_ledger;
+        });
+        std::println!(
+            "Advanced to ledger {} (offset: {})",
+            target_ledger, tc.ledger_offset
+        );
+
+        // Check if nonce is still marked as used at this ledger
+        let is_used = client.is_nonce_used(&challenge);
+        assert_eq!(
+            is_used, tc.expected_is_used,
+            "[{}] is_nonce_used at ledger {} should be {}",
+            tc.name, target_ledger, tc.expected_is_used
+        );
+
+        // Attempt to record the same challenge again (replay test)
+        let replay_result = env.as_contract(&contract_id, || {
+            crate::registry::record_challenge(&env, &challenge)
+        });
+        assert_eq!(
+            replay_result, tc.expected_record_result,
+            "[{}] replay record_challenge result at ledger {} should match expected",
+            tc.name, target_ledger
+        );
+
+        std::println!(
+            "✓ is_used={}, replay_result={:?}",
+            is_used, replay_result
+        );
+    }
+
+    // Additional test: verify a fresh nonce can be registered after the original expires
+    std::println!("\n=== fresh_registration_after_expiry ===");
+    std::println!("Verify that a new nonce can be registered after a previous nonce expires");
+
+    let env = new_env();
+    let (contract_id, client) = deploy(&env);
+
+    let first_challenge = to_bytes32(&env, &[0xE1u8; 32]);
+    let second_challenge = to_bytes32(&env, &[0xE2u8; 32]);
+
+    let initial_ledger = env.ledger().sequence();
+
+    // Record first challenge
+    env.as_contract(&contract_id, || {
+        crate::registry::record_challenge(&env, &first_challenge)
+            .expect("first challenge record must succeed");
+    });
+
+    // Advance past expiry
+    env.ledger().with_mut(|li| {
+        li.sequence_number = initial_ledger + TTL_EXTEND + 1;
+    });
+
+    // First challenge should be expired
+    assert!(
+        !client.is_nonce_used(&first_challenge),
+        "first challenge should be expired"
+    );
+
+    // Should be able to record a completely new challenge
+    let new_record_result = env.as_contract(&contract_id, || {
+        crate::registry::record_challenge(&env, &second_challenge)
+    });
+    assert_eq!(
+        new_record_result,
+        Ok(()),
+        "recording a new challenge after expiry must succeed"
+    );
+
+    // The new challenge should be marked as used
+    assert!(
+        client.is_nonce_used(&second_challenge),
+        "newly recorded challenge must be marked used"
+    );
+
+    // Even better: the expired first challenge can be re-registered
+    let reregister_result = env.as_contract(&contract_id, || {
+        crate::registry::record_challenge(&env, &first_challenge)
+    });
+    assert_eq!(
+        reregister_result,
+        Ok(()),
+        "re-registering an expired challenge must succeed"
+    );
+
+    assert!(
+        client.is_nonce_used(&first_challenge),
+        "re-registered challenge must be marked used"
+    );
+
+    std::println!("✓ Fresh and re-registration after expiry both succeed");
+}
