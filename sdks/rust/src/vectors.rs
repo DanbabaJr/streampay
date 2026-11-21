@@ -299,8 +299,6 @@ fn canonical(value: &ScVal, context: &str) -> Result<Value, DecodeError> {
         ScVal::I32(inner) => json!(inner.to_string()),
         ScVal::U64(inner) => json!(inner.to_string()),
         ScVal::I64(inner) => json!(inner.to_string()),
-        ScVal::Timepoint(stellar_xdr::TimePoint(inner))
-        | ScVal::Duration(stellar_xdr::Duration(inner)) => json!(inner.to_string()),
         ScVal::U128(parts) => {
             json!(((u128::from(parts.hi) << 64) | u128::from(parts.lo)).to_string())
         }
