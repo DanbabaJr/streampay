@@ -12,13 +12,26 @@ Deterministic Wasm compilation requires pinning the entire toolchain triad:
 
 | Toolchain Component | Pinned Version | Definition Location | Purpose & Reproducibility Impact |
 |---|---|---|---|
-| **stellar-cli** | `28.1.0` | `.github/workflows/release.yml`, Dockerfile | Orchestrates `soroban-spec` v2 shaking, wasm contract optimization, and XDR spec ordering. Differing versions may shake or reorder spec entries differently. |
+| **stellar-cli** | `28.1.0` | `digests/stellar-cli-28.1.0.sha256`, `.github/workflows/*.yml`, `Dockerfile` | Orchestrates `soroban-spec` v2 shaking, wasm contract optimization, and XDR spec ordering. Differing versions may shake or reorder spec entries differently. |
 | **rustc** | `1.99.1` | `rust-toolchain.toml`, `release-metadata.json` | LLVM Wasm backend, MIR optimizations, and codegen. Different minor/patch releases of rustc can generate different opcode sequences or register allocations. |
 | **rust-toolchain channel** | `1.99.1` | `rust-toolchain.toml` | Ensures identical Rust standard library (`wasm32v1-none`) intrinsics, compiler frontend, and lint behavior across all hosts. |
 
 ### Build Host Environment
 
 The canonical release builds are compiled on `x86_64-unknown-linux-gnu` (Ubuntu Linux runner). To eliminate host-specific variance, the reproducible verification action defaults to a hermetic Docker container running this exact environment.
+
+### Toolchain Binary Download & Digest Verification
+
+To guard against supply-chain tampering and corrupted network downloads, all prebuilt binary downloads in CI workflows and container setup scripts (`scripts/install_stellar_cli.sh`, `.devcontainer/postCreate.sh`) adhere to a strict **download-verify-extract** convention:
+
+1. **Committed Digest**: Release archive digests are pinned in the repository under `digests/<tool>-<version>.sha256` (for example, `digests/stellar-cli-28.1.0.sha256` in standard GNU `sha256sum` format: `<sha256>  <filename>`).
+2. **Pre-Extraction Verification**: The archive is downloaded to a temporary directory (`curl -fsSL -o`) and its SHA-256 hash is computed and compared against the committed digest *before* invoking `tar`.
+3. **Failure Behavior**: If the actual digest does not match the expected digest, the downloaded archive is deleted immediately, an unmistakable error displaying **both expected and actual digests** is printed to stderr, and execution terminates with a non-zero exit code without extracting untrusted files.
+4. **Bumping Pinned Versions**: When upgrading a pinned tool:
+   - Download the official release archive from upstream.
+   - Generate its SHA-256 digest: `sha256sum <archive> > digests/<tool>-<new-version>.sha256`.
+   - Ensure the digest file uses LF line endings and standard coreutils format.
+   - Update the version references in workflows, `devcontainer.json`, and metadata files.
 
 ---
 
