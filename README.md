@@ -33,7 +33,7 @@ Everything is on-chain and trust-minimized: no admin key, no upgrade path, funds
 
 A stream is a half-open window `[start_time, end_time)`. At any ledger timestamp the contract computes `deposit × elapsed / duration` with checked math (products widened to `u128`, results floored to whole token units and capped at the deposit). **Every edge case you can think of — withdrawing before start, after end, cancelling a never-started stream, topping up after end — is covered by a unit test** (see `contracts/streaming-payments/src/test.rs`).
 
-How it works in depth, including the design invariants and the Soroban-specific traps contributors keep rediscovering (`extend_ttl` on missing keys, `#[contractimpl]` signature rules, the sdk-28 build path): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+How it works in depth, including the design invariants and the Soroban-specific traps contributors keep rediscovering (`extend_ttl` on missing keys, `#[contractimpl]` signature rules, the sdk-28 build path): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). New to the protocol vocabulary? [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) defines every protocol term — stream, accrual, endowment, claim, keeper, intent, sponsor, bond, TTL/rent, footprint, dual-read, ScVal, ledger time — with a link to its authoritative source.
 
 ## Architecture overview
 
@@ -456,6 +456,7 @@ infra/indexer/                  event indexer service with Prometheus metrics & 
 infra/reconciler/               continuous state reconciler and truth verification daemon
 docs/RUNBOOK.md                 operational diagnosis runbook for all alert rules
 docs/ARCHITECTURE.md            design deep-dive
+docs/GLOSSARY.md               protocol glossary: sourced definitions of every protocol term
 docs/FEE_AWARE_CLAIMS.md        opt-in fee-aware claim scheduling (constraints + decisions)
 docs/SCHEDULED_INTENTS.md       scheduled intents: keeper guide + threat model
 docs/DEPLOY_PIPELINE.md         sandbox → testnet → mainnet-canary promotion design

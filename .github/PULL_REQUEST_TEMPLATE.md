@@ -23,8 +23,9 @@ the same command, so a clean local run means a clean CI run.
       free one, and checks `surface.rs` wiring: a code duplicated with another
       merged PR is `E0081` in CI, a code no `Branch` returns is a wasm-build failure
 - [ ] `npm run generated:check` — regenerates `docs/ERROR_SURFACE.md`, the error
-      catalog (`docs/errors.md`, `docs/errors/<code>.md`, `frontend/lib/errors.ts`)
-      and `tests/vectors/accrual_vectors.json`, then fails on drift. A failing run
+      catalog (`docs/errors.md`, `docs/errors/<code>.md`, `frontend/lib/errors.ts`),
+      `tests/vectors/accrual_vectors.json`, and the OpenAPI spec
+      (`docs/openapi.json`, `frontend/public/openapi.json`), then fails on drift. A failing run
       has already written the right files: `git add` what it prints.
 - [ ] `npm run eol:check` — CRLF committed in a text file (whole-file `cargo fmt`
       diffs and shifted content hashes); fix with `git add --renormalize .`
