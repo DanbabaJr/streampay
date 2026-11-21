@@ -1,4 +1,28 @@
-import { contractErrorFromMessage, contractErrorName } from "./generated.js";
+import {
+  contractErrorFromMessage,
+  contractErrorName,
+  type StreamErrorName,
+} from "./generated.js";
+
+/** Contract error codes that are retained for wire compatibility but retired. */
+export const RETIRED_CONTRACT_ERROR_CODES: ReadonlySet<number> = new Set([2, 3]);
+
+export interface ContractErrorMapping {
+  code: number;
+  name: StreamErrorName;
+  retired: boolean;
+}
+
+/** Returns a typed SDK mapping, including an explicit retired marker. */
+export function contractErrorMapping(code: number): ContractErrorMapping | undefined {
+  const name = contractErrorName(code);
+  if (name === undefined) return undefined;
+  return {
+    code,
+    name,
+    retired: RETIRED_CONTRACT_ERROR_CODES.has(code),
+  };
+}
 
 /** Where in the transaction pipeline the failure happened. */
 export type FailureKind =
