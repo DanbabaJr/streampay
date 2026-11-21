@@ -10,8 +10,8 @@ import {
   accentedPseudo,
   longWordPseudo,
   generatePseudoCatalogs,
-} from "./pseudo-locale.js";
-import { en, MESSAGE_KEYS, MESSAGE_SAMPLES, PARAMETERIZED_KEYS } from "./messages/index.js";
+} from "./pseudo-locale.ts";
+import { en, MESSAGE_KEYS, MESSAGE_SAMPLES, PARAMETERIZED_KEYS } from "./messages/index.ts";
 
 describe("pseudo-locale core transforms", () => {
   it("accented pseudo preserves ICU placeholders", () => {
