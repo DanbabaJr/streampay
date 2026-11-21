@@ -143,7 +143,7 @@ export function longWordPseudo(message: string): string {
   return transformIcuLiterals(message, (literal) =>
     literal.replace(/\b(\w+)\b/g, (word) => {
       let result = "";
-      for (const [index, char] of Array.from(word).entries()) {
+      for (const char of Array.from(word)) {
         const accented = ACCENT_MAP[char] ?? char;
         result += accented.repeat(3);
       }
