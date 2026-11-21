@@ -22,8 +22,13 @@ import {
 
 /**
  * EmbedFrame renders the sandboxed iframe guest page.
- * URL params are mocked through Next's useSearchParams (auto-mocked by the
- * Storybook nextjs-vite framework via parameters.nextjs.navigation).
+ *
+ * The page reads its configuration from the iframe URL with `useSearchParams()`,
+ * so each story sets `parameters.nextjs.navigation.query`: the framework's
+ * app-directory decorator feeds that object into Next's `SearchParamsContext`
+ * (`@storybook/nextjs-vite` → `AppRouterProvider`), which is what
+ * `useSearchParams()` reads. `navigation.searchParams` is not a `NextRouter`
+ * field and is ignored — every story then renders the loading state.
  */
 const meta = {
   title: "Embed/EmbedFrame",
@@ -34,7 +39,7 @@ const meta = {
     nextjs: {
       appDirectory: true,
       navigation: {
-        searchParams: {
+        query: {
           streamId: activeStream.id,
           mode: "read",
           theme: "auto",
@@ -67,7 +72,7 @@ export const LinkMode: Story = {
     nextjs: {
       appDirectory: true,
       navigation: {
-        searchParams: {
+        query: {
           streamId: activeStream.id,
           mode: "link",
           theme: "auto",
@@ -121,7 +126,7 @@ export const Cancelled: Story = {
     nextjs: {
       appDirectory: true,
       navigation: {
-        searchParams: {
+        query: {
           streamId: cancelledStream.id,
           mode: "read",
           theme: "auto",
