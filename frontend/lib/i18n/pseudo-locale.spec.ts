@@ -121,7 +121,7 @@ describe("pseudo-locale transform", () => {
       const transformed = transformCatalog(sample, accentedPseudo);
 
       expect(Object.keys(transformed)).toEqual(Object.keys(sample));
-      for (const key in sample) {
+      for (const key of Object.keys(sample) as Array<keyof typeof sample>) {
         expect(transformed[key]).not.toBe(sample[key]);
         expect(transformed[key].length).toBeGreaterThan(0);
       }
