@@ -332,13 +332,43 @@ pub enum Branch {
     PauseAlreadyPaused,
     /// `resume_stream`: the stream is not paused.
     ResumeNotPaused,
+    // ----------------------------------------------------------- receivables
+    AdvanceExceedsMaxLtv,
+    AdvanceAmountNonPositive,
+    AdvanceAlreadyActive,
+    AdvanceNotFound,
+    AdvanceRepaymentNonPositive,
+    AdvanceRepaymentExceedsBalance,
+    InvalidLtvBps,
+    StreamNotEligibleForAdvance,
+    // --------------------------------------------------- conditional streams
+    ConditionNotMet,
+    ConditionExpired,
+    ConditionAlreadyRegistered,
+    ConditionNotFound,
+    ConditionAlreadySatisfied,
+    InvalidConditionThreshold,
+    NotConditionPublisher,
+    ConditionAttestationStale,
+    // ------------------------------------------------------ stream templates
+    TemplateNotFound,
+    TemplateAlreadyApproved,
+    TemplateVersionMismatch,
+    TemplateValidationFailed,
+    TemplateRateInvalid,
+    // ------------------------------------------------------ integrator hooks
+    HookAlreadyRegistered,
+    HookNotFound,
+    HookReentrancyBlocked,
+    HookExecutionFailed,
+    InvalidHookSelector,
 }
 
 impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 133] = [
+    pub const ALL: [Branch; 159] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -472,6 +502,32 @@ impl Branch {
         Branch::PauseNotAuthorized,
         Branch::PauseAlreadyPaused,
         Branch::ResumeNotPaused,
+        Branch::AdvanceExceedsMaxLtv,
+        Branch::AdvanceAmountNonPositive,
+        Branch::AdvanceAlreadyActive,
+        Branch::AdvanceNotFound,
+        Branch::AdvanceRepaymentNonPositive,
+        Branch::AdvanceRepaymentExceedsBalance,
+        Branch::InvalidLtvBps,
+        Branch::StreamNotEligibleForAdvance,
+        Branch::ConditionNotMet,
+        Branch::ConditionExpired,
+        Branch::ConditionAlreadyRegistered,
+        Branch::ConditionNotFound,
+        Branch::ConditionAlreadySatisfied,
+        Branch::InvalidConditionThreshold,
+        Branch::NotConditionPublisher,
+        Branch::ConditionAttestationStale,
+        Branch::TemplateNotFound,
+        Branch::TemplateAlreadyApproved,
+        Branch::TemplateVersionMismatch,
+        Branch::TemplateValidationFailed,
+        Branch::TemplateRateInvalid,
+        Branch::HookAlreadyRegistered,
+        Branch::HookNotFound,
+        Branch::HookReentrancyBlocked,
+        Branch::HookExecutionFailed,
+        Branch::InvalidHookSelector,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -794,6 +850,34 @@ impl Branch {
             Branch::SenderTransferNotConsenter => &["accept_sender_transfer"],
             Branch::RefundTargetNotSender => &["set_refund_target"],
             Branch::RefundTargetUnchanged => &["create_stream_with_refund", "set_refund_target"],
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv
+            | Branch::AdvanceAmountNonPositive
+            | Branch::AdvanceAlreadyActive
+            | Branch::StreamNotEligibleForAdvance => &["draw_advance"],
+            Branch::AdvanceNotFound
+            | Branch::AdvanceRepaymentNonPositive
+            | Branch::AdvanceRepaymentExceedsBalance => &["repay_advance"],
+            Branch::InvalidLtvBps => &["set_receivables_config", "draw_advance"],
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => &["withdraw", "withdraw_max"],
+            Branch::ConditionExpired => &["register_condition", "attest_condition"],
+            Branch::ConditionAlreadyRegistered => &["register_condition"],
+            Branch::ConditionNotFound => &["attest_condition"],
+            Branch::ConditionAlreadySatisfied => &["attest_condition"],
+            Branch::InvalidConditionThreshold => &["register_condition"],
+            Branch::NotConditionPublisher => &["attest_condition"],
+            Branch::ConditionAttestationStale => &["attest_condition"],
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => &["instantiate_template"],
+            Branch::TemplateAlreadyApproved
+            | Branch::TemplateVersionMismatch
+            | Branch::TemplateValidationFailed
+            | Branch::TemplateRateInvalid => &["approve_template"],
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered | Branch::InvalidHookSelector => &["register_hook"],
+            Branch::HookNotFound => &["unregister_hook"],
+            Branch::HookReentrancyBlocked | Branch::HookExecutionFailed => &["dispatch_hook"],
         }
     }
 
@@ -942,6 +1026,36 @@ impl Branch {
             Branch::WithdrawManyDuplicateIds => StreamError::WithdrawDuplicateStreamIds,
             Branch::WithdrawManyNotStreamRecipient => StreamError::NotAuthorized,
             Branch::WithdrawManyTotalOverflow => StreamError::MathOverflow,
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv => StreamError::AdvanceExceedsMaxLtv,
+            Branch::AdvanceAmountNonPositive => StreamError::AdvanceAmountNonPositive,
+            Branch::AdvanceAlreadyActive => StreamError::AdvanceAlreadyActive,
+            Branch::AdvanceNotFound => StreamError::AdvanceNotFound,
+            Branch::AdvanceRepaymentNonPositive => StreamError::AdvanceRepaymentNonPositive,
+            Branch::AdvanceRepaymentExceedsBalance => StreamError::AdvanceRepaymentExceedsBalance,
+            Branch::InvalidLtvBps => StreamError::InvalidLtvBps,
+            Branch::StreamNotEligibleForAdvance => StreamError::StreamNotEligibleForAdvance,
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => StreamError::ConditionNotMet,
+            Branch::ConditionExpired => StreamError::ConditionExpired,
+            Branch::ConditionAlreadyRegistered => StreamError::ConditionAlreadyRegistered,
+            Branch::ConditionNotFound => StreamError::ConditionNotFound,
+            Branch::ConditionAlreadySatisfied => StreamError::ConditionAlreadySatisfied,
+            Branch::InvalidConditionThreshold => StreamError::InvalidConditionThreshold,
+            Branch::NotConditionPublisher => StreamError::NotConditionPublisher,
+            Branch::ConditionAttestationStale => StreamError::ConditionAttestationStale,
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => StreamError::TemplateNotFound,
+            Branch::TemplateAlreadyApproved => StreamError::TemplateAlreadyApproved,
+            Branch::TemplateVersionMismatch => StreamError::TemplateVersionMismatch,
+            Branch::TemplateValidationFailed => StreamError::TemplateValidationFailed,
+            Branch::TemplateRateInvalid => StreamError::TemplateRateInvalid,
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered => StreamError::HookAlreadyRegistered,
+            Branch::HookNotFound => StreamError::HookNotFound,
+            Branch::HookReentrancyBlocked => StreamError::HookReentrancyBlocked,
+            Branch::HookExecutionFailed => StreamError::HookExecutionFailed,
+            Branch::InvalidHookSelector => StreamError::InvalidHookSelector,
         }
     }
 
@@ -1228,6 +1342,58 @@ impl Branch {
             Branch::WithdrawManyTotalOverflow => {
                 "summing the batch's per-stream payouts into the summary total would overflow"
             }
+            // ----------------------------------------------------------- receivables
+            Branch::AdvanceExceedsMaxLtv => {
+                "draw_advance requested amount exceeds maximum loan-to-value threshold"
+            }
+            Branch::AdvanceAmountNonPositive => "draw_advance amount is zero or negative",
+            Branch::AdvanceAlreadyActive => "an advance is already active on the stream",
+            Branch::AdvanceNotFound => "no active advance found for the stream",
+            Branch::AdvanceRepaymentNonPositive => "repay_advance amount is zero or negative",
+            Branch::AdvanceRepaymentExceedsBalance => {
+                "repayment amount exceeds remaining advance balance"
+            }
+            Branch::InvalidLtvBps => {
+                "receivables configuration or repayment basis points exceed bounds"
+            }
+            Branch::StreamNotEligibleForAdvance => {
+                "stream is paused, cancelled, or not active for advance draw"
+            }
+            // --------------------------------------------------- conditional streams
+            Branch::ConditionNotMet => {
+                "release condition has not been attested as met by oracle quorum"
+            }
+            Branch::ConditionExpired => {
+                "release condition has passed its timeout without satisfaction"
+            }
+            Branch::ConditionAlreadyRegistered => {
+                "a release condition is already registered for this stream"
+            }
+            Branch::ConditionNotFound => "no release condition found for the stream",
+            Branch::ConditionAlreadySatisfied => "release condition is already satisfied",
+            Branch::InvalidConditionThreshold => {
+                "condition quorum threshold is zero or exceeds publisher count"
+            }
+            Branch::NotConditionPublisher => "caller is not an authorized condition publisher",
+            Branch::ConditionAttestationStale => "condition attestation timestamp is too old",
+            // ------------------------------------------------------ stream templates
+            Branch::TemplateNotFound => "template id and version not found",
+            Branch::TemplateAlreadyApproved => "template version has already been approved",
+            Branch::TemplateVersionMismatch => "template version must be exactly next in sequence",
+            Branch::TemplateValidationFailed => "template parameters fail validation against policy",
+            Branch::TemplateRateInvalid => "template stream rate evaluates to zero or overflow",
+            // ------------------------------------------------------ integrator hooks
+            Branch::HookAlreadyRegistered => {
+                "a callback hook is already registered for this event class"
+            }
+            Branch::HookNotFound => "no callback hook found to unregister",
+            Branch::HookReentrancyBlocked => {
+                "nested contract entry into stream blocked by reentrancy lock"
+            }
+            Branch::HookExecutionFailed => {
+                "callback contract invocation failed or reverted under Revert failure policy"
+            }
+            Branch::InvalidHookSelector => "callback selector is invalid",
         }
     }
 

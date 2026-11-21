@@ -1,0 +1,14 @@
+# Self-test fixture for perf/harness/check_image_budget.mjs.
+#
+# It intentionally bloats the image with a 256 MiB layer. The CI gate builds
+# this fixture and requires the budget check to FAIL; if it passes, the gate is
+# not actually enforcing anything. Never used by a release build.
+#
+# The payload must be incompressible: size accounting runs against the loaded
+# image, where a /dev/zero layer compresses away and would slip under the
+# budget (measured 58.8 MB instead of 256+ MiB on the runner).
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+
+WORKDIR /app
+RUN dd if=/dev/urandom of=/app/bloat.bin bs=1M count=256
+CMD ["true"]

@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/condition_registered.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a release condition is registered for a stream.",
+  "properties": {
+    "condition_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "condition_id"
+  ],
+  "title": "ConditionRegistered",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "condition_registered",
+    "fingerprint": "sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

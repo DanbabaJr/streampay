@@ -33,7 +33,7 @@ Everything is on-chain and trust-minimized: no admin key, no upgrade path, funds
 
 A stream is a half-open window `[start_time, end_time)`. At any ledger timestamp the contract computes `deposit × elapsed / duration` with checked math (products widened to `u128`, results floored to whole token units and capped at the deposit). **Every edge case you can think of — withdrawing before start, after end, cancelling a never-started stream, topping up after end — is covered by a unit test** (see `contracts/streaming-payments/src/test.rs`).
 
-How it works in depth, including the design invariants and the Soroban-specific traps contributors keep rediscovering (`extend_ttl` on missing keys, `#[contractimpl]` signature rules, the sdk-28 build path): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+How it works in depth, including the design invariants and the Soroban-specific traps contributors keep rediscovering (`extend_ttl` on missing keys, `#[contractimpl]` signature rules, the sdk-28 build path): [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). New to the protocol vocabulary? [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) defines every protocol term — stream, accrual, endowment, claim, keeper, intent, sponsor, bond, TTL/rent, footprint, dual-read, ScVal, ledger time — with a link to its authoritative source.
 
 ## Architecture overview
 
@@ -410,7 +410,8 @@ stellar contract deploy \
 
 The TypeScript CLI supports stream creation, withdrawals, cancellation,
 top-ups, and recipient `claim-all`, with environment, encrypted-file, and
-hardware-wallet handoff signers. Dry-runs use Soroban RPC transaction
+hardware-wallet handoff signers, plus read-only `status`/`get` snapshots with
+a `--watch` JSON-lines mode. Dry-runs use Soroban RPC transaction
 simulation and report its footprint and event-derived token deltas. It
 requires Node.js ≥ 22.6; setup, JSON schema v1, and exit codes are documented
 in [`tools/streampay-cli`](./tools/streampay-cli/README.md).
@@ -442,6 +443,7 @@ npm run rent -- --streams 1000             # rent + cost projection
 ```text
 contracts/streaming-payments/   the contract (lib.rs, stream.rs, schedule.rs, treasury.rs, errors.rs, events.rs, test.rs, schedule_test.rs)
 frontend/                       minimal Next.js UI (Freighter wallet)
+tools/streampay-cli/            headless CLI: transactions, key encrypt, status/get --watch
 indexer/                        Soroban event indexer (TypeScript + SQLite + REST API)
 fuzz/                           cargo-fuzz harness for the accrual math (own workspace)
 scripts/deploy_testnet.sh       one-command testnet demo
@@ -454,6 +456,7 @@ infra/indexer/                  event indexer service with Prometheus metrics & 
 infra/reconciler/               continuous state reconciler and truth verification daemon
 docs/RUNBOOK.md                 operational diagnosis runbook for all alert rules
 docs/ARCHITECTURE.md            design deep-dive
+docs/GLOSSARY.md               protocol glossary: sourced definitions of every protocol term
 docs/FEE_AWARE_CLAIMS.md        opt-in fee-aware claim scheduling (constraints + decisions)
 docs/SCHEDULED_INTENTS.md       scheduled intents: keeper guide + threat model
 docs/DEPLOY_PIPELINE.md         sandbox → testnet → mainnet-canary promotion design
@@ -494,7 +497,7 @@ Incident drill tooling and results are documented in [`docs/INCIDENT_RUNBOOK.md`
 
 ## Contributing
 
-PRs welcome! Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) — it covers conventions, branch/PR process, and how to run the tests locally. Every PR runs the full test suite, fmt, clippy (`-D warnings`), and the frontend build in CI.
+PRs welcome! Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) — it covers conventions, branch/PR process, and how to run the tests locally. Every PR runs the full test suite, fmt, clippy (`-D warnings`), and the frontend build in CI. Arriving through the Drips Wave program? [`docs/WAVE_CONTRIBUTORS.md`](./docs/WAVE_CONTRIBUTORS.md) walks through claiming an issue, the PR conventions, the CI gates and what "resolved" means.
 
 ## Funding & sustainability
 

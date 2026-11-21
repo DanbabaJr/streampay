@@ -6,6 +6,7 @@ import type { DecodedEvent, Stream } from "./types.js";
 import { EVENT_KEYS } from "./generated/events.js";
 import { WebhookStore } from "./webhooks/store.js";
 import { OutboxStore, newOutboxEventFromDecoded } from "./outbox/store.js";
+import { WasmPluginRegistry } from "./wasm/registry.js";
 import { globalIndexerTracer, traceCorrelationRegistry } from "./telemetry.js";
 
 export interface IngestSummary {
@@ -23,6 +24,8 @@ export class StreamStore extends EventEmitter {
   readonly db: Database.Database;
   readonly webhooks: WebhookStore;
   readonly outbox: OutboxStore;
+  /** WASM plugin registry (#580): content-addressed plugins + per-tenant approvals. */
+  readonly wasm: WasmPluginRegistry;
 
   constructor(path: string) {
     super();
@@ -66,6 +69,7 @@ export class StreamStore extends EventEmitter {
     } catch {}
     this.webhooks = new WebhookStore(this.db);
     this.outbox = new OutboxStore(this.db);
+    this.wasm = new WasmPluginRegistry(this.db);
     this.allowNullStreamId();
   }
 

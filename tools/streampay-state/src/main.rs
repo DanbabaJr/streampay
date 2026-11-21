@@ -4,9 +4,11 @@
 //!
 //! ```
 //! streampay-state export   --rpc <url> --contract <C...> --out <file.json>
-//! streampay-state verify   --snapshot <file.json>
+//! streampay-state verify   --snapshot <file.json> [--format text|json]
+//! streampay-state diff     --a <file.json> --b <file.json> [--format text|json]
 //! streampay-state replay   --snapshot <file.json> --rpc <url> --contract <C...>
 //! ```
+mod diff;
 mod export;
 mod model;
 mod rpc;
@@ -47,6 +49,27 @@ enum Commands {
         /// Path to the JSON snapshot file.
         #[arg(long)]
         snapshot: String,
+        /// Output format. `json` prints the versioned report documented in
+        /// README.md (schema: json-schema-v1.json) to stdout.
+        #[arg(long, value_enum, default_value_t = verify::Format::Text)]
+        format: verify::Format,
+    },
+    /// Compare two snapshots. Exit code 0 = identical, 1 = differences,
+    /// 2 = error (unreadable or invalid input).
+    Diff {
+        /// First snapshot (the "before" side).
+        #[arg(long)]
+        a: String,
+        /// Second snapshot (the "after" side).
+        #[arg(long)]
+        b: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = diff::Format::Text)]
+        format: diff::Format,
+        /// Count export provenance (exported_at, rpc_url, latest_ledger) as
+        /// differences. Off by default: it differs between any two exports.
+        #[arg(long)]
+        include_provenance: bool,
     },
     /// Replay a snapshot against a fresh sandbox deployment.
     Replay {
@@ -64,6 +87,24 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+    // `diff` has its own exit-code contract (0 identical / 1 differences /
+    // 2 error), so it is handled before the generic error path.
+    if let Commands::Diff {
+        a,
+        b,
+        format,
+        include_provenance,
+    } = &cli.command
+    {
+        match diff::run(a, b, *format, *include_provenance) {
+            Ok(diff::Outcome::Identical) => std::process::exit(0),
+            Ok(diff::Outcome::Different) => std::process::exit(1),
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::exit(2);
+            }
+        }
+    }
     let result = match cli.command {
         Commands::Export {
             rpc,
@@ -71,12 +112,13 @@ fn main() {
             out,
             network,
         } => export::run(&rpc, &contract, &out, &network),
-        Commands::Verify { snapshot } => verify::run(&snapshot),
+        Commands::Verify { snapshot, format } => verify::run(&snapshot, format),
         Commands::Replay {
             snapshot,
             rpc,
             contract,
         } => replay_cmd::run(&snapshot, &rpc, &contract),
+        Commands::Diff { .. } => unreachable!("handled above"),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -91,7 +133,7 @@ mod replay_cmd {
 
     pub fn run(snapshot_path: &str, rpc_url: &str, contract_id: &str) -> anyhow::Result<()> {
         // 1. Verify snapshot consistency before replay.
-        verify::run(snapshot_path)?;
+        verify::run(snapshot_path, verify::Format::Text)?;
 
         // 2. Load snapshot.
         let raw = std::fs::read_to_string(snapshot_path)?;

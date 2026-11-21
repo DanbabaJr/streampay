@@ -190,6 +190,7 @@ export class OutboxDispatcher {
             if (this.store.markDelivered(intent.id, claimToken)) {
               report.delivered++;
               this.metrics.observe("delivered");
+              this.metrics.observeDelivery(consumer.url, "delivered");
             }
           } else {
             const attempt = intent.attempts + 1;
@@ -204,12 +205,15 @@ export class OutboxDispatcher {
             if (outcome === "dead") {
               report.dead++;
               this.metrics.observe("dead");
+              this.metrics.observeDelivery(consumer.url, "dead");
             } else if (outcome === "scheduled") {
               report.retried++;
               this.metrics.observe("retry");
+              this.metrics.observeDelivery(consumer.url, "retry");
             } else {
               report.stale++;
               this.metrics.observe("stale");
+              this.metrics.observeDelivery(consumer.url, "stale");
             }
           }
         } finally {

@@ -1,0 +1,33 @@
+{
+  "$comment": "Secrets rotation policy (issue #615). Read by the indexer through indexer/src/secrets/config.ts and by .github/workflows/secrets-rotation.yml. The values here are documentation of the approved posture: the running service reads them from its environment (SECRET_OVERLAP_MS, SECRET_ROTATION_INTERVAL_MS, WEBHOOK_KEY_SWEEP_INTERVAL_MS) so a deployment can tighten them without a release. An overlap below 60s is clamped to 60s in code: shorter than that is an outage, not a rotation.",
+  "schema": "streampay.secrets-rotation-policy/v1",
+  "secrets": {
+    "webhook_signing_keys": {
+      "owner": "indexer",
+      "rotation_interval_seconds": 2592000,
+      "overlap_seconds": 86400,
+      "retire_mechanism": "sweep clears webhook_endpoints.previous_secret once updated_at + overlap has elapsed; verification refuses an expired previous key even before the sweep runs",
+      "subscriber_delivery": "Streampay-Signature carries one v1 signature per active key during the overlap, so a subscriber holding either key verifies",
+      "audit": "hash-chained entries (rotation_started / rotation_promoted / rotation_aborted / secret_retired)"
+    },
+    "rpc_credentials": {
+      "owner": "indexer",
+      "rotation_interval_seconds": 2592000,
+      "overlap_seconds": 0,
+      "retire_mechanism": "candidate is probed against every endpoint before the credential map is swapped; a failing probe aborts the whole update and the previous credential stays active",
+      "hot_reload": "credentials are applied per request, so rotation never closes a connection, aborts an in-flight call, or resets failover state",
+      "audit": "sha256-prefix fingerprints only; credential values are never logged"
+    }
+  },
+  "scheduler": {
+    "enabled_by": "SECRETS_ROTATION_ENABLED=1",
+    "tick_seconds": 60,
+    "webhook_sweep_seconds": 900,
+    "max_consecutive_failures": 3,
+    "on_failure": "abort, keep the previous secret active, emit an alert and record the abort in the audit log; after max_consecutive_failures the scheduler stops retrying until the next successful manual run"
+  },
+  "reversibility": {
+    "mechanism": "a rotation is a single new version plus a bounded overlap; rolling back means promoting the previous value again with SecretRotationManager.rotate using the provider's previous value — the audit log records both, so the rollback is as visible as the rotation",
+    "data_loss": "none: nothing is deleted, the previous key is retired only by clearing a column or dropping an in-memory version after its window"
+  }
+}
