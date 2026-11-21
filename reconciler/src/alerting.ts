@@ -19,14 +19,60 @@ export interface WebhookDispatchResult {
   durationMs: number;
 }
 
+export interface ReconcilerAlertingMetrics {
+  roundingWithinToleranceCount: number;
+  realDivergenceCount: number;
+  webhooksDispatchedCount: number;
+  webhooksFailedCount: number;
+}
+
 export class AlertingService {
   private config: AlertingConfig;
   private webhookUrl?: string;
   private httpAgent = createHttpAgent();
+  private metrics: ReconcilerAlertingMetrics = {
+    roundingWithinToleranceCount: 0,
+    realDivergenceCount: 0,
+    webhooksDispatchedCount: 0,
+    webhooksFailedCount: 0,
+  };
 
   constructor(config: AlertingConfig) {
     this.config = config;
     this.webhookUrl = config.webhookUrl;
+  }
+
+  /**
+   * Record a rounding within epsilon event in metrics without paging/webhook dispatch.
+   */
+  recordRounding(d: DivergenceRecord): void {
+    this.metrics.roundingWithinToleranceCount++;
+    this.log("INFO", `Rounding tolerance within epsilon detected for stream ${d.streamId}`, {
+      streamId: d.streamId,
+      classification: d.classification,
+      delta: d.delta,
+      toleranceEpsilon: d.toleranceEpsilon,
+      checkType: d.checkType,
+    });
+  }
+
+  /**
+   * Get current metrics snapshot.
+   */
+  getMetrics(): ReconcilerAlertingMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics counters (useful between test runs or audit cycles).
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      roundingWithinToleranceCount: 0,
+      realDivergenceCount: 0,
+      webhooksDispatchedCount: 0,
+      webhooksFailedCount: 0,
+    };
   }
 
   /**
@@ -49,9 +95,22 @@ export class AlertingService {
 
   /**
    * Dispatch a divergence alert to the webhook target.
+   * Only pages on real divergences (suppresses webhooks for rounding within epsilon).
    */
   async dispatchWebhook(d: DivergenceRecord): Promise<WebhookDispatchResult> {
     const start = Date.now();
+
+    // Guard: Suppress paging/webhook dispatch for rounding within tolerance epsilon
+    if (d.classification === "rounding_within_epsilon") {
+      this.recordRounding(d);
+      return {
+        success: true,
+        message: "Suppressed: rounding within epsilon",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    this.metrics.realDivergenceCount++;
     const payload = this.buildWebhookPayload(d);
     const payloadStr = JSON.stringify(payload);
 
@@ -59,6 +118,7 @@ export class AlertingService {
       payloadSize: payloadStr.length,
       checkType: d.checkType,
       severity: d.severity,
+      classification: d.classification,
     });
 
     if (!this.webhookUrl) {
@@ -73,6 +133,12 @@ export class AlertingService {
       });
 
       const success = response.status >= 200 && response.status < 300;
+      if (success) {
+        this.metrics.webhooksDispatchedCount++;
+      } else {
+        this.metrics.webhooksFailedCount++;
+      }
+
       this.log(success ? "INFO" : "WARN", `Webhook dispatch ${success ? "succeeded" : "failed"}`, {
         status: response.status,
         durationMs: Date.now() - start,
@@ -94,6 +160,7 @@ export class AlertingService {
         durationMs: Date.now() - start,
       };
     } catch (err: unknown) {
+      this.metrics.webhooksFailedCount++;
       const message = err instanceof Error ? err.message : String(err);
       this.log("WARN", `Webhook dispatch failed: ${message}`, {
         durationMs: Date.now() - start,
@@ -118,6 +185,9 @@ export class AlertingService {
         data: {
           streamId: d.streamId,
           divergenceType: d.checkType,
+          classification: d.classification,
+          delta: d.delta,
+          toleranceEpsilon: d.toleranceEpsilon,
           horizonState: d.indexedValue,
           sorobanState: d.onChainValue,
           lagMs: d.horizonLagMs ?? d.sorobanLagMs ?? 0,
