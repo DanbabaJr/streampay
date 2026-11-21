@@ -2140,4 +2140,3 @@ pub fn put_agent_cap(env: &Env, stream_id: u64, agent: &Address, state: &AgentCa
         .persistent()
         .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
 }
-

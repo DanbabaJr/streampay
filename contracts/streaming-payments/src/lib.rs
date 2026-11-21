@@ -145,20 +145,19 @@ pub use dispute::{
 pub use errors::StreamError;
 pub use events::{
     AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, AgentAuthorized, AgentRevoked,
-    BatchWithdrawSummary, BeneficiaryEnrolled,
-    ConditionExpired, ConditionMet, ConditionRegistered, ContractFrozenStateChanged,
-    ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
-    GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
-    GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked, HookRegistered,
-    OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback, OracleTimeReported,
-    OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted, PolicyAssetQueued,
-    PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed, PolicyInitialized,
-    RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired,
-    ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
-    SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
-    StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
-    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
-    TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    BatchWithdrawSummary, BeneficiaryEnrolled, ConditionExpired, ConditionMet, ConditionRegistered,
+    ContractFrozenStateChanged, ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved,
+    FeeCharged, FeeWithdrawn, GovernanceActionExecuted, GovernanceActionProposed,
+    GovernanceActionSigned, GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked,
+    HookRegistered, OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback,
+    OracleTimeReported, OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted,
+    PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed,
+    PolicyInitialized, RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled,
+    ScheduledIntentExpired, ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed,
+    SenderTransferred, SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated,
+    StreamCancelled, StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated,
+    StreamRefundTargetChanged, StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated,
+    TemplateApproved, TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -174,15 +173,14 @@ pub use sponsor::{PeriodSpend, SponsorConfig};
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{
     streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AssetTransfer,
-    BatchEntry, ClaimFailure,
-    MigrationStatus, OwnershipRole, PageBounds, PendingOwnership, PendingRateChange,
-    PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory, SenderTransferRecord,
-    Stream, StreamStatus, StreamVersionReport, VersionedStream, WithdrawAllResult, WithdrawEntry,
-    WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH,
-    MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS,
-    MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS,
-    RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2,
-    TARGET_SCHEMA_VERSION,
+    BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds, PendingOwnership,
+    PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory,
+    SenderTransferRecord, Stream, StreamStatus, StreamVersionReport, VersionedStream,
+    WithdrawAllResult, WithdrawEntry, WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION,
+    INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE,
+    MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS,
+    OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1,
+    STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
 };
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
 
@@ -1654,7 +1652,12 @@ impl StreamingPayments {
 
     /// Revokes an authorized agent on a stream.
     /// Only the stream recipient can revoke an agent.
-    pub fn revoke_agent(env: Env, stream_id: u64, agent: Address, caller: Address) -> Result<(), StreamError> {
+    pub fn revoke_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        caller: Address,
+    ) -> Result<(), StreamError> {
         caller.require_auth();
         let s = stream::get_stream(&env, stream_id)?;
         if caller != s.recipient {
@@ -1677,16 +1680,28 @@ impl StreamingPayments {
     ///
     /// Requires `agent.require_auth()`. Funds are always transferred directly to the
     /// stream's recipient (never to the agent). Caps and expiration are strictly enforced.
+    ///
+    /// The payout preamble is the same one [`Self::withdraw`] runs — maintenance
+    /// freeze, hook reentrancy lock, release gating and oracle-resolved accrual —
+    /// so a delegation can never move funds that the recipient itself could not
+    /// currently withdraw.
     pub fn withdraw_delegated(
         env: Env,
         stream_id: u64,
         agent: Address,
         amount: i128,
     ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
         agent.require_auth();
 
         if amount <= 0 {
             return Err(surface::reject(Branch::WithdrawAmountNonPositive));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
         }
 
         let mut s = stream::get_stream(&env, stream_id)?;
@@ -1702,7 +1717,8 @@ impl StreamingPayments {
             return Err(surface::reject(Branch::WithdrawDelegatedAgentExpired));
         }
 
-        let available = stream::available_amount(&env, &s)?;
+        let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
+        let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
         if amount > available {
             return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
         }

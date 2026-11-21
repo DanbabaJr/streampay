@@ -5375,10 +5375,7 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
         TokenClient::new(&f.env, &f.token).balance(&f.recipient),
         withdraw_1
     );
-    assert_eq!(
-        TokenClient::new(&f.env, &f.token).balance(&agent),
-        0
-    );
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&agent), 0);
 
     // Cap state updated
     let (_, cap1) = f.client.mock_all_auths().agent_status(&id, &agent).unwrap();
@@ -5474,14 +5471,9 @@ fn session_keys_expiry_enforcement() {
     let now = f.env.ledger().timestamp();
 
     let expires_at = now + 3 * DAY;
-    f.client.mock_all_auths().authorize_agent(
-        &id,
-        &agent,
-        &DEPOSIT,
-        &DEPOSIT,
-        &DAY,
-        &expires_at,
-    );
+    f.client
+        .mock_all_auths()
+        .authorize_agent(&id, &agent, &DEPOSIT, &DEPOSIT, &DAY, &expires_at);
 
     // Advance time before expiry: succeeds
     f.advance_time(2 * DAY);
@@ -5527,7 +5519,11 @@ fn session_keys_revocation_mid_window() {
         .revoke_agent(&id, &agent, &f.recipient);
 
     // Status is None
-    assert!(f.client.mock_all_auths().agent_status(&id, &agent).is_none());
+    assert!(f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .is_none());
 
     // Agent attempts withdrawal immediately: rejected with AgentNotAuthorized
     let err = f

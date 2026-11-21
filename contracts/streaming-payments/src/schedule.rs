@@ -271,10 +271,6 @@ pub fn validate_schedule(
     execute_after: u64,
     expires_at: u64,
 ) -> Result<i128, StreamError> {
-    let now = env.ledger().timestamp();
-    if start_time < now {
-        return Err(reject(Branch::CreateStartTimeInPast));
-    }
     if deposit <= 0 {
         return Err(StreamError::ZeroAmount);
     }
@@ -301,8 +297,9 @@ pub fn validate_schedule(
         return Err(reject(Branch::ScheduleInvalidParameters));
     }
 
+    let now = env.ledger().timestamp();
     if start_time <= now {
-        return Err(reject(Branch::CreateStartTimeInPast));
+        return Err(StreamError::StartTimeInPast);
     }
     if execute_after < now {
         return Err(reject(Branch::ScheduleInvalidParameters));

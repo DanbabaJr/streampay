@@ -88,6 +88,8 @@ pub enum Branch {
     AcceptGovernorNoPending,
     /// `accept_governor`: the caller is not the nominated address.
     AcceptGovernorNotNominee,
+    /// `withdraw_treasury`: amount is zero or negative.
+    WithdrawTreasuryAmountNonPositive,
     /// `withdraw_treasury`: amount exceeds fees collected minus fees already
     /// withdrawn.
     WithdrawTreasuryExceedsBalance,
@@ -567,7 +569,7 @@ impl Branch {
             | Branch::CreateDurationTooLong => &["create_stream", "create_streams"],
             Branch::CreateBatchEmpty | Branch::CreateBatchTooLarge => &["create_streams_batch"],
             Branch::WithdrawAmountNonPositive | Branch::WithdrawAmountExceedsAvailable => {
-                &["withdraw"]
+                &["withdraw", "withdraw_delegated"]
             }
             Branch::WithdrawMaxNothingToWithdraw => {
                 &["withdraw_max", "withdraw_many", "withdraw_all"]
@@ -617,6 +619,7 @@ impl Branch {
             ],
             Branch::StreamNotActive => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -675,6 +678,7 @@ impl Branch {
             }
             Branch::PayoutOverflow => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -710,6 +714,7 @@ impl Branch {
             Branch::TopUpTransferFailed => &["top_up"],
             Branch::RecipientPayoutFailed => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -895,7 +900,7 @@ impl Branch {
             | Branch::AdvanceRepaymentExceedsBalance => &["repay_advance"],
             Branch::InvalidLtvBps => &["set_receivables_config", "draw_advance"],
             // --------------------------------------------------- conditional streams
-            Branch::ConditionNotMet => &["withdraw", "withdraw_max"],
+            Branch::ConditionNotMet => &["withdraw", "withdraw_max", "withdraw_delegated"],
             Branch::ConditionExpired => &["register_condition", "attest_condition"],
             Branch::ConditionAlreadyRegistered => &["register_condition"],
             Branch::ConditionNotFound => &["attest_condition"],
