@@ -10,6 +10,11 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- TypeScript SDK: opt-in submit retry policy (#497). `retry` on
+  `StreamPayClient` adds bounded exponential backoff with full jitter for
+  transient RPC failures. Retries resend the same signed envelope, using its
+  hash as the idempotency key. Ambiguous timeouts are never resubmitted and
+  report `StreamPayError.transactionHash`. Retries are off by default.
 - `streampay-state verify --format json` (#522): a versioned, machine-readable
   verify report with a published JSON Schema (`tools/streampay-state/json-schema-v1.json`,
   draft 2020-12; additive-only within v1), per-violation `check` identifiers and
