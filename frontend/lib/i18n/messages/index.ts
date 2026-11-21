@@ -3,9 +3,9 @@
  * parameters its call sites must supply.
  */
 
-import type { Locale } from "../locales";
-import { en, type MessageKey } from "./en";
-import { de } from "./de";
+import type { Locale } from "../locales.ts";
+import { en, type MessageKey } from "./en.ts";
+import { de } from "./de.ts";
 
 export { en, de };
 export type { MessageKey };
