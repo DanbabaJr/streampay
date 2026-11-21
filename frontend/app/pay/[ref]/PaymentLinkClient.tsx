@@ -32,7 +32,7 @@ export default function PaymentLinkClient({
 }) {
   const { t, formatAmount, locale } = useLocale();
 
-  const [resolution, setResolution] = useState<PaymentLinkResolution | null>(
+  const [resolution] = useState<PaymentLinkResolution | null>(
     initialResolution
   );
   const { address, signTransaction } = useWallet();

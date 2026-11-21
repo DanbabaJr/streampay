@@ -813,7 +813,7 @@ export async function cancelStream(
 ): Promise<void> {
   await send(
     caller,
-    contract().call("cancel_stream", scAddr(caller), u64(streamId)),
+    buildCancelStreamOperation(CONTRACT_ID, caller, streamId),
     () => undefined,
     signer
   );

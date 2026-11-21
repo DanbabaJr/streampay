@@ -93,9 +93,13 @@ describe("NotificationsSettingsPage", () => {
         )
       );
     });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
   }
 
   function fireChange(element: HTMLElement, value: string) {
+    if (!element) throw new Error("fireChange called on null element");
     (element as HTMLInputElement).value = value;
     const propKey = Object.keys(element).find((k) => k.startsWith("__reactProps$"));
     const props = propKey ? (element as unknown as Record<string, { onChange?: (e: unknown) => void }>)[propKey] : null;
@@ -205,7 +209,7 @@ describe("NotificationsSettingsPage", () => {
       address: TEST_ADDR,
     });
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (url === "/api/notifications" && init?.method === "POST") {
         const body = JSON.parse(init.body as string);
         if (body.action === "challenge") {
@@ -237,7 +241,7 @@ describe("NotificationsSettingsPage", () => {
       signError: { message: "User rejected signature request." },
     });
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (url === "/api/notifications" && init?.method === "POST") {
         const body = JSON.parse(init.body as string);
         if (body.action === "challenge") {
@@ -269,7 +273,7 @@ describe("NotificationsSettingsPage", () => {
       signedMessage: "valid_sig",
     });
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (url === "/api/notifications" && init?.method === "POST") {
         const body = JSON.parse(init.body as string);
         if (body.action === "challenge") {
@@ -335,7 +339,7 @@ describe("NotificationsSettingsPage", () => {
       eventTypes: string[];
     } | null = null;
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (url.startsWith("/api/notifications?address=")) {
         return jsonResponse({ subscriptions: [...currentSubs] });
       }
@@ -448,7 +452,7 @@ describe("NotificationsSettingsPage", () => {
       signedMessage: "valid_sig",
     });
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (url === "/api/notifications" && init?.method === "POST") {
         const body = JSON.parse(init.body as string);
         if (body.action === "challenge") {
@@ -504,7 +508,7 @@ describe("NotificationsSettingsPage", () => {
       },
     ];
 
-    mockRoute(async (url) => {
+    mockRoute(async (url, init) => {
       if (init?.method === "DELETE" && url.startsWith("/api/notifications?")) {
         const u = new URL(url, "http://localhost");
         deletedId = u.searchParams.get("id");
