@@ -125,8 +125,9 @@ jobs:
             `.github/ci-gates.json` with a reason, in this same PR, so the
             deletion is visible in the diff instead of quiet.
           - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
-            file is stored as UTF-16, carries a UTF-8 BOM, or contains a NUL
-            byte. git then calls it binary: `git diff` prints "Binary files
+            file is stored as UTF-16, carries a UTF-8 BOM, or contains a C0
+            control byte (0x00-0x1F other than tab/LF, or a CR outside CRLF).
+            git then calls it binary: `git diff` prints "Binary files
             differ", the change is unreviewable, and a workflow can be gutted
             without a reviewer seeing a single line. Re-save as UTF-8 without a
             BOM (`* text=auto eol=lf` in `.gitattributes` handles the rest).

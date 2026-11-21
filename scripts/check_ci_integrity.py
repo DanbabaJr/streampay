@@ -43,7 +43,8 @@ What it checks
              .github/ci-gates.json. Retiring a gate is allowed, but only by
              recording it under "retired" with a reason, in the open.
   encoding   no tracked text file is committed as UTF-16, with a UTF-8 BOM, or
-             containing a NUL byte
+             containing any C0 control byte (0x00-0x1F) other than tab and LF,
+             or a CR that is not part of a CRLF pair
 
 Usage
 -----
@@ -84,6 +85,21 @@ TEXT_EXTENSIONS = (
 # A UTF-8 BOM is only tolerated where the toolchain requires it: PowerShell 5.1
 # mis-parses non-ASCII characters in a .ps1 file unless the file starts with one.
 BOM_TOLERATED_EXTENSIONS = (".ps1",)
+# C0 control bytes (0x00-0x1F) corrupt YAML parsers, shell scripts and diff
+# review just as effectively as the NUL byte the gate already rejected, so the
+# encoding check rejects all of them. Tab (0x09) and LF (0x0A) are legitimate
+# text. CR (0x0D) is legitimate only as the first half of a CRLF pair -- and
+# even then only where the line-ending gate permits it:
+# scripts/check_line_endings.sh rejects every CRLF file committed to this
+# repo, so a CR that passes here is still caught there. This gate refuses to
+# bless a lone CR, which no line-ending convention produces, and otherwise
+# leaves CRLF to that gate so the two never contradict each other.
+C0_NAMES = (
+    "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL",
+    "BS", "TAB", "LF", "VT", "FF", "CR", "SO", "SI",
+    "DLE", "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB",
+    "CAN", "EM", "SUB", "ESC", "FS", "GS", "RS", "US",
+)
 SKIP_DIRS = {".git", "node_modules", "target", ".next", "dist", "build",
              "coverage", ".venv", "venv", "__pycache__", ".cargo"}
 WORKFLOW_DIR = ".github/workflows"
@@ -469,32 +485,72 @@ def tracked_text_files(root, base=None):
     return out
 
 
+def first_forbidden_control(data):
+    """(offset, byte) of the first C0 control byte that is not allowed, else None.
+
+    Tab and LF are allowed. CR is allowed only as part of a CRLF pair; a CR
+    at end of file or followed by anything but LF is a lone CR. DEL (0x7F)
+    is not a C0 byte and is out of scope here.
+    """
+    for offset, byte in enumerate(data):
+        if byte >= 0x20 or byte in (0x09, 0x0A):
+            continue
+        if byte == 0x0D and offset + 1 < len(data) and data[offset + 1] == 0x0A:
+            continue
+        return offset, byte
+    return None
+
+
 def check_encodings(root, base=None):
     problems = []
     for rel, path in tracked_text_files(root, base):
         try:
             with open(path, "rb") as handle:
-                head = handle.read(8192)
+                data = handle.read()
         except OSError as exc:
             problems.append(("encoding", rel, 0, f"could not read: {exc}"))
             continue
-        if head[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        # The whole file is read, not just the first 8 KiB: a control byte
+        # past the head is just as unreviewable as one at the top.
+        if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
             problems.append((
                 "encoding", rel, 0,
                 "is stored as UTF-16. git then treats it as a binary blob: `git diff` prints \"Binary "
                 "files differ\", the change is unreviewable, and a CI file can be gutted without "
                 "showing up in the diff. Re-save as UTF-8 without a BOM.",
             ))
-        elif b"\x00" in head:
-            problems.append(("encoding", rel, 0,
-                             "contains a NUL byte, so git and every text tool treat it as binary"))
-        elif head[:3] == b"\xef\xbb\xbf" and not rel.lower().endswith(BOM_TOLERATED_EXTENSIONS):
+        elif b"\x00" in data:
+            problems.append((
+                "encoding", rel, 0,
+                f"contains a NUL byte (0x00) at offset {data.index(b'\x00')}, so git and every text tool "
+                "treat it as binary. Remove the NUL byte and re-save as UTF-8 without a BOM.",
+            ))
+        elif data[:3] == b"\xef\xbb\xbf" and not rel.lower().endswith(BOM_TOLERATED_EXTENSIONS):
             problems.append((
                 "encoding", rel, 0,
                 "starts with a UTF-8 BOM. Tools that read the file as UTF-8 see \\ufeff before the first "
                 "token, so a shebang or a YAML document marker stops matching. Save without a BOM "
                 "(.ps1 is exempt because PowerShell needs it).",
             ))
+        else:
+            found = first_forbidden_control(data)
+            if found is not None:
+                offset, byte = found
+                if byte == 0x0D:
+                    problems.append((
+                        "encoding", rel, 0,
+                        f"contains a lone carriage return (CR, 0x0D) at offset {offset}, not followed "
+                        "by LF. A CR on its own is not a line ending in any convention this repo uses: "
+                        "re-save the file with LF line endings (see scripts/check_line_endings.sh).",
+                    ))
+                else:
+                    problems.append((
+                        "encoding", rel, 0,
+                        f"contains C0 control byte 0x{byte:02x} ({C0_NAMES[byte]}) at offset {offset}. "
+                        "Control bytes corrupt YAML parsers and shell scripts and make diffs "
+                        "unreviewable, the same way a NUL byte does. Remove the control character "
+                        "and re-save the file as UTF-8 without a BOM.",
+                    ))
     return problems
 
 
@@ -662,13 +718,46 @@ def self_test():
             handle.write("# StreamPay\nsecond line\n".encode("utf-16"))
         with open(os.path.join(repo, "bom.rs"), "wb") as handle:
             handle.write(b"\xef\xbb\xbffn main() {}\n")
+        # C0 controls: one fixture per forbidden byte, so a detector that
+        # only catches NUL cannot stay green while e.g. ESC slips through.
+        # NUL (0x00) gets its own fixture too -- the old check had none.
+        # A lone CR is its own class: CR is only legitimate inside CRLF.
+        c0_bytes = ([0x00] + list(range(0x01, 0x09)) + [0x0B, 0x0C]
+                    + list(range(0x0E, 0x20)))
+        for byte in c0_bytes:
+            with open(os.path.join(repo, f"c0-{byte:02x}.md"), "wb") as handle:
+                handle.write(b"clean text " + bytes([byte]) + b" more text\n")
+        with open(os.path.join(repo, "c0-0d-lone.md"), "wb") as handle:
+            handle.write(b"first line\rsecond line\n")
+        # A control byte past the first 8 KiB must still be caught: the old
+        # check only read the head of each file.
+        with open(os.path.join(repo, "c0-deep.md"), "wb") as handle:
+            handle.write(b"x" * 9000 + b"\x07\n")
+        # Tab, LF and CR-as-CRLF are legitimate and must stay quiet here.
+        # (CRLF itself is still rejected, by scripts/check_line_endings.sh --
+        # this gate only refuses to bless a lone CR, it does not own CRLF.)
+        with open(os.path.join(repo, "c0-clean.md"), "wb") as handle:
+            handle.write(b"tab\there\r\ncrlf above\n")
         run("git", "add", "-A")
         run("git", "commit", "-qm", "encoding")
-        enc = [message for _, _, _, message in check_encodings(repo)]
-        if not [m for m in enc if "UTF-16" in m]:
+        enc = [(rel, message) for _, rel, _, message in check_encodings(repo)]
+        if not [m for _, m in enc if "UTF-16" in m]:
             failures.append("encoding detector reported nothing on a UTF-16 file")
-        if not [m for m in enc if "BOM" in m]:
+        if not [m for _, m in enc if "BOM" in m]:
             failures.append("encoding detector reported nothing on a UTF-8 BOM file")
+        for byte in c0_bytes:
+            rel = f"c0-{byte:02x}.md"
+            found = [m for r, m in enc if r.endswith(rel)]
+            if not found or f"0x{byte:02x}" not in found[0]:
+                failures.append(f"encoding detector did not report C0 byte 0x{byte:02x} in {rel}")
+        lone = [m for r, m in enc if r.endswith("c0-0d-lone.md")]
+        if not lone or "0x0d" not in lone[0].lower() or "lone" not in lone[0].lower():
+            failures.append("encoding detector did not report a lone CR")
+        deep = [m for r, m in enc if r.endswith("c0-deep.md")]
+        if not deep or "offset 9000" not in deep[0]:
+            failures.append("encoding detector missed a C0 byte past the first 8 KiB")
+        if [r for r, _ in enc if r.endswith("c0-clean.md")]:
+            failures.append("encoding detector fired on tab / LF / CRLF, which are legitimate")
 
     if failures:
         for message in failures:
@@ -685,7 +774,8 @@ def self_test():
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Fail loudly on workflows GitHub's parser would reject, on CI gates that "
-                    "quietly disappeared, and on text files committed as binary-looking UTF-16.")
+                    "quietly disappeared, and on text files committed as binary-looking UTF-16 "
+                    "or carrying C0 control bytes.")
     parser.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         help="repository root (default: the repo containing this script)")
     parser.add_argument("--base", default=None,
