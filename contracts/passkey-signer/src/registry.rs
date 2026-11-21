@@ -72,7 +72,7 @@ pub fn remove_credential(env: &Env, owner: &Address) -> Result<(), PasskeyError>
 /// already recorded (replay prevention).
 pub fn record_challenge(env: &Env, challenge: &BytesN<32>) -> Result<(), PasskeyError> {
     let key = RegistryKey::UsedChallenge(challenge.clone());
-    if env.storage().persistent().has(&key) {
+    if env.storage().temporary().has(&key) {
         return Err(PasskeyError::ChallengeAlreadyUsed);
     }
     // Store `true`; presence is what matters.
