@@ -207,6 +207,24 @@ export const de: Record<MessageKey, string> = {
   "form.amountTooPrecise":
     "Dieses Token hat höchstens {decimals, number} Nachkommastellen — der eingegebene Betrag müsste gerundet werden.",
   "form.amountInvalid": "Das ist kein lesbarer Betrag.",
+  "form.recipientRequired": "Gib eine Empfängeradresse ein.",
+  "form.recipientInvalid": "Gib eine gültige Stellar-Adresse ein (G… mit gültiger Prüfsumme).",
+  "form.tokenRequired": "Gib eine Token-Vertrags-ID ein.",
+  "form.tokenInvalid": "Gib eine gültige Token-Vertrags-ID ein (C… mit gültiger Prüfsumme).",
+  "form.durationInvalid": "Gib eine Laufzeit in Tagen größer als null ein (bis zu 36.500 Tagen).",
+  "form.durationTooLong": "Die Laufzeit überschreitet das Protokollmaximum von {max, number} Sekunden.",
+  "form.depositTooSmallForDuration":
+    "Die Einzahlung ist für diese Laufzeit zu klein — mindestens {min} sind nötig, damit der Stream anwächst.",
+  "form.depositTooLarge":
+    "Die Einzahlung ist für diese Laufzeit zu groß — reduziere die Einzahlung oder verkürze die Laufzeit.",
+  "form.depositTransferFailed":
+    "Die Einzahlung konnte nicht abgebucht werden — prüfe Guthaben und Token-Freigabe für Einzahlung plus Gebühr.",
+  "form.recipientPayoutFailed":
+    "Der Empfänger konnte nicht ausgezahlt werden — prüfe, ob die Adresse eine gültige Trustline hat und autorisiert ist.",
+  "form.assetNotAllowed": "Dieses Token steht nicht auf der Zulassungsliste der Governance-Richtlinie.",
+  "form.batchEmpty": "Füge mindestens eine CSV-Zeile hinzu.",
+  "form.batchTooLarge": "Die Charge hat zu viele Zeilen (maximal {max, number}).",
+  "form.batchRowIssue": "Zeile {row, number}: {detail}",
 
   "notFound.notFound": "Nicht gefunden",
   "notFound.badRequest": "Anfrageproblem",
