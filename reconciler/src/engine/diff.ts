@@ -5,7 +5,6 @@ import type {
   StreamState,
   DivergenceRecord,
   ReconciliationResult,
-  ReaderConfig,
 } from "../types.js";
 import { AlertingService } from "../alerting.js";
 
@@ -73,7 +72,7 @@ export class ReconciliationEngine {
           "missing_record",
           "critical",
           { streamId: horizonState.streamId, ledger: horizonState.ledger },
-          { streamId: "N/A", ledger: 0 },
+          { streamId: sorobanState ? (sorobanState as StreamState).streamId : "N/A", ledger: sorobanState ? (sorobanState as StreamState).ledger : 0 },
           horizonState.ledger,
           0 // Soroban lag is infinite, but we'll use 0 as placeholder
         ));
@@ -84,7 +83,7 @@ export class ReconciliationEngine {
           streamId,
           "missing_record",
           "warning", // Less critical - might be indexing delay
-          { streamId: "N/A", ledger: 0 },
+          { streamId: horizonState ? (horizonState as StreamState).streamId : "N/A", ledger: horizonState ? (horizonState as StreamState).ledger : 0 },
           { streamId: sorobanState.streamId, ledger: sorobanState.ledger },
           0, // Horizon lag is infinite
           sorobanState.ledger
@@ -140,13 +139,6 @@ export class ReconciliationEngine {
     }
     
     // Calculate ledger lag between sources
-    const horizonAgeMs = Date.now() - new Date(h.timestamp).getTime();
-    const sorobanAgeMs = Date.now() - new Date(s.timestamp).getTime();
-    
-    // The consistency window applies to how stale each source can be
-    // If both sources are stale but agree, that's still within window conceptually
-    // We're more concerned about when they disagree AND are fresh
-    
     const timeDiffMs = Math.abs(new Date(h.timestamp).getTime() - new Date(s.timestamp).getTime());
     
     // If the disagreement is due to reasonable propagation delay, treat as lag
@@ -249,7 +241,7 @@ export class ReconciliationEngine {
     options: { 
       initialDelayMs?: number; 
       healthCheckIntervalMs?: number;
-      onError?: (error: Error) => void;
+      onError?: (error: unknown) => void;
     } = {}
   ): Promise<void> {
     const {
@@ -264,7 +256,6 @@ export class ReconciliationEngine {
     }
     
     // Start health check interval
-    let lastHealthCheck = 0;
     const healthCheckLoop = setInterval(async () => {
       try {
         const [hHealth, sHealth] = await Promise.all([
@@ -280,7 +271,7 @@ export class ReconciliationEngine {
             sorobanError: sHealth.error,
           });
         }
-      } catch (err) {
+      } catch (err: unknown) {
         this.alerting.log("ERROR", "Health check failed", {
           error: err instanceof Error ? err.message : String(err),
         });
@@ -306,8 +297,8 @@ export class ReconciliationEngine {
           const sleepTime = Math.max(0, this.config.consistencyWindowMs - elapsed);
           
           await new Promise(resolve => setTimeout(resolve, sleepTime));
-        } catch (err) {
-          onError(err as Error);
+        } catch (err: unknown) {
+          onError(err);
           // Continue looping despite errors
           await new Promise(resolve => setTimeout(resolve, 1000));
         }

@@ -6,15 +6,29 @@
 //! ```
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
+use streampay_sdk::vectors::{decode_vector, Spec};
+
+fn spec_path(vectors_dir: &Path) -> PathBuf {
+    let beside = vectors_dir.join("..").join("spec").join("streampay.spec.json");
+    if beside.exists() {
+        beside
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("spec")
+            .join("streampay.spec.json")
+    }
+}
 
 fn main() {
     let dir = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vectors"));
+    let spec = Spec::load(&spec_path(&dir)).unwrap_or_else(|error| panic!("{error}"));
 
     let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
@@ -31,7 +45,7 @@ fn main() {
             .as_str()
             .unwrap_or_else(|| path.file_stem().unwrap().to_str().unwrap())
             .to_string();
-        let decoded = streampay_sdk::vectors::decode_vector(&vector)
+        let decoded = decode_vector(&vector, &spec)
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         vectors.insert(name, decoded);
     }

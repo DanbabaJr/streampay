@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { StreamView, StreamRoleFilter, StreamStatusFilter } from "@/lib/stellar";
 import { computeAccruedAt, computeAvailable } from "@/lib/accrual";
+import { serializeAddressExplorerUrlState } from "@/lib/address-explorer-url";
 
 export interface AddressStats {
   totalStreams: number;
@@ -18,6 +19,9 @@ export interface AddressExplorerClientProps {
   asOfTimestamp: number;
   tab: StreamRoleFilter;
   status: StreamStatusFilter;
+  page: number;
+  sort: "id-desc";
+  limit: number;
   nextCursor: string | null;
   prevCursor: string | null;
   hasMore: boolean;
@@ -52,6 +56,9 @@ export default function AddressExplorerClient({
   asOfTimestamp,
   tab,
   status,
+  page,
+  sort,
+  limit,
   nextCursor,
   prevCursor,
   hasMore,
@@ -119,20 +126,20 @@ export default function AddressExplorerClient({
     status?: string;
     cursor?: string | null;
     dir?: string;
+    page?: number;
   }): string {
-    const params = new URLSearchParams();
     const targetTab = overrides.tab !== undefined ? overrides.tab : tab;
     const targetStatus = overrides.status !== undefined ? overrides.status : status;
-
-    if (targetTab && targetTab !== "all") params.set("tab", targetTab);
-    if (targetStatus && targetStatus !== "all") params.set("status", targetStatus);
-
-    if (overrides.cursor) {
-      params.set("cursor", overrides.cursor);
-      if (overrides.dir) params.set("dir", overrides.dir);
-    }
-
-    const qs = params.toString();
+    const targetPage = overrides.page ?? page;
+    const qs = serializeAddressExplorerUrlState({
+      page: targetPage,
+      cursor: overrides.cursor ?? null,
+      direction: overrides.dir === "backward" ? "backward" : "forward",
+      tab: targetTab as StreamRoleFilter,
+      status: targetStatus as StreamStatusFilter,
+      sort,
+      limit,
+    });
     return `/address/${address}${qs ? `?${qs}` : ""}`;
   }
 
@@ -265,7 +272,7 @@ export default function AddressExplorerClient({
           aria-label="Direction filter"
         >
           <Link
-            href={makeUrl({ tab: "all", cursor: null })}
+            href={makeUrl({ tab: "all", cursor: null, page: 1 })}
             className={`filter-btn ${tab === "all" ? "active" : ""}`}
             role="tab"
             aria-selected={tab === "all"}
@@ -273,7 +280,7 @@ export default function AddressExplorerClient({
             All Streams
           </Link>
           <Link
-            href={makeUrl({ tab: "incoming", cursor: null })}
+            href={makeUrl({ tab: "incoming", cursor: null, page: 1 })}
             className={`filter-btn ${tab === "incoming" ? "active" : ""}`}
             role="tab"
             aria-selected={tab === "incoming"}
@@ -281,7 +288,7 @@ export default function AddressExplorerClient({
             Incoming (Recipient)
           </Link>
           <Link
-            href={makeUrl({ tab: "outgoing", cursor: null })}
+            href={makeUrl({ tab: "outgoing", cursor: null, page: 1 })}
             className={`filter-btn ${tab === "outgoing" ? "active" : ""}`}
             role="tab"
             aria-selected={tab === "outgoing"}
@@ -297,21 +304,21 @@ export default function AddressExplorerClient({
           aria-label="Status filter"
         >
           <Link
-            href={makeUrl({ status: "all", cursor: null })}
+            href={makeUrl({ status: "all", cursor: null, page: 1 })}
             className={`filter-btn ${status === "all" ? "active" : ""}`}
             aria-current={status === "all" ? "true" : undefined}
           >
             All Status
           </Link>
           <Link
-            href={makeUrl({ status: "active", cursor: null })}
+            href={makeUrl({ status: "active", cursor: null, page: 1 })}
             className={`filter-btn ${status === "active" ? "active" : ""}`}
             aria-current={status === "active" ? "true" : undefined}
           >
             Active Only
           </Link>
           <Link
-            href={makeUrl({ status: "ended", cursor: null })}
+            href={makeUrl({ status: "ended", cursor: null, page: 1 })}
             className={`filter-btn ${status === "ended" ? "active" : ""}`}
             aria-current={status === "ended" ? "true" : undefined}
           >
@@ -581,7 +588,7 @@ export default function AddressExplorerClient({
       {/* Cursor Pagination Bar */}
       <nav className="pagination-bar" aria-label="Pagination navigation">
         <Link
-          href={makeUrl({ cursor: prevCursor, dir: "backward" })}
+          href={makeUrl({ cursor: prevCursor, dir: "backward", page: Math.max(1, page - 1) })}
           className={`page-btn ${hasPrev ? "" : "disabled"}`}
           aria-disabled={!hasPrev}
           tabIndex={hasPrev ? 0 : -1}
@@ -591,12 +598,12 @@ export default function AddressExplorerClient({
 
         <div style={{ textAlign: "center" }}>
           <span className="muted" style={{ fontSize: 12 }}>
-            Monotonic Cursor Pagination
+            Page {page} · Monotonic Cursor Pagination
           </span>
         </div>
 
         <Link
-          href={makeUrl({ cursor: nextCursor, dir: "forward" })}
+          href={makeUrl({ cursor: nextCursor, dir: "forward", page: page + 1 })}
           className={`page-btn ${hasMore ? "" : "disabled"}`}
           aria-disabled={!hasMore}
           tabIndex={hasMore ? 0 : -1}

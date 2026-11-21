@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Neziahtech/streampay/tools/streampay-state/json-schema-v1.json",
+  "title": "streampay-state verify report (v1)",
+  "description": "Output of `streampay-state verify --snapshot <file> --format json`. Compatibility policy: within v1 the report is additive-only. Fields and `check` identifiers are never removed, renamed or re-typed; new optional fields and new `check` identifiers may appear, so consumers must ignore unknown properties and tolerate unknown `check` values. Any breaking change ships as json-schema-v2.json with report_version 2.",
+  "type": "object",
+  "required": [
+    "report_version",
+    "tool_version",
+    "ok",
+    "snapshot",
+    "counts",
+    "violations",
+    "unclaimed_by_token"
+  ],
+  "properties": {
+    "report_version": {
+      "description": "Version of this contract. Always 1 for this schema.",
+      "const": 1
+    },
+    "tool_version": {
+      "description": "Version of the streampay-state binary that produced the report.",
+      "type": "string",
+      "minLength": 1
+    },
+    "ok": {
+      "description": "true exactly when `violations` is empty. The process also exits 0 only in that case.",
+      "type": "boolean"
+    },
+    "snapshot": {
+      "description": "Facts about the snapshot file that was verified.",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "schema_fingerprint",
+        "expected_schema_fingerprint",
+        "contract_id",
+        "latest_ledger",
+        "exported_at"
+      ],
+      "properties": {
+        "schema_version": { "type": "integer", "minimum": 0 },
+        "schema_fingerprint": {
+          "description": "Fingerprint recorded in the snapshot file.",
+          "type": "string"
+        },
+        "expected_schema_fingerprint": {
+          "description": "Fingerprint of the snapshot schema this verifier build understands. A mismatch with `schema_fingerprint` is reported as a `schema_fingerprint` violation.",
+          "type": "string"
+        },
+        "contract_id": { "type": "string" },
+        "latest_ledger": {
+          "description": "Ledger sequence at export time.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "exported_at": {
+          "description": "Export wall-clock time, Unix seconds.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "counts": {
+      "description": "Number of rows of each kind in the snapshot.",
+      "type": "object",
+      "required": ["streams", "scheduled_intents", "treasuries", "stream_fees"],
+      "properties": {
+        "streams": { "type": "integer", "minimum": 0 },
+        "scheduled_intents": { "type": "integer", "minimum": 0 },
+        "treasuries": { "type": "integer", "minimum": 0 },
+        "stream_fees": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "violations": {
+      "description": "Every invariant violation found. Empty when `ok` is true.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/violation" }
+    },
+    "unclaimed_by_token": {
+      "description": "Per token, the unclaimed balance (deposit - withdrawn) summed over Active streams. Sorted by `token`. Tokens with no Active stream are omitted.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/tokenBalance" }
+    }
+  },
+  "if": {
+    "properties": { "ok": { "const": true } },
+    "required": ["ok"]
+  },
+  "then": {
+    "properties": { "violations": { "maxItems": 0 } }
+  },
+  "else": {
+    "properties": { "violations": { "minItems": 1 } }
+  },
+  "$defs": {
+    "violation": {
+      "type": "object",
+      "required": ["check", "message"],
+      "properties": {
+        "check": {
+          "description": "Stable identifier of the invariant that failed. Match on this, not on `message`. Consumers must tolerate values not listed here: new checks may be added within v1.",
+          "type": "string",
+          "examples": [
+            "schema_fingerprint",
+            "stream_arithmetic",
+            "duplicate_stream_ids",
+            "treasury_invariant",
+            "index_completeness",
+            "orphan_fee",
+            "intent_arithmetic"
+          ]
+        },
+        "message": {
+          "description": "Human-readable description. Wording is not part of the contract and may change.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tokenBalance": {
+      "type": "object",
+      "required": ["token", "unclaimed"],
+      "properties": {
+        "token": {
+          "description": "Token contract address (C...).",
+          "type": "string"
+        },
+        "unclaimed": {
+          "description": "Decimal integer string. Amounts are i128 and can exceed the JSON/JavaScript safe-integer range, so parse with BigInt, not Number.",
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        }
+      }
+    }
+  }
+}

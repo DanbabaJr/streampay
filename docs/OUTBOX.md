@@ -109,6 +109,53 @@ Replay protocol for a pull consumer: store your last processed `seq` durably
 → `GET /streams/:id/events?after=<seq>` → apply rows in order, skipping keys
 you already applied → advance cursor to `next_cursor`.
 
+## Dead-letter replay tool
+
+Operators replay dead-lettered intents after fixing a downstream outage with
+`npm run outbox:replay` (source: [indexer/src/outbox/replay.ts](../indexer/src/outbox/replay.ts),
+[replay-cli.ts](../indexer/src/outbox/replay-cli.ts)). It needs no schema change.
+
+```bash
+cd indexer
+# 1. Dry-run (the default): lists what WOULD be re-dispatched, changes nothing.
+npm run outbox:replay -- --consumer push-a
+
+# 2. Replay for real, only after reviewing the dry-run output.
+npm run outbox:replay -- --consumer push-a --execute
+```
+
+| Option | Meaning |
+|---|---|
+| `--db <path>` | SQLite file (default `$DATABASE_PATH`, else `./data/streampay.sqlite`). |
+| `--consumer <id>` | Only this destination. |
+| `--event <id>` / `--intent <id>` | Select specific entries (repeatable). |
+| `--reason <r>` | Only this `dead_reason` (`max_attempts`, `reorg_retracted`). |
+| `--limit <n>` | Max entries (default 100, hard cap 1000). |
+| `--execute` | Actually replay. Without it nothing is written or sent. |
+| `--json` | Machine-readable summary. |
+
+Both modes print a summary: entry count, destinations, event ids and one line
+per entry. With `--execute` it also reports per-entry outcome
+(`delivered` / `pending-retry` / `dead-again` / `skipped`). Exit code is `1`
+if any replayed entry dead-lettered again, `2` on bad arguments.
+
+How it keeps the delivery guarantees:
+
+- Replay goes through the **normal dispatch path**. Each selected intent moves
+  `dead → pending` via the guarded `replayIntent` transition (`WHERE state =
+  'dead'`), then the regular `OutboxDispatcher` claims and delivers it with the
+  same `idempotency_key` (`<consumer>:<event>`), signature, backoff and metrics.
+- It is **idempotent**: a delivered intent is no longer `dead`, so a second
+  replay selects nothing and sends nothing; an entry that another operator or
+  `POST /api/outbox/intents/:id/replay` already reset is reported as `skipped`.
+- The tool resets `attempts` to 0 so the intent gets a full retry budget (the
+  HTTP endpoint keeps the old `attempts`, so one more failure re-dead-letters).
+  Transport remains at-least-once; consumers must still dedupe on the key.
+- A running indexer's dispatcher may pick the replayed intents up first. That
+  is safe because claims are guarded; the tool just reports the final state.
+- Metrics from a CLI run live in that process only; the long-running indexer's
+  `/metrics` reflects deliveries it performs itself.
+
 ## Reorg safety
 
 Every `outbox_events` row carries the ingestion ledger number **and** the

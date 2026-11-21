@@ -2,7 +2,6 @@
 
 export interface HttpResponse {
   status: number;
-  statusText: string;
   data: unknown;
   headers: Record<string, string>;
 }
@@ -14,25 +13,27 @@ export class HttpError extends Error {
   }
 }
 
+export interface HttpAgent {
+  get(url: string, headers?: Record<string, string>): Promise<HttpResponse>;
+  post(url: string, body: unknown, headers?: Record<string, string>): Promise<HttpResponse>;
+}
+
 /**
  * Creates an HTTP agent that returns typed responses.
- * Wraps the node:http client for better DX.
+ * Wraps globalThis.fetch for better DX.
  */
-export function createHttpAgent(): {
-  get(url: string, headers?: Record<string, string>): Promise<HttpResponse>;
-  post(url: string, body: any, headers?: Record<string, string>): Promise<HttpResponse>;
-} {
+export function createHttpAgent(): HttpAgent {
   const request = async (url: string, options: RequestInit): Promise<HttpResponse> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30s timeout
 
     try {
-      const response = await fetch(url, {
+      const response = await globalThis.fetch(url, {
         ...options,
         signal: controller.signal,
         headers: {
           "User-Agent": "streampay-reconciler/1.0.0",
-          ...((options.headers as Record<string, string>) || {}),
+          ...(options.headers || {}),
         },
       });
 
@@ -53,11 +54,10 @@ export function createHttpAgent(): {
 
       return {
         status: response.status,
-        statusText: response.statusText,
         data,
         headers: Object.fromEntries(response.headers.entries()),
       };
-    } catch (err) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === "AbortError") {
         throw new HttpError(408, "Request timeout");
@@ -72,7 +72,7 @@ export function createHttpAgent(): {
     async get(url: string, headers = {}): Promise<HttpResponse> {
       return request(url, { method: "GET", headers });
     },
-    async post(url: string, body: any, headers = {}): Promise<HttpResponse> {
+    async post(url: string, body: unknown, headers = {}): Promise<HttpResponse> {
       const stringBody =
         typeof body === "string" ? body : JSON.stringify(body);
       return request(url, {

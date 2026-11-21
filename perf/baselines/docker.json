@@ -1,0 +1,15 @@
+{
+  "commit": "3f9df32",
+  "updated_at": "2026-11-20T00:00:00Z",
+  "images": {
+    "indexer": {
+      "dockerfile": "infra/docker/Dockerfile.indexer",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "budget": 180,
+      "baseline": 150,
+      "unit": "MB",
+      "tolerance_percent": 15,
+      "description": "Multi-stage Node 22 alpine indexer image: production deps + compiled better-sqlite3, no dev deps or package-manager caches"
+    }
+  }
+}

@@ -32,7 +32,7 @@ export class HorizonReader {
         healthy: this.healthy,
         lastLedger: this.lastLedger,
       };
-    } catch (err) {
+    } catch (err: unknown) {
       this.healthy = false;
       return {
         healthy: false,
@@ -71,7 +71,7 @@ export class HorizonReader {
           status: "Active" as const, // Placeholder
         },
       }));
-    } catch (err) {
+    } catch (err: unknown) {
       this.healthy = false;
       console.warn(`Horizon reader error: ${err}`);
       return []; // Return empty on error to allow Soroban data to dominate
@@ -81,7 +81,7 @@ export class HorizonReader {
   /**
    * Get historical effects for a specific stream from a ledger onwards.
    */
-  async getHistoricalData(streamId: string, fromLedger: number): Promise<StreamState[]> {
+  async getHistoricalData(_streamId: string, _fromLedger: number): Promise<StreamState[]> {
     // TODO: Implement historical data fetching
     return [];
   }
@@ -92,14 +92,35 @@ export class HorizonReader {
   async updateLastLedger(): Promise<void> {
     try {
       const response = await this.http.get(`${this.config.url}/ledgers?limit=1&order=desc`);
-      if (response.status === 200 && Array.isArray((response.data as any)._embedded?.records)) {
-        const ledger = (response.data as any)._embedded?.records[0]?.sequence;
-        if (ledger && typeof ledger === "number") {
-          this.lastLedger = ledger;
-          this.healthy = true;
+      if (
+        response.status === 200 &&
+        typeof response.data === "object" &&
+        response.data !== null &&
+        "_embedded" in response.data
+      ) {
+        const embedded = (response.data as { _embedded: unknown })._embedded;
+        if (
+          typeof embedded === "object" &&
+          embedded !== null &&
+          "records" in embedded &&
+          Array.isArray((embedded as { records: unknown }).records)
+        ) {
+          const records = (embedded as { records: unknown[] }).records;
+          const firstRecord = records[0];
+          if (
+            typeof firstRecord === "object" &&
+            firstRecord !== null &&
+            "sequence" in firstRecord
+          ) {
+            const ledger = (firstRecord as { sequence: unknown }).sequence;
+            if (typeof ledger === "number") {
+              this.lastLedger = ledger;
+              this.healthy = true;
+            }
+          }
         }
       }
-    } catch (err) {
+    } catch {
       this.healthy = false;
       // Don't throw - ledger update is best-effort
     }

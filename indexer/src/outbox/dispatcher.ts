@@ -33,6 +33,9 @@ export interface TickReport {
 export class OutboxDispatcher {
   private timer: NodeJS.Timeout | null = null;
   private ticking: Promise<TickReport> | null = null;
+  private stopping = false;
+  /** intent id -> claim token for claims this process holds right now. */
+  private readonly heldClaims = new Map<number, string>();
 
   constructor(
     private readonly store: OutboxStore,
@@ -54,6 +57,42 @@ export class OutboxDispatcher {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  /**
+   * Graceful shutdown: stop the timer, claim nothing new, and wait up to
+   * `timeoutMs` for the tick that is already running to record its outcome.
+   *
+   * If the window expires with a transport still pending, every claim this
+   * dispatcher still holds is released back to `pending` (attempts untouched), so
+   * the store is never left with an intent stuck `in_flight` until the claim
+   * timeout. That intent may have reached the consumer, so it can be sent again
+   * after restart: delivery stays at-least-once and consumers dedupe on the
+   * unchanged idempotency key. A late transport result then finds its claim
+   * token gone and is a no-op.
+   */
+  async shutdown(timeoutMs: number): Promise<{ drained: boolean; released: number }> {
+    this.stopping = true;
+    this.stop();
+    let drained = true;
+    const running = this.ticking;
+    if (running) {
+      // Keep a late rejection (e.g. the store closed under a slow transport)
+      // from surfacing as an unhandled rejection after we stop waiting.
+      const settled = running.then(() => true, () => true);
+      let timer: NodeJS.Timeout | undefined;
+      const expired = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+      });
+      drained = await Promise.race([settled, expired]);
+      clearTimeout(timer);
+    }
+    let released = 0;
+    for (const [intentId, token] of [...this.heldClaims]) {
+      if (this.store.releaseClaim(intentId, token)) released++;
+      this.heldClaims.delete(intentId);
+    }
+    return { drained, released };
   }
 
   /** Single non-reentrant tick; concurrent callers await the same run. */
@@ -116,6 +155,7 @@ export class OutboxDispatcher {
 
     const tickSeconds = (this.opts.tickMs ?? 1000) / 1000;
     for (const consumer of this.store.listConsumers()) {
+      if (this.stopping) break;
       if (consumer.status !== "active" || consumer.kind !== "push") continue;
       const budget =
         consumer.rate_limit_per_sec === null
@@ -123,50 +163,61 @@ export class OutboxDispatcher {
           : Math.max(1, Math.min(batchSize, Math.floor(consumer.rate_limit_per_sec * tickSeconds)));
       const ids = this.store.dueIntents(consumer.id, budget, nowMs);
       for (const id of ids) {
+        // Shutdown requested: leave the rest of the batch pending in the store.
+        if (this.stopping) break;
         const claimToken = this.store.claimToken();
         const intent = this.store.claimIntent(id, claimToken, Date.now());
         if (!intent) {
           report.stale++;
           continue;
         }
-        const consumerConfig = {
-          id: consumer.id,
-          url: consumer.url,
-          secret: consumer.secret,
-          max_attempts: consumer.max_attempts,
-          rate_limit_per_sec: consumer.rate_limit_per_sec,
-        };
-        let result: TransportResult;
+        this.heldClaims.set(intent.id, claimToken);
         try {
-          result = await this.transport(intent, consumerConfig);
-        } catch (err: unknown) {
-          result = { ok: false, error: err instanceof Error ? err.message : String(err) };
-        }
-        if (result.ok) {
-          if (this.store.markDelivered(intent.id, claimToken)) {
-            report.delivered++;
-            this.metrics.observe("delivered");
+          const consumerConfig = {
+            id: consumer.id,
+            url: consumer.url,
+            secret: consumer.secret,
+            max_attempts: consumer.max_attempts,
+            rate_limit_per_sec: consumer.rate_limit_per_sec,
+          };
+          let result: TransportResult;
+          try {
+            result = await this.transport(intent, consumerConfig);
+          } catch (err: unknown) {
+            result = { ok: false, error: err instanceof Error ? err.message : String(err) };
           }
-        } else {
-          const attempt = intent.attempts + 1;
-          const delay = outboxRetryDelayMs(attempt + 1, this.opts.randomFn);
-          const outcome = this.store.recordFailure(
-            intent.id,
-            claimToken,
-            result.error ?? `HTTP ${result.status ?? "unknown"}`,
-            consumer.max_attempts,
-            Date.now() + delay
-          );
-          if (outcome === "dead") {
-            report.dead++;
-            this.metrics.observe("dead");
-          } else if (outcome === "scheduled") {
-            report.retried++;
-            this.metrics.observe("retry");
+          if (result.ok) {
+            if (this.store.markDelivered(intent.id, claimToken)) {
+              report.delivered++;
+              this.metrics.observe("delivered");
+              this.metrics.observeDelivery(consumer.url, "delivered");
+            }
           } else {
-            report.stale++;
-            this.metrics.observe("stale");
+            const attempt = intent.attempts + 1;
+            const delay = outboxRetryDelayMs(attempt + 1, this.opts.randomFn);
+            const outcome = this.store.recordFailure(
+              intent.id,
+              claimToken,
+              result.error ?? `HTTP ${result.status ?? "unknown"}`,
+              consumer.max_attempts,
+              Date.now() + delay
+            );
+            if (outcome === "dead") {
+              report.dead++;
+              this.metrics.observe("dead");
+              this.metrics.observeDelivery(consumer.url, "dead");
+            } else if (outcome === "scheduled") {
+              report.retried++;
+              this.metrics.observe("retry");
+              this.metrics.observeDelivery(consumer.url, "retry");
+            } else {
+              report.stale++;
+              this.metrics.observe("stale");
+              this.metrics.observeDelivery(consumer.url, "stale");
+            }
           }
+        } finally {
+          this.heldClaims.delete(intent.id);
         }
       }
     }

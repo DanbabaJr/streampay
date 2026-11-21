@@ -1,6 +1,6 @@
-//! Service entrypoint for the reconciliation daemon. It runs a pinned
-//! three-way comparison across Soroban RPC, Horizon and the indexer
-//! projection, and can emit governance-gated heal proposals.
+//! Service entrypoint for the reconciliation daemon.
+//! Runs a pinned three-way comparison across Soroban RPC, Horizon and the
+//! indexer projection, and can emit governance-gated heal proposals.
 
 import { ReconciliationEngine } from "./engine/diff.js";
 import { ThreeWayReconciler } from "./engine/threeway.js";
@@ -16,11 +16,11 @@ import {
   rpcAdapter,
 } from "./sources/pinned.js";
 import { ProposalStore, proposeHeals } from "./heal/proposals.js";
-import type { StreamState } from "./types.js";
+import type { StreamState, ReconciliationResult } from "./types.js";
 
 const SERVICE_NAME = "streampay-reconciler";
 
-interface ServiceConfig {
+export interface ReconcilerServiceConfig {
   horizonUrl: string;
   sorobanRpcUrl: string;
   indexerUrl?: string;
@@ -44,6 +44,18 @@ interface ServiceConfig {
   healMaxLedgerRange: number;
 }
 
+export interface ReconcilerService {
+  horizonReader: HorizonReader;
+  sorobanReader: SorobanRpcReader;
+  projectionReader: ProjectionReader;
+  engine: ReconciliationEngine;
+  threeWay: ThreeWayReconciler;
+  proposalStore: ProposalStore;
+  suppressor: DivergenceSuppressor;
+  alerting: AlertingService;
+  config: ReconcilerServiceConfig;
+}
+
 function parseInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -62,18 +74,25 @@ function parseSigners(raw: string | undefined): Record<string, string> | string[
   throw new Error("HEAL_SIGNERS must be a JSON array or object");
 }
 
-function loadConfig(): ServiceConfig {
+// Parse configuration from environment
+function loadConfig(): ReconcilerServiceConfig {
+  const logLevel = (process.env.LOG_LEVEL || "INFO") as "DEBUG" | "INFO" | "WARN" | "ERROR";
+  const consistencyWindowMs = parseInt(process.env.CONSISTENCY_WINDOW_MS || "30000", 10);
+  const pollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || "5000", 10);
+  const environment = process.env.ENVIRONMENT || "testnet";
+  const reconcilerId = process.env.RECONCILER_ID || "primary-001";
+
   return {
     horizonUrl: process.env.HORIZON_URL || "https://horizon-testnet.stellar.org",
     sorobanRpcUrl: process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org/rpc",
     indexerUrl: process.env.INDEXER_URL || undefined,
     webhookUrl: process.env.WEBHOOK_URL || undefined,
-    consistencyWindowMs: parseInteger(process.env.CONSISTENCY_WINDOW_MS, 30_000),
-    pollIntervalMs: parseInteger(process.env.POLL_INTERVAL_MS, 5_000),
-    logLevel: (process.env.LOG_LEVEL || "INFO") as ServiceConfig["logLevel"],
+    consistencyWindowMs,
+    pollIntervalMs,
+    logLevel,
     contractId: process.env.CONTRACT_ID,
-    environment: process.env.ENVIRONMENT || "testnet",
-    reconcilerId: process.env.RECONCILER_ID || "primary-001",
+    environment,
+    reconcilerId,
     asOfMaxLagLedgers: parseInteger(process.env.AS_OF_MAX_LAG_LEDGERS, 5),
     tolerance: {
       absolute: parseInteger(process.env.ROUNDING_TOLERANCE_ABSOLUTE, 0),
@@ -91,15 +110,28 @@ function loadConfig(): ServiceConfig {
   };
 }
 
+/**
+ * Get the list of stream IDs to monitor.
+ * In production, this would come from the indexer dashboard or a config file.
+ */
 function getMonitoredStreamIds(): string[] {
   const ids = process.env.STREAM_IDS;
   if (!ids) return [];
-  return ids.split(",").map((id) => id.trim()).filter(Boolean);
+  return ids.split(",").map(id => id.trim()).filter(Boolean);
 }
 
-export async function createReconcilerService() {
+export async function createReconcilerService(): Promise<ReconcilerService> {
   const config = loadConfig();
 
+  // Validate required config
+  if (!config.horizonUrl) {
+    throw new Error("HORIZON_URL is required");
+  }
+  if (!config.sorobanRpcUrl) {
+    throw new Error("SOROBAN_RPC_URL is required");
+  }
+
+  // Initialize readers
   const horizonReader = new HorizonReader({
     url: config.horizonUrl,
     token: process.env.HORIZON_API_TOKEN || undefined,
@@ -113,11 +145,7 @@ export async function createReconcilerService() {
     contractId: config.contractId || "unknown",
   });
 
-  const projectionReader = new ProjectionReader({
-    url: config.indexerUrl,
-    token: process.env.INDEXER_API_TOKEN || undefined,
-  });
-
+  // Initialize alerting service
   const alerting = new AlertingService({
     webhookUrl: config.webhookUrl,
     consistencyWindowMs: config.consistencyWindowMs,
@@ -125,6 +153,11 @@ export async function createReconcilerService() {
     serviceName: SERVICE_NAME,
     environment: config.environment,
     reconcilerId: config.reconcilerId,
+  });
+
+  const projectionReader = new ProjectionReader({
+    url: config.indexerUrl,
+    token: process.env.INDEXER_API_TOKEN || undefined,
   });
 
   const suppressor = new DivergenceSuppressor({
@@ -138,11 +171,6 @@ export async function createReconcilerService() {
     suppressor,
   });
 
-  const engine = new ReconciliationEngine({
-    consistencyWindowMs: config.consistencyWindowMs,
-    alertingService: alerting,
-  });
-
   const proposalStore = new ProposalStore({
     timelockMs: config.healTimelockMs,
     ttlMs: config.healTtlMs,
@@ -150,7 +178,7 @@ export async function createReconcilerService() {
     governanceSigners: config.healSigners,
     maxScope: config.healMaxScope,
     maxLedgerRange: config.healMaxLedgerRange,
-    onEvent: (event: string, proposal: any) => {
+    onEvent: (event: string, proposal: { id?: string; status?: string; dryRun?: { beforeRoot?: string; afterRoot?: string }; execution?: unknown }) => {
       alerting.log("INFO", `Heal proposal ${event}`, {
         proposalId: proposal.id,
         status: proposal.status,
@@ -161,6 +189,13 @@ export async function createReconcilerService() {
     },
   });
 
+  // Initialize reconciliation engine
+  const engine = new ReconciliationEngine({
+    consistencyWindowMs: config.consistencyWindowMs,
+    alertingService: alerting,
+  });
+
+  // Health check both readers on startup
   const [hHealth, sHealth] = await Promise.all([
     horizonReader.healthCheck(),
     sorobanReader.healthCheck(),
@@ -188,18 +223,49 @@ export async function createReconcilerService() {
     engine,
     threeWay,
     proposalStore,
+    suppressor,
     alerting,
     config,
   };
 }
 
-export type ReconcilerService = Awaited<ReturnType<typeof createReconcilerService>>;
+/**
+ * Run a single reconciliation cycle (useful for testing or manual invocation).
+ */
+export async function runCycle(
+  horizonReader: HorizonReader,
+  sorobanReader: SorobanRpcReader,
+  engine: ReconciliationEngine,
+  alerting: AlertingService,
+  streamIds: string[]
+): Promise<ReconciliationResult> {
+  const [horizonStates, sorobanStates] = await Promise.all([
+    horizonReader.pollStreams(streamIds),
+    sorobanReader.pollStreams(streamIds),
+  ]);
+
+  const result = await engine.reconcile(horizonStates, sorobanStates);
+
+  alerting.log("INFO", "Reconciliation cycle complete", {
+    totalChecked: result.totalChecked,
+    inSync: result.inSync,
+    withinLagWindow: result.withinLagWindow,
+    divergences: result.divergences.length,
+    ledgerGap: result.ledgerGap,
+    timestamp: result.timestamp,
+  });
+
+  return result;
+}
 
 /**
  * Run one pinned three-way cycle. A missing source produces a degraded report
  * rather than a clean verdict; heal proposals fail closed outside three-way.
  */
-export async function runThreeWayCycle(service: ReconcilerService, streamIds: string[]) {
+export async function runThreeWayCycle(
+  service: ReconcilerService,
+  streamIds: string[]
+): Promise<{ report: any; proposals: any[]; skipped: any[] }> {
   const adapters: any[] = [
     rpcAdapter(service.sorobanReader),
     horizonAdapter(service.horizonReader),
@@ -223,7 +289,9 @@ export async function runThreeWayCycle(service: ReconcilerService, streamIds: st
   let proposals: any[] = [];
   let skipped: any[] = [];
   if (service.config.healEnabled && report.mode === "three_way") {
-    const projectionSnapshot = snapshots.find((snapshot: any) => snapshot.source === "projection");
+    const projectionSnapshot = snapshots.find(
+      (snapshot: { source?: string }) => snapshot.source === "projection"
+    );
     const records = projectionSnapshot?.available ? projectionSnapshot.states : [];
     const result = proposeHeals({
       report,
@@ -236,87 +304,67 @@ export async function runThreeWayCycle(service: ReconcilerService, streamIds: st
     skipped = result.skipped;
   }
 
-  service.alerting.log(report.verdict === "divergent" ? "ERROR" : "INFO", "Three-way reconciliation complete", {
-    verdict: report.verdict,
-    mode: report.mode,
-    asOfLedger: report.asOfLedger ?? asOfLedger,
-    checked: report.summary.checked,
-    inSync: report.summary.inSync,
-    tolerated: report.summary.tolerated,
-    withinLag: report.summary.withinLag,
-    divergent: report.summary.divergent,
-    suppressed: report.summary.suppressed,
-    byLayer: report.summary.byLayer,
-    caveats: report.caveats,
-    proposals: proposals.map((proposal) => proposal.id),
-    skipped,
-  });
+  service.alerting.log(
+    report.verdict === "divergent" ? "ERROR" : "INFO",
+    "Three-way reconciliation complete",
+    {
+      verdict: report.verdict,
+      mode: report.mode,
+      asOfLedger: report.asOfLedger ?? asOfLedger,
+      checked: report.summary.checked,
+      inSync: report.summary.inSync,
+      tolerated: report.summary.tolerated,
+      withinLag: report.summary.withinLag,
+      divergent: report.summary.divergent,
+      suppressed: report.summary.suppressed,
+      byLayer: report.summary.byLayer,
+      caveats: report.caveats,
+      proposals: proposals.map((proposal) => proposal.id),
+      skipped,
+    }
+  );
 
   return { report, proposals, skipped };
 }
 
-/**
- * Legacy two-way cycle retained for deployments that have not configured the
- * indexer projection yet. It cannot attribute a divergence to a layer.
- */
-export async function runCycle(
-  horizonReader: HorizonReader,
-  sorobanReader: SorobanRpcReader,
-  engine: ReconciliationEngine,
-  alerting: AlertingService,
+export async function runContinuousThreeWay(
+  service: ReconcilerService,
   streamIds: string[]
-) {
-  const [horizonStates, sorobanStates] = await Promise.all([
-    horizonReader.pollStreams(streamIds),
-    sorobanReader.pollStreams(streamIds),
-  ]);
-
-  const result = await engine.reconcile(horizonStates, sorobanStates);
-
-  alerting.log("INFO", "Two-way reconciliation cycle complete", {
-    totalChecked: result.totalChecked,
-    inSync: result.inSync,
-    withinLagWindow: result.withinLagWindow,
-    divergences: result.divergences.length,
-    ledgerGap: result.ledgerGap,
-    timestamp: result.timestamp,
-    caveat: "two-way mode cannot isolate the disagreeing layer",
-  });
-
-  return result;
-}
-
-export async function runContinuousThreeWay(service: ReconcilerService, streamIds: string[]) {
+): Promise<void> {
   const interval = service.config.pollIntervalMs;
   for (;;) {
     const started = Date.now();
     try {
       await runThreeWayCycle(service, streamIds);
     } catch (error) {
-      service.alerting.log("ERROR", "Three-way reconciliation cycle failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      service.alerting.log(
+        "ERROR",
+        "Three-way reconciliation cycle failed",
+        { error: error instanceof Error ? error.message : String(error) }
+      );
     }
     const elapsed = Date.now() - started;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, interval - elapsed)));
   }
 }
 
-const entrypoint = process.argv[1] ?? "";
-if (entrypoint.endsWith("index.js") || entrypoint.endsWith("index.ts")) {
+// Entrypoint when run directly
+if (process.argv[1]?.endsWith("index.js") || process.argv[1]?.endsWith("index.ts")) {
   (async () => {
     try {
       const service = await createReconcilerService();
       const streamIds = getMonitoredStreamIds();
+
       service.alerting.log("INFO", "Reconciler service ready", {
         monitoredStreams: streamIds.length,
       });
+
       await runContinuousThreeWay(service, streamIds);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[streampay-reconciler] Fatal error:", err);
       process.exit(1);
     }
   })();
 }
 
-export type { StreamState };
+export type { StreamState, ReconciliationResult };

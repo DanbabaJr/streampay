@@ -53,7 +53,7 @@ fn every_catalog_code_maps_to_one_variant_and_back() {
         assert_eq!(error.name(), name, "code {code}");
         assert_eq!(error.code(), Some(code), "code {code}");
     }
-    assert_eq!(seen, 99, "the mobile SDK must map the full catalog");
+    assert_eq!(seen, 125, "the mobile SDK must map the full catalog");
     assert_eq!(StreamPayError::from_code(9_999), StreamPayError::Unknown);
     assert_eq!(StreamPayError::Transport.code(), None);
 }

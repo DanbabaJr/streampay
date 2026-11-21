@@ -1,8 +1,9 @@
 PYTHON ?= python3
 VECTORS_BUILDER := vectors/builder
 TS_DIR := typescript
+RUST_DIR := rust
 
-.PHONY: help spec generate check check-spec vectors test publish-dry-run clean conformance conformance-test conformance-live mobile-check mobile-bindings
+.PHONY: help spec generate check check-spec vectors test test-rust publish-dry-run clean conformance conformance-test conformance-live mobile-check mobile-bindings
 
 help:
 	@echo "spec              re-derive spec/streampay.spec.json + FINGERPRINT from the contract"
@@ -11,11 +12,8 @@ help:
 	@echo "check-spec        schema guard + tests only"
 	@echo "vectors           rebuild conformance vectors (deterministic)"
 	@echo "test              TypeScript SDK: typecheck, build, tests (incl. vectors)"
+	@echo "test-rust         Rust SDK: conformance vectors + doctests"
 	@echo "conformance       TypeScript + Rust + Python decode every shared vector"
-	@echo "conformance-test  orchestrator lifecycle tests (no Docker/network)"
-	@echo "conformance-live  same clients against an ephemeral Stellar sandbox"
-	@echo "mobile-bindings   regenerate UDL + 99-code catalog + manifest"
-	@echo "mobile-check      freshness gate + host tests + host vector runner"
 	@echo "publish-dry-run   npm pack --dry-run for the TypeScript SDK (no upload)"
 
 spec:
@@ -36,6 +34,9 @@ vectors:
 
 test:
 	cd $(TS_DIR) && npm ci && npm run typecheck && npm test
+
+test-rust:
+	cd $(RUST_DIR) && cargo test
 
 conformance:
 	./conformance/run.sh

@@ -236,6 +236,9 @@ export default function Home() {
             <Link href="/docs" style={{ color: "#38bdf8", fontSize: "0.85rem", textDecoration: "none" }}>
               {t("chrome.apiDocs")}
             </Link>
+            <Link href="/settings" style={{ color: "var(--accent2)", fontSize: "0.85rem", textDecoration: "none" }}>
+              {t("home.settings")}
+            </Link>
             <Link href="/listings" style={{ color: "var(--accent2)", fontSize: "14px", textDecoration: "none" }}>
               {t("home.browse")}
             </Link>
@@ -293,6 +296,9 @@ export default function Home() {
           >
             {t("chrome.simulatorLink")}
           </a>
+          <Link href="/settings" style={{ color: "var(--accent2)", fontSize: "13px", textDecoration: "none", fontWeight: 600 }}>
+            {t("home.settings")}
+          </Link>
           <WalletButton />
           <Link href="/listings" style={{ color: "var(--accent2)", fontSize: "14px", textDecoration: "none" }}>
             {t("home.browse")}

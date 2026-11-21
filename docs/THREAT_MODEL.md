@@ -1,22 +1,22 @@
 # StreamPay Threat Model: Adversary × Component Security Matrix
 
-- **Document Version**: 1.0.0-draft
+- **Document Version**: 1.1.0-draft
 - **Pinned Commit**: `0846c879db1312d4a08bbf7099349822fc66ced4`
-- **Date**: 2026-10-15
-- **Status**: Draft for External Audit Intake (Pairs with Issue #13 / Audit Prep)
+- **Date**: 2026-11-19
+- **Status**: Refreshed for External Audit Intake (Extended for Passkey-Signer, Stream-NFT, and Sponsorship - Issue #538)
 - **Target Network**: Stellar Mainnet (Soroban Protocol 23 / Protocol 24+)
 
 ---
 
 ## 1. Purpose and How to Use This Document
 
-This document is the authoritative **threat model and audit-intake specification** for the StreamPay protocol. It pairs with issue #13 (external audit intake and security readiness) and is designed to provide auditors and security evaluators with unambiguous scoping boundaries, an exhaustive adversarial threat matrix, precise invariant definitions, and verified evidence citations.
+This document is the authoritative **threat model and audit-intake specification** for the StreamPay protocol. It pairs with issue #13 (external audit intake and security readiness) and issue #538 (threat model refresh) and is designed to provide auditors and security evaluators with unambiguous scoping boundaries, an exhaustive adversarial threat matrix, precise invariant definitions, and verified evidence citations.
 
 ### Intended Audience and Scope Orientation
 An external auditor reviewing StreamPay should use this document to:
 1. **Clarify Scope Boundaries**: Eliminate guesswork regarding what is formally guaranteed by the smart contract versus what is an accepted operational or external risk.
 2. **Review Invariant Adherence**: Test every contract entrypoint, branch, and edge case against the mathematical and architectural invariants defined in [§3](#3-assets-and-security-invariants).
-3. **Verify the Adversary × Component Matrix**: Evaluate how each of the 7 identified adversary classes is countered across the 4 architectural components in [§6](#6-the-adversary--component-matrix).
+3. **Verify the Adversary × Component Matrix**: Evaluate how each of the 10 identified adversary classes is countered across the 4 architectural components in [§6](#6-the-adversary--component-matrix).
 4. **Inspect Unmitigated & Partially Mitigated Gaps**: Review pre-identified residual risks in [§8](#8-accepted-open-risks-register) and ready-to-file security enhancements in [§10](#10-gap-issues-drafts-ready-for-filing).
 5. **Analyze Full State Exposure**: Review the candid evaluation of on-chain information leakage in [§9](#9-the-honest-weakness-full-contract-state-exposure-analysis).
 
@@ -31,6 +31,9 @@ StreamPay provides continuous, per-second linear payment streaming on the Stella
 | Component | Repository Path | Tech Stack | Role & Responsibility |
 |---|---|---|---|
 | **Contract** | `contracts/streaming-payments/` | Rust, `soroban-sdk` 28.0.0 | Immutable escrow engine. Enforces auth checks (`require_auth`), monotonic stream ID assignment, capacity validation, linear accrual math, Checks-Effects-Interactions (CEI) token transfers, event emission, and persistent storage management. |
+| **Passkey Signer** | `contracts/passkey-signer/` | Rust, `soroban-sdk` 28.0.0 | On-chain WebAuthn Level 3 assertion verifier. Verifies P-256 ECDSA signatures over clientDataJSON/authData, validates relying party IDs and user presence/verification flags, and prevents challenge replay via single-use persistent nonces. |
+| **Stream NFT** | `contracts/stream-nft/` | Rust, `soroban-sdk` 28.0.0 | Companion single-unit SEP-41 non-fungible token contract. Binds recipient rights for a stream to an NFT with transferable ownership, operator allowances, delegated withdrawals, and terminal burn-on-finalize enforcement. |
+| **Sponsorship** | `contracts/streaming-payments/src/sponsor.rs` | Rust, `soroban-sdk` 28.0.0 | Inner-authorization gas sponsorship module. Manages sponsor budgets, per-period and per-beneficiary limits, dual ed25519 signature verification over canonical domain-separated digests, and single-use claim nonces. |
 | **Frontend** | `frontend/` | Next.js 16 (App Router), React 19, TypeScript, `@stellar/stellar-sdk`, `@stellar/freighter-api` | Non-custodial client interface. Connects to Freighter wallet, discovers user streams via on-chain indexes, estimates transaction resources, simulates calls against Soroban RPC, and submits signed XDR envelopes. |
 | **Indexer** | Roadmap (spec in `docs/GOOD_FIRST_ISSUES.md:65-85`, drill simulation in `scripts/drill_indexer_corruption.sh`) | TypeScript / Node.js worker + SQLite/Postgres | Asynchronous off-chain worker. Ingests contract events (`StreamCreated`, `Withdrawn`, `StreamCancelled`, `StreamToppedUp`) via RPC `getEvents`, indexes historical state transitions, and serves analytical queries. |
 | **Ops Keys / Sentinel** | `infra/ttl-sentinel/`, `scripts/deploy_*.sh`, `.github/workflows/promote.yml` | TypeScript / Node.js, Shell, GitHub Actions | Operational infrastructure. Manages Wasm deployment, continuous storage TTL monitoring (`ttl-sentinel`), cliff projections, and automated rent extension transactions (`ExtendFootprintTTL`). |
@@ -115,6 +118,9 @@ flowchart TD
 | **A-5** | Contract Bytecode & Instance | Wasm executable code and contract instance ledger entries | Critical: Contract bricking / denial of service if un-extended past 4,095 ledgers. |
 | **A-6** | User Signing Keys | Ed25519 private keys controlling sender and recipient Stellar accounts | Critical: Unauthorized stream creation, cancellation, or fund diversion. |
 | **A-7** | Operational Rent Keys | Extender account secret key funding `ExtendFootprintTTL` transactions | Medium: Depletion of operational XLM rent budget. |
+| **A-8** | WebAuthn Passkey Credentials & Nonces | `contracts/passkey-signer/`: `Credential` persistent entries `(rp_id_hash, x, y, flags)` and single-use challenge nonces `PasskeyKey::Challenge` | High: Unauthorized withdrawal authorization via replayed assertions or rogue credential registration. |
+| **A-9** | Stream NFT Rights & Operator Allowances | `contracts/stream-nft/`: `NftDataKey::Owner`, `NftDataKey::Allowance(spender)`, and `NftDataKey::Burned` instance/persistent storage | High: Unauthorized transfer of recipient claims, illegitimate operator withdrawals, or premature token burning. |
+| **A-10** | Gas Sponsorship Budgets & Consent Keys | `contracts/streaming-payments/`: `SponsorConfig`, `OperatorKey`, `BeneficiaryKey`, `ClaimNonce`, and `PeriodSpend` persistent entries | High: Unauthorized draining of sponsor gas allowance, relayer griefing, or unauthorized fund release. |
 
 ### 3.2 Formal Security Invariants
 
@@ -178,12 +184,30 @@ contracts/streaming-payments/
 └── src/
     ├── lib.rs                  # Public contract entrypoints & auth verification
     ├── stream.rs               # Stream lifecycle, storage handlers, accrual math
+    ├── sponsor.rs              # Gas sponsorship & inner-auth dual ed25519 claim verification
+    ├── sponsor_test.rs         # Sponsorship budget, replay, and rotation test suite
     ├── errors.rs               # StreamError enum & numeric code definitions
-    ├── events.rs               # Event structs (StreamCreated, Withdrawn, etc.)
+    ├── events.rs               # Event structs (StreamCreated, Withdrawn, SponsorClaim, etc.)
     ├── surface.rs              # Error-surface rejection matrix & branch instrumentation
     ├── test.rs                 # Comprehensive unit & integration test suite
     ├── error_surface_test.rs   # Exhaustive reachability matrix tests
     └── test_client.rs          # Test harness contract client bindings
+
+contracts/passkey-signer/
+├── Cargo.toml
+└── src/
+    ├── lib.rs                  # PasskeySigner contract: register, deregister, verify_and_record
+    ├── registry.rs             # Credential persistent storage & single-use challenge nonces
+    ├── crypto.rs               # P-256 ECDSA verification & WebAuthn authData flag validation
+    ├── cbor.rs                 # clientDataJSON parsing, type verification, and challenge matching
+    ├── errors.rs               # PasskeyError enum & numeric code definitions
+    └── tests.rs                # Comprehensive WebAuthn assertion verification test suite
+
+contracts/stream-nft/
+├── Cargo.toml
+└── src/
+    ├── lib.rs                  # StreamNft companion contract: SEP-41 token, mint, transfer, burn
+    └── test.rs                 # StreamNft lifecycle, operator allowances, and burn tests
 ```
 
 ### 5.2 Out-of-Scope Components
@@ -204,7 +228,7 @@ contracts/streaming-payments/
 
 ## 6. The Adversary × Component Matrix
 
-The threat model evaluates **7 Adversaries** across **4 Components** (28 distinct threat vectors).
+The threat model evaluates **10 Adversaries** across **4 Components** (40 distinct threat vectors).
 
 ### 6.1 Matrix Summary Table
 
@@ -217,6 +241,9 @@ The threat model evaluates **7 Adversaries** across **4 Components** (28 distinc
 | **5. RPC Liar** | **MITIGATED** | **PARTIALLY MITIGATED** | **PARTIALLY MITIGATED** | **MITIGATED** |
 | **6. Indexer Compromiser** | **MITIGATED** | **PARTIALLY MITIGATED** | **PARTIALLY MITIGATED** | **N/A (Reason: Isolation)** |
 | **7. Griefing Third Party** | **PARTIALLY MITIGATED** | **PARTIALLY MITIGATED** | **ACCEPTED RISK** | **ACCEPTED RISK** |
+| **8. Passkey Compromiser / Phisher** | **MITIGATED** | **PARTIALLY MITIGATED** | **N/A (Reason: Isolation)** | **N/A (Reason: Isolation)** |
+| **9. NFT Manipulator** | **MITIGATED** | **PARTIALLY MITIGATED** | **PARTIALLY MITIGATED** | **N/A (Reason: Isolation)** |
+| **10. Sponsor Allowance Drainer / Griefing Relayer** | **MITIGATED** | **PARTIALLY MITIGATED** | **ACCEPTED RISK** | **N/A (Reason: Isolation)** |
 
 ---
 
@@ -548,6 +575,196 @@ An unauthenticated external party attempting to disrupt contract liveness, explo
 
 ---
 
+#### Row 8: Passkey Compromiser / Phisher (WebAuthn Credential Theft, Replay & Challenge Phishing)
+An adversary attempting to steal, spoof, or replay WebAuthn credentials, manipulate `clientDataJSON` parameters, bypass user presence or verification flags, or phish users via fake relying party domains to authorize stream claims through `contracts/passkey-signer/`.
+
+- **Adversary Capability**: Theft or cloning of platform authenticators, DNS/phishing attacks to trick users into signing assertions for malicious origins, man-in-the-middle challenge harvesting, and replay of previously executed assertion payloads.
+- **Affected Asset**: Asset A-8 (WebAuthn Passkey Credentials, single-use challenge nonces), Asset A-1 (Escrowed stream funds).
+
+- **Cell 8.1: Passkey Compromiser × Contract**
+  - **Consequence**:
+    - Assertion replay: Attacker re-submits a captured WebAuthn assertion payload (`authData`, `clientDataJSON`, `signature`) to claim funds a second time.
+    - Origin / RP phishing: Attacker tricks user into signing on `evil.com` and attempts to verify the assertion on-chain for a legitimate StreamPay address.
+    - Challenge mismatch: Attacker attempts to use an assertion generated for an arbitrary challenge to satisfy a specific claim nonce.
+    - User presence bypass: Attacker attempts to forge or replay an assertion without physical user interaction (`UP` bit cleared).
+    - Unregistered credential execution: Attacker attempts to submit assertions against un-enrolled addresses or coordinates not lying on the curve.
+    - (Severity: **Critical**).
+  - **Existing Mitigations**:
+    1. Single-use challenge nonce registry: `registry::record_challenge` records the 32-byte challenge in persistent storage. A replayed assertion with an already-consumed challenge reverts with `PasskeyError::ChallengeAlreadyUsed` (`contracts/passkey-signer/src/lib.rs:222-224`, `contracts/passkey-signer/src/registry.rs:55-66`).
+    2. Strict RP-ID hash verification: `crypto::verify_auth_data` asserts `auth_data[0..32] == cred.rp_id_hash`. Cross-origin assertions generated on rogue domains fail with `PasskeyError::RpIdHashMismatch` (`contracts/passkey-signer/src/crypto.rs:18-24`, `contracts/passkey-signer/src/lib.rs:185`).
+    3. User presence (UP) and user verification (UV) flag checks: `crypto::verify_auth_data` enforces that bit 0 of `auth_data[32]` is set (`PasskeyError::UserPresenceNotSet`); if `REGISTRATION_FLAGS_REQUIRE_UV` was configured at registration, bit 2 is also verified (`PasskeyError::UserVerificationNotSet`) (`contracts/passkey-signer/src/crypto.rs:26-37`).
+    4. Structural `clientDataJSON` validation: `cbor::verify_client_data_json` verifies that `type == "webauthn.get"` (`PasskeyError::ClientDataTypeMismatch`) and that the embedded base64url-encoded challenge strictly matches the expected 32-byte challenge parameter (`PasskeyError::ChallengeMismatch`) (`contracts/passkey-signer/src/cbor.rs:24-68`).
+    5. P-256 ECDSA cryptographic verification: `crypto::verify_p256_assertion` computes `sha256(auth_data || sha256(client_data_json))` and verifies the `(sig_r, sig_s)` signature over the digest against the stored `(x, y)` public key coordinates (`contracts/passkey-signer/src/crypto.rs:48-69`).
+    6. Registration authorization: Credential binding requires caller authorization (`owner.require_auth()`) (`contracts/passkey-signer/src/lib.rs:137`).
+  - **Status**: `MITIGATED`
+  - **Residual Risks**:
+    - **No On-Chain Hardware Attestation**: The contract intentionally does not verify WebAuthn attestation certificates (due to the gas and storage overhead of maintaining an on-chain FIDO2 MDS3 trust root). The on-chain contract cannot differentiate between a hardware enclave (e.g., Apple Secure Enclave / YubiKey) and a software authenticator.
+    - **Omission of Point-on-Curve Check**: On registration, `x` and `y` coordinates are stored without on-chain validation that $(x, y)$ satisfies the secp256r1 curve equation $y^2 \equiv x^3 + ax + b \pmod p$. Relying parties MUST validate points off-chain before submitting registration.
+    - **Opt-in User Verification**: Biometric/PIN verification (`UV` bit) is opt-in via `REGISTRATION_FLAGS_REQUIRE_UV`. If not enabled, physical possession and touch presence alone satisfy assertion requirements.
+  - **Evidence Citations**:
+    - `contracts/passkey-signer/src/tests.rs:132` (`fn register_and_get_credential_roundtrip()`)
+    - `contracts/passkey-signer/src/tests.rs:227` (`fn rp_id_hash_mismatch_rejected()`)
+    - `contracts/passkey-signer/src/tests.rs:258` (`fn user_presence_not_set_rejected()`)
+    - `contracts/passkey-signer/src/tests.rs:288` (`fn uv_required_but_not_set_rejected()`)
+    - `contracts/passkey-signer/src/tests.rs:320` (`fn wrong_type_in_client_data_json_rejected()`)
+    - `contracts/passkey-signer/src/tests.rs:353` (`fn wrong_challenge_in_client_data_json_rejected()`)
+    - `contracts/passkey-signer/src/tests.rs:396` (`fn challenge_replay_prevented_via_registry()`)
+    - `contracts/passkey-signer/src/tests.rs:438` (`fn expired_challenge_nonce_rejected()`)
+
+- **Cell 8.2: Passkey Compromiser × Frontend**
+  - **Consequence**: Adversary stands up a phishing domain or injects client-side scripts to prompt victims for assertions under an illegitimate relying party. (Severity: **High**).
+  - **Existing Mitigations**:
+    1. Browser WebAuthn Origin Isolation: The WebAuthn browser API (`navigator.credentials.get()`) enforces that the authenticator signs only for the origin of the active browsing context (eTLD+1). An assertion signed for `evil-phish.com` will carry `rpIdHash = sha256("evil-phish.com")` which the contract rejects upon verification against `streampay.app`.
+    2. Short-lived challenges: Frontend/relayer generates single-use random 32-byte challenges with a tight client-side expiration window.
+  - **Status**: `PARTIALLY MITIGATED` (Browser standard prevents cross-origin harvesting; client XSS remains an accepted web threat)
+  - **Residual Risks**: An XSS compromise on the canonical frontend origin could prompt the user for an assertion with an attacker-specified challenge.
+  - **Evidence Citations**: `contracts/passkey-signer/src/lib.rs:35-87`, `docs/SECURITY_LIGHT_CLIENT.md:32-48`.
+
+- **Cell 8.3: Passkey Compromiser × Indexer**
+  - **Consequence**: Adversary queries indexer to identify addresses using passkey signers for targeted phishing campaigns. (Severity: **Low**).
+  - **Existing Mitigations**:
+    1. Passkey registration does not expose private keys; only public coordinates `(x, y)` and `rp_id_hash` are stored.
+    2. Challenge consumption state is verified synchronously on-chain via `is_nonce_used` and not dependent on off-chain indexing.
+  - **Status**: `N/A (Reason: Isolation)`
+  - **Residual Risks**: On-chain inspection allows identifying which addresses use passkeys (see §9 full state exposure).
+  - **Evidence Citations**: `contracts/passkey-signer/src/registry.rs:18-40`.
+
+- **Cell 8.4: Passkey Compromiser × Ops Keys**
+  - **Consequence**: Compromised ops keys attempt to rebind user passkey credentials. (Severity: **N/A**).
+  - **Existing Mitigations**: Ops keys possess zero authority over passkey bindings; `register` and `deregister` strictly require `owner.require_auth()`.
+  - **Status**: `N/A (Reason: Isolation)`
+  - **Residual Risks**: None.
+  - **Evidence Citations**: `contracts/passkey-signer/src/lib.rs:137, 157`.
+
+---
+
+#### Row 9: NFT Manipulator (Ownership Confusion, Unauthorized Transfer & Metadata Spoofing)
+An adversary attempting to mint companion NFTs for unauthorized streams, steal stream recipient rights via token manipulation, exploit operator allowances, burn tokens prematurely, or spoof token metadata in `contracts/stream-nft/`.
+
+- **Adversary Capability**: Front-running companion NFT minting, replaying approvals, executing unauthorized `transfer` or `transfer_from` calls, burning tokens while underlying streams remain active, and tricking clients with spoofed token symbols or names.
+- **Affected Asset**: Asset A-9 (Companion NFT ownership and operator allowances), Asset A-1 (Escrowed stream funds).
+
+- **Cell 9.1: NFT Manipulator × Contract**
+  - **Consequence**:
+    - Front-running mint: Attacker mints an NFT for another user's stream to their own address.
+    - Over-minting / supply inflation: Attacker mints multiple NFT units for a single stream.
+    - Premature burn: Attacker burns an NFT while stream is active, destroying transferable claims.
+    - Stale allowance exploitation: Operator uses expired or already-consumed allowance to transfer tokens.
+    - Unauthorized withdrawal: Stranger or revoked operator withdraws funds through `StreamNft::withdraw`.
+    - (Severity: **Critical**).
+  - **Existing Mitigations**:
+    1. Mint authorization & recipient verification: `mint` requires `admin.require_auth()` and cross-checks `core_client.get_stream(&stream_id)`. The call reverts if stream is not `Active` (`NftError::StreamNotActive`) or if `stream.recipient != recipient` (`NftError::NotAuthorized`) (`contracts/stream-nft/src/lib.rs:182-202`).
+    2. Single-unit supply invariant: Token balances are strictly 0 or 1. `amount` must equal `1` for all transfers, burns, and approvals; anything else reverts with `NftError::InvalidAmount` (`contracts/stream-nft/src/lib.rs:285, 336, 363, 537`).
+    3. Strict allowance expiry & consumption: Allowances are single-use (`transfer_from` and `burn_from` remove the allowance key) and check `live_until_ledger >= env.ledger().sequence()` (`contracts/stream-nft/src/lib.rs:262, 346-348, 387-394`).
+    4. Burn gating: `finalize_and_burn` requires that `core_client.get_stream(&stream_id)` has reached a terminal status (`Depleted` or `Cancelled`); reverts with `NftError::StreamNotFinalized` if active (`contracts/stream-nft/src/lib.rs:412-419`).
+    5. Delegated withdrawal access control: `withdraw` and `withdraw_max` check that caller is either current `Owner` or an authorized operator with valid allowance (`contracts/stream-nft/src/lib.rs:437-445, 475-483`).
+  - **Status**: `MITIGATED`
+  - **Residual Risks**:
+    - **Core Stream Recipient Asynchrony (The Recipient Disconnect)**: Transferring a `StreamNft` updates the NFT's persistent `Owner`, but the underlying stream's `recipient` field on the core `contracts/streaming-payments` contract is immutable and cannot be edited without core contract modifications. When an NFT holder calls `StreamNft::withdraw`, the core contract executes `TokenClient::transfer(&contract, &s.recipient, &amount)`, which pays out to the *original* recipient address recorded at stream creation time unless the core contract is updated.
+    - **Single Admin Mint Bottleneck**: Minting requires `admin.require_auth()`. If the admin key is lost or unresponsive, stream recipients cannot tokenize active streams.
+  - **Evidence Citations**:
+    - `contracts/stream-nft/src/test.rs:162` (`fn test_mint_lifecycle_and_events()`)
+    - `contracts/stream-nft/src/test.rs:199` (`fn test_mint_rejects_non_matching_recipient()`)
+    - `contracts/stream-nft/src/test.rs:214` (`fn test_transfer_then_withdraw()`)
+    - `contracts/stream-nft/src/test.rs:257` (`fn test_transfer_invalid_amount()`)
+    - `contracts/stream-nft/src/test.rs:280` (`fn test_operator_approval_and_transfer_from()`)
+    - `contracts/stream-nft/src/test.rs:303` (`fn test_double_spend_attempts_via_stale_operator_keys()`)
+    - `contracts/stream-nft/src/test.rs:333` (`fn test_expired_operator_allowance()`)
+    - `contracts/stream-nft/src/test.rs:363` (`fn test_authorized_operator_can_withdraw()`)
+    - `contracts/stream-nft/src/test.rs:390` (`fn test_burn_on_finalize_depleted()`)
+    - `contracts/stream-nft/src/test.rs:463` (`fn test_finalize_and_burn_reverts_if_still_active()`)
+
+- **Cell 9.2: NFT Manipulator × Frontend**
+  - **Consequence**: Frontend displays the core stream recipient as the owner even after an NFT transfer has occurred, misleading users about who possesses claim rights. (Severity: **Medium**).
+  - **Existing Mitigations**:
+    1. UI must query companion NFT contract address and display both the original stream recipient and the current NFT holder.
+    2. Warnings displayed when companion NFT ownership diverges from core stream recipient.
+  - **Status**: `PARTIALLY MITIGATED` (Integration tracked in GAP-8; no dedicated UI proving test)
+  - **Residual Risks**: Secondary NFT marketplaces may list stream NFTs without displaying real-time unwithdrawn stream balances or remaining durations.
+  - **Evidence Citations**: `contracts/stream-nft/src/lib.rs:236-245`, `frontend/lib/stellar.ts`. Tracking issue: GAP-8.
+
+- **Cell 9.3: NFT Manipulator × Indexer**
+  - **Consequence**: Indexer indexes core `StreamCreated` and `Withdrawn` events but fails to track `NftMinted`, `NftTransferred`, and `NftBurned`, serving outdated ownership data. (Severity: **Medium**).
+  - **Existing Mitigations**:
+    1. StreamNft contract emits explicit typed events: `NftMinted`, `NftTransferred`, and `NftBurned` with indexed topics for `stream_id`, `from`, `to`, and `owner` (`contracts/stream-nft/src/lib.rs:93-125`).
+    2. Indexer pipeline must subscribe to both core contract ID and companion NFT contract IDs.
+  - **Status**: `PARTIALLY MITIGATED` (Event definitions exist; multi-contract indexer ingestion in roadmap; see GAP-5)
+  - **Residual Risks**: High companion contract deployment volume creates a distributed event-subscription burden on the indexer.
+  - **Evidence Citations**: `contracts/stream-nft/src/lib.rs:93-125`.
+
+- **Cell 9.4: NFT Manipulator × Ops Keys**
+  - **Consequence**: Ops keys attempt to modify NFT ownership or burn tokens. (Severity: **N/A**).
+  - **Existing Mitigations**: StreamNft admin is configured during `initialize` and does not default to ops/rent keys. Ops keys hold no authority over companion NFT contracts.
+  - **Status**: `N/A (Reason: Isolation)`
+  - **Residual Risks**: None.
+  - **Evidence Citations**: `contracts/stream-nft/src/lib.rs:141-164`.
+
+---
+
+#### Row 10: Sponsor Allowance Drainer / Griefing Relayer (sponsor.rs)
+An adversary attempting to exhaust a sponsor's gas/allowance budget, relay unauthorized claims, manipulate claim amounts, reuse nonces, or front-run and censor beneficiary claims in `contracts/streaming-payments/src/sponsor.rs`.
+
+- **Adversary Capability**: Flooding legitimate dual-signed claims to exhaust periodic budget windows, submitting forged signatures, replaying old signatures across streams or tokens, relaying dust claims to consume per-beneficiary allowances, and front-running sponsored claims.
+- **Affected Asset**: Asset A-10 (Sponsor budget caps, operator relay keys, beneficiary consent keys, claim nonces), Asset A-1 (Escrowed stream funds).
+
+- **Cell 10.1: Sponsor Allowance Drainer × Contract**
+  - **Consequence**:
+    - Budget exhaustion: Attacker drains sponsor's `per_period_limit` or `per_beneficiary_limit`, preventing legitimate beneficiaries from claiming.
+    - Claim replay: Attacker re-submits a previously executed claim with the same nonce.
+    - Signature forgery: Attacker attempts to modify amount, token, stream ID, or deadline in the relayed claim.
+    - Cross-stream / cross-network replay: Signature signed for testnet or another stream is replayed.
+    - Siphoning funds: Attacker sets up a sponsor to divert stream payouts to an unauthorized address.
+    - (Severity: **Critical**).
+  - **Existing Mitigations**:
+    1. Dual ed25519 inner authorization: Both operator key and beneficiary consent key must sign the SHA-256 digest of the canonical domain-separated message (`contracts/streaming-payments/src/sponsor.rs:303-342, 545-547`). Rejection is total: `ed25519_verify` panics (host trap) on forged signatures, rolling back all state mutations (`sponsor.rs:338-342`).
+    2. Strict budget caps per window: Enforces `per_period_limit` and `per_beneficiary_limit` against `PeriodSpend.effective(window_seconds, now)`. Claims exceeding limits fail with `Branch::SponsorBudgetPeriodExceeded` or `Branch::SponsorBudgetBeneficiaryExceeded` (`sponsor.rs:521-530`).
+    3. Persistent replay defense: `ClaimNonce(sponsor, beneficiary, nonce)` is checked before execution and marked immediately after signature verification (`sponsor.rs:277-291, 516-518, 550`). Replayed nonces revert with `Branch::ClaimNonceReplay`.
+    4. Canonical message domain separation: Message binds `contract_id`, `sponsor`, `beneficiary`, `token`, `stream_id`, `amount`, `nonce`, and `deadline`. Cross-stream, cross-token, or cross-network replays fail cryptographic verification (`sponsor.rs:303-324`).
+    5. Recipient invariant enforcement: `sponsored_withdraw` strictly checks `beneficiary == s.recipient` and `s.token == cfg.token`. Funds are transferred strictly to `s.recipient` via `TokenClient::transfer` (`sponsor.rs:494, 576-580`).
+    6. Circuit breaker & rotation: Sponsor can call `set_sponsor_active(false)` to halt all relays instantly, or `rotate_operator_key` to void compromised operator keys (`sponsor.rs:401-439`).
+  - **Status**: `MITIGATED`
+  - **Residual Risks**:
+    - **Public Budget Exposure**: A sponsor's remaining allowance and window start timestamp are publicly inspectable on-chain via `get_period`. A griefer can time bursts to exhaust allowances right at window roll-overs.
+    - **Authorized Collusion Exhaustion**: If a beneficiary colludes with an operator, they can legitimately exhaust the sponsor's budget up to `per_period_limit` and `per_beneficiary_limit`.
+    - **Deadline Ledger Granularity**: Claims remain valid until `deadline`. If a client sets a long deadline, an operator can hold and execute the claim at an inopportune time.
+  - **Evidence Citations**:
+    - `contracts/streaming-payments/src/sponsor_test.rs:119` (`fn sponsored_claim_with_valid_signatures_pays_out_and_books_budget()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:173` (`fn replayed_nonce_is_rejected_and_cannot_double_spend()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:202` (`fn budget_exhaustion_mid_relay_rejects_the_second_claim_until_window_rolls()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:241` (`fn beneficiary_cap_rejects_within_the_sponsor_window()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:266` (`fn rotating_the_operator_key_voids_old_relay_signatures()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:308` (`fn invalid_signature_traps_without_burning_the_nonce()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:360` (`fn paused_sponsor_blocks_relay_until_resumed()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:389` (`fn sponsoring_someone_who_is_not_the_recipient_is_rejected()`)
+    - `contracts/streaming-payments/src/sponsor_test.rs:428` (`fn canonical_relay_message_has_a_frozen_wire_form()`)
+
+- **Cell 10.2: Sponsor Allowance Drainer × Frontend**
+  - **Consequence**: Compromised local storage exposes beneficiary's ed25519 consent key, or rogue relayer refuses to submit signed claims (censorship). (Severity: **High**).
+  - **Existing Mitigations**:
+    1. Direct withdrawal fallback: Sponsorship is strictly optional. If an operator censors a claim or exhausts budget, the recipient can always call `withdraw` or `withdraw_max` directly with their standard wallet.
+    2. Single-intent signing: Beneficiary signs specific parameters rather than open-ended allowances.
+  - **Status**: `PARTIALLY MITIGATED` (Fallback prevents fund locking; consent key custody in browser storage tracked in GAP-9)
+  - **Residual Risks**: Browser local storage key custody is vulnerable to device theft or malware; hardware/wallet signing for raw ed25519 payloads is needed for production.
+  - **Evidence Citations**: `contracts/streaming-payments/src/sponsor.rs:28-35`, `docs/THREAT_MODEL.md:825-840`. Tracking issue: GAP-9.
+
+- **Cell 10.3: Sponsor Allowance Drainer × Indexer**
+  - **Consequence**: High-frequency sponsored claim relay floods event logs or indexer database. (Severity: **Low**).
+  - **Existing Mitigations**:
+    1. Contract emits structured `SponsorClaim` events containing `stream_id`, `beneficiary`, `amount`, and `nonce` (`contracts/streaming-payments/src/events.rs:65-75`).
+    2. Budget caps inherently limit the maximum number of successful claims per window.
+  - **Status**: `ACCEPTED RISK`
+  - **Residual Risks**: None beyond standard transaction spam.
+  - **Evidence Citations**: `contracts/streaming-payments/src/events.rs:65-75`.
+
+- **Cell 10.4: Sponsor Allowance Drainer × Ops Keys**
+  - **Consequence**: Attempting to alter sponsor budget or operator key via ops keys. (Severity: **N/A**).
+  - **Existing Mitigations**: `register_sponsor`, `set_sponsor_active`, and `rotate_operator_key` require `sponsor.require_auth()`. Ops keys have no administrative authority over sponsors.
+  - **Status**: `N/A (Reason: Isolation)`
+  - **Residual Risks**: None.
+  - **Evidence Citations**: `contracts/streaming-payments/src/sponsor.rs:360, 402, 427`.
+
+---
+
 ## 7. Existing Test Coverage Map (Mitigation → Test)
 
 This section maps core security mitigations directly to their proving automated tests in the repository.
@@ -605,6 +822,29 @@ This section maps core security mitigations directly to their proving automated 
 | Sentinel TTL extender disabled by default (read-only safety) | `infra/ttl-sentinel/src/extender.ts:1-19` | `the extender is off unless explicitly enabled — the core stays read-only` | `infra/ttl-sentinel/test/extender.test.ts:42` |
 | Sentinel ledger fast-forward alerts within class cliff margins | `infra/ttl-sentinel/src/cliff.ts:6-14` | `stream: warn fires ~49k ledgers inside the 200k cliff, then crit, then expiry` | `infra/ttl-sentinel/test/fastforward.test.ts:22` |
 | Verification that counter and instance entries are never extended on-chain | `contracts/streaming-payments/src/stream.rs:185-190` | `the counter is NEVER extended — its cliff is min_persistent_entry_ttl` | `infra/ttl-sentinel/test/constants-sync.test.ts:61` |
+| Passkey registration and credential lookup roundtrip | `contracts/passkey-signer/src/lib.rs:129-150` | `register_and_get_credential_roundtrip` | `contracts/passkey-signer/src/tests.rs:132` |
+| Passkey rejection of mismatched Relying Party ID hash | `contracts/passkey-signer/src/crypto.rs:18-24` | `rp_id_hash_mismatch_rejected` | `contracts/passkey-signer/src/tests.rs:227` |
+| Passkey rejection of assertions without user-presence bit | `contracts/passkey-signer/src/crypto.rs:26-30` | `user_presence_not_set_rejected` | `contracts/passkey-signer/src/tests.rs:258` |
+| Passkey enforcement of user-verification (UV) bit when required | `contracts/passkey-signer/src/crypto.rs:32-37` | `uv_required_but_not_set_rejected` | `contracts/passkey-signer/src/tests.rs:288` |
+| Passkey rejection of invalid clientDataJSON types | `contracts/passkey-signer/src/cbor.rs:24-34` | `wrong_type_in_client_data_json_rejected` | `contracts/passkey-signer/src/tests.rs:320` |
+| Passkey rejection of mismatched challenge bytes | `contracts/passkey-signer/src/cbor.rs:40-68` | `wrong_challenge_in_client_data_json_rejected` | `contracts/passkey-signer/src/tests.rs:353` |
+| Passkey single-use challenge nonce replay prevention | `contracts/passkey-signer/src/registry.rs:55-66` | `challenge_replay_prevented_via_registry` | `contracts/passkey-signer/src/tests.rs:396` |
+| Stream NFT companion mint lifecycle and event emission | `contracts/stream-nft/src/lib.rs:168-220` | `test_mint_lifecycle_and_events` | `contracts/stream-nft/src/test.rs:162` |
+| Stream NFT rejection of minting to non-matching recipient | `contracts/stream-nft/src/lib.rs:200-202` | `test_mint_rejects_non_matching_recipient` | `contracts/stream-nft/src/test.rs:199` |
+| Stream NFT transfer followed by holder withdrawal | `contracts/stream-nft/src/lib.rs:321-324, 430-468` | `test_transfer_then_withdraw` | `contracts/stream-nft/src/test.rs:214` |
+| Stream NFT rejection of non-unit transfer amounts (amount != 1) | `contracts/stream-nft/src/lib.rs:537-539` | `test_transfer_invalid_amount` | `contracts/stream-nft/src/test.rs:257` |
+| Stream NFT operator allowance approval and single-use `transfer_from` | `contracts/stream-nft/src/lib.rs:328-351` | `test_operator_approval_and_transfer_from` | `contracts/stream-nft/src/test.rs:280` |
+| Stream NFT allowance expiration enforcement by ledger sequence | `contracts/stream-nft/src/lib.rs:262` | `test_expired_operator_allowance` | `contracts/stream-nft/src/test.rs:333` |
+| Stream NFT rejection of finalization burn while stream active | `contracts/stream-nft/src/lib.rs:416-418` | `test_finalize_and_burn_reverts_if_still_active` | `contracts/stream-nft/src/test.rs:463` |
+| Stream NFT burn on finalization when stream is depleted | `contracts/stream-nft/src/lib.rs:401-421` | `test_burn_on_finalize_depleted` | `contracts/stream-nft/src/test.rs:390` |
+| Gas sponsorship payout with valid dual ed25519 signatures | `contracts/streaming-payments/src/sponsor.rs:473-582` | `sponsored_claim_with_valid_signatures_pays_out_and_books_budget` | `contracts/streaming-payments/src/sponsor_test.rs:119` |
+| Gas sponsorship single-use claim nonce replay prevention | `contracts/streaming-payments/src/sponsor.rs:516-518, 550` | `replayed_nonce_is_rejected_and_cannot_double_spend` | `contracts/streaming-payments/src/sponsor_test.rs:173` |
+| Gas sponsorship budget exhaustion rejects subsequent claims | `contracts/streaming-payments/src/sponsor.rs:521-525` | `budget_exhaustion_mid_relay_rejects_the_second_claim_until_window_rolls` | `contracts/streaming-payments/src/sponsor_test.rs:202` |
+| Gas sponsorship per-beneficiary limit enforcement | `contracts/streaming-payments/src/sponsor.rs:526-530` | `beneficiary_cap_rejects_within_the_sponsor_window` | `contracts/streaming-payments/src/sponsor_test.rs:241` |
+| Gas sponsorship operator key rotation voids old signatures | `contracts/streaming-payments/src/sponsor.rs:422-439` | `rotating_the_operator_key_voids_old_relay_signatures` | `contracts/streaming-payments/src/sponsor_test.rs:266` |
+| Gas sponsorship invalid signatures trap without state change | `contracts/streaming-payments/src/sponsor.rs:546-547` | `invalid_signature_traps_without_burning_the_nonce` | `contracts/streaming-payments/src/sponsor_test.rs:308` |
+| Gas sponsorship paused sponsor blocks all relay claims | `contracts/streaming-payments/src/sponsor.rs:486-488` | `paused_sponsor_blocks_relay_until_resumed` | `contracts/streaming-payments/src/sponsor_test.rs:360` |
+| Gas sponsorship rejects claims sponsoring non-recipients | `contracts/streaming-payments/src/sponsor.rs:494-496` | `sponsoring_someone_who_is_not_the_recipient_is_rejected` | `contracts/streaming-payments/src/sponsor_test.rs:389` |
 
 ---
 
@@ -620,6 +860,9 @@ This register details known residual risks that are either accepted for the curr
 | **R-4** | **Non-Standard Token Incompatibilities (Fee-on-Transfer / Clawback)** | Tokens that deduct transfer fees or rebase balances break the contract balance coverage invariant. SAC tokens with clawback flags allow issuers to burn escrowed balances. Rationale: V1 explicitly scopes support to standard SAC and SEP-41 compliant tokens. Impact: Insolvency if non-compliant tokens are used. | Protocol Architecture | `GAP-6` / `docs/ARCHITECTURE.md:21-24` |
 | **R-5** | **Single RPC Endpoint Dependency in Frontend** | The Next.js frontend connects to a single configured Soroban RPC provider. RPC outages or latency cause client transaction simulation or inclusion polling timeouts. Impact: Frontend degraded availability. | Frontend Team | `GAP-7` |
 | **R-6** | **Absence of Emergency Pause Mechanism** | Trust-minimized design omits admin keys and pause switches. If a critical logic flaw is discovered post-deployment, individual senders must execute manual cancellations; contract-wide funds cannot be frozen. Rationale: Eliminates central privilege escalation risk; verified in incident drill 1. Impact: Incident containment relies on off-chain response speed. | Core Maintainers | `docs/INCIDENT_RUNBOOK.md:17-24` |
+| **R-7** | **Passkey Hardware Attestation Omission** | `contracts/passkey-signer/` intentionally omits on-chain FIDO2 attestation certificate parsing due to gas constraints and lack of an on-chain MDS3 trust root. An assertion proves possession of the private key matching registered P-256 coordinates, but cannot prove whether the key resides in a FIDO2-certified secure enclave or a software emulator. Rationale: Relying parties must perform attestation verification off-chain during initial enrollment. Impact: Potential use of non-hardware-bound authenticators. | Security Architecture | `contracts/passkey-signer/src/lib.rs:35-52` |
+| **R-8** | **Core Stream Recipient Asynchrony on NFT Transfer** | When a `StreamNft` is transferred via `transfer` or `transfer_from`, `NftDataKey::Owner` updates to the transferee, but `s.recipient` in `contracts/streaming-payments/` remains immutable. Calls to `StreamNft::withdraw` invoke `CoreStreamPayClient::withdraw`, which triggers `TokenClient::transfer(&contract, &s.recipient, &amount)` paying to the original stream recipient. Rationale: Core contract stream state cannot be mutated by companion contracts without reentrancy/security compromises. Impact: NFT buyers cannot receive stream funds directly unless core contract supports recipient address updates. | Contract Engineering | `GAP-8` |
+| **R-9** | **Public Gas Sponsorship Budget Visibility** | `contracts/streaming-payments/src/sponsor.rs` stores budget limits and cumulative period spend in public persistent storage (`SponsorKey::SponsorPeriod`). Any network observer can monitor remaining sponsor allowances in real time and time relay requests or bursts to exhaust allowances. Rationale: Soroban public ledger transparency. Impact: Competitors or griefers can predict budget exhaustion cliffs. | Protocol Architecture | `contracts/streaming-payments/src/sponsor.rs:187-212` |
 
 ---
 
@@ -770,6 +1013,28 @@ The following draft issues document every `OPEN` or `PARTIALLY MITIGATED` threat
 
 ---
 
+### `GAP-8`: Core Stream Recipient Synchronization for Companion StreamNft Transfers
+- **Component**: Contract / Companion (`contracts/stream-nft/`, `contracts/streaming-payments/`)
+- **Severity**: **Medium**
+- **Referenced Matrix Cells**: Cell 9.1 & 9.2 (NFT Manipulator × Contract / Frontend), Risk `R-8`
+- **Problem Description**:
+  When a user transfers a `StreamNft` token via `transfer` or `transfer_from`, the companion contract updates `NftDataKey::Owner`, but the underlying stream's `recipient` address on `contracts/streaming-payments/` remains immutable. Any direct invocation of `CoreStreamPayClient::withdraw` transfers tokens to the original recipient rather than the new NFT owner.
+- **Suggested Fix Direction**:
+  Introduce an authenticated recipient update or transfer hook on the core streaming-payments contract callable exclusively by an authorized companion NFT contract during an approved token transfer.
+
+---
+
+### `GAP-9`: Secure Hardware-Bound Consent Key Signer for Gas Sponsorship
+- **Component**: Frontend (`frontend/lib/stellar.ts`), Sponsorship Subsystem (`contracts/streaming-payments/src/sponsor.rs`)
+- **Severity**: **Medium**
+- **Referenced Matrix Cells**: Cell 10.2 (Sponsor Allowance Drainer × Frontend), Section 12.3
+- **Problem Description**:
+  The prototype frontend implementation stores beneficiary ed25519 consent private keys in browser `localStorage`. A cross-site scripting (XSS) vulnerability or device compromise exposes this key, allowing an attacker to generate unauthorized sponsored claim intents up to `per_beneficiary_limit`.
+- **Suggested Fix Direction**:
+  Integrate hardware wallet signing (e.g., Ledger SEP-0007 / Freighter raw payload signing) or WebAuthn passkey PRF extension for raw byte signing, eliminating plaintext storage of consent keys in browser local storage.
+
+---
+
 ## 11. Open Questions for Auditors and Maintainers
 
 ### 11.1 Questions for External Auditors
@@ -842,5 +1107,6 @@ attack surface against the components in §2.
 
 ## 13. Changelog
 
+- **2026-11-19 (v1.1.0-draft)**: Extended threat model and adversary × component matrix to cover passkey-signer (Row 8: WebAuthn credential theft, assertion replay, and challenge phishing), stream-nft (Row 9: NFT ownership confusion, operator allowance abuse, and metadata spoofing), and gas sponsorship (Row 10: sponsor allowance draining, budget exhaustion, and relayer griefing). Expanded protected assets table (A-8 to A-10), added residual risks register entries (R-7 to R-9), drafted gap issues (GAP-8 and GAP-9), refreshed automated test coverage map with 24 new proving test citations across contracts, and aligned audit scope cross-links for issue #538.
 - **2026-10-16**: Added §12 (gas sponsorship adversary matrix, invariants 8-11 and residual risks) for issue #57.
 - **2026-10-15 (v1.0.0-draft)**: Initial threat model and adversary × component security matrix compiled for issue #13 / audit intake against commit `0846c879db1312d4a08bbf7099349822fc66ced4`.

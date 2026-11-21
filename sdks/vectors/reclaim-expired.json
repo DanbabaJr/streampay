@@ -1,0 +1,40 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "reclaim-expired",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
+  "provenance": "schedule_test::reclaim_after_expiry_refunds_sender_permissionlessly: an unexecuted intent reclaimed at expires_at by anyone; escrow refunded to the sender; ScheduledIntentExpired as that test asserts it.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAPcmVjbGFpbV9leHBpcmVkAAAAAAEAAAAFAAAAAAAAAAEAAAAAAAAAAAAAAAEURtIsAAAAQJ2lMl5KfBk6jvyl8zmK9BZo7S8u2OI+rWryfd2auNWeEsPahrFIDbz1vaSVGzUdFKsUkI9BQModwzVxmgzNPg4=",
+  "resultXdr": "AAAAAQ==",
+  "eventsXdr": [
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABwAAAAEAAAAAAAAAAgAAAA8AAAAYc2NoZWR1bGVkX2ludGVudF9leHBpcmVkAAAABQAAAAAAAAABAAAAEQAAAAEAAAACAAAADwAAAAZyZWZ1bmQAAAAAAAoAAAAAAAAAAAAAAAJUGyZAAAAADwAAAAZzZW5kZXIAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM="
+  ],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+      "function": "reclaim_expired",
+      "args": {
+        "intent_id": "1"
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": null
+    },
+    "events": [
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "name": "ScheduledIntentExpired",
+        "topics": {
+          "intent_id": "1"
+        },
+        "data": {
+          "refund": "10001000000",
+          "sender": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+        }
+      }
+    ]
+  }
+}

@@ -604,6 +604,31 @@ code,
 }
 
 /* --------------------------------------------------------------------------
+ * Loading Skeletons & Layout Placeholders
+ * -------------------------------------------------------------------------- */
+.skeleton-shimmer {
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonPulse 1.8s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeletonPulse {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
  * Reduced motion (WCAG 2.3.3 / prefers-reduced-motion)
  * Disables all transitions and animations for users who prefer it.
  * -------------------------------------------------------------------------- */
@@ -619,6 +644,11 @@ code,
 
   .live-dot {
     animation: none !important;
+  }
+
+  .skeleton-shimmer {
+    animation: none !important;
+    background: rgba(255, 255, 255, 0.06) !important;
   }
 }
 

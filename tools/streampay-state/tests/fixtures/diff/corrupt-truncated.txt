@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "schema_fingerprint": "a3f9c2e1b4d7f0e2a1c5b8d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1c4d7e0",
+  "exported_at": 1700000000,
+  "rpc_url": "https://rpc-one.example.invalid",
+  "contract_id": "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "latest_ledger": 123456,
+  "contract_schema_version": 1,
+  "contract_frozen": false,
+  "governor": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "streams": [
+    {
+      "id": 1,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 9007199254740993000,
+      "withdrawn": 1000,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    },
+    {
+      "id": 2,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 500,
+      "withdrawn": 500,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Depleted"
+    },
+    {
+      "id": 3,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU",
+      "deposit": 800,
+      "withdrawn": 300,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    },
+    {
+      "id": 4,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    

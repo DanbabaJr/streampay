@@ -8,7 +8,6 @@
  * SDKs consume the same files.
  */
 import {
-  Address,
   Networks,
   TransactionBuilder,
   scValToNative,
@@ -34,32 +33,15 @@ interface VectorFile {
   expected?: Canonical;
 }
 
-type InvokeContractOperation = {
-  func: {
-    invokeContract(): {
-      contractAddress(): xdr.ScAddress;
-      functionName(): unknown;
-      args(): xdr.ScVal[];
-    };
-  };
-};
-
-type ParsedTransaction = {
-  source: string;
-  fee: string;
-  sequence: string;
-  signatures: unknown[];
-  operations: InvokeContractOperation[];
+type InvokeContractJson = {
+  contract_address: string;
+  function_name: string;
+  args: unknown[];
 };
 
 function asString(value: unknown, label: string): string {
   if (typeof value !== "string") throw new Error(`${label}: expected a string`);
   return value;
-}
-
-function readMember<T>(target: unknown, key: string): T {
-  const member = (target as Record<string, unknown> | undefined)?.[key];
-  return (typeof member === "function" ? (member as () => T).call(target) : member) as T;
 }
 
 function canonicalStream(value: xdr.ScVal): Canonical {
@@ -157,26 +139,79 @@ function canonicalEvent(event: StreamPayEvent): Canonical {
           new_deposit: event.newDeposit.toString(),
         },
       };
+    case "StreamScheduled":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          sender: event.sender,
+          recipient: event.recipient,
+          token: event.token,
+          deposit: event.deposit.toString(),
+          start_time: event.startTime.toString(),
+          end_time: event.endTime.toString(),
+          cancelable: event.cancelable,
+          interval: event.interval.toString(),
+          occurrences: String(event.occurrences),
+          fee_budget: event.feeBudget.toString(),
+          execute_after: event.executeAfter.toString(),
+          expires_at: event.expiresAt.toString(),
+        },
+      };
+    case "ScheduledStreamExecuted":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          keeper: event.keeper,
+          stream_id: event.streamId.toString(),
+          occurrence_index: String(event.occurrenceIndex),
+          occurrences_remaining: String(event.occurrencesRemaining),
+          fee_paid: event.feePaid.toString(),
+        },
+      };
+    case "ScheduledIntentCancelled":
+    case "ScheduledIntentExpired":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: { sender: event.sender, refund: event.refund.toString() },
+      };
+    default:
+      // Only the interfaces with recorded vectors are canonicalised; a vector
+      // for any other event must extend this switch rather than be dropped.
+      throw new Error(`no canonical form for event ${event.type}`);
   }
 }
 
 /** Decodes one vector into `{ transaction, result, events }`. */
 export function decodeVector(vector: VectorFile): Canonical {
-  const tx = TransactionBuilder.fromXDR(
-    vector.transactionEnvelopeXdr,
-    Networks.TESTNET
-  ) as unknown as ParsedTransaction;
-  const operation = tx.operations[0];
-  if (operation === undefined || typeof operation.func?.invokeContract !== "function") {
-    throw new Error("vector has no invokeContract operation");
-  }
+  const tx = TransactionBuilder.fromXDR(vector.transactionEnvelopeXdr, Networks.TESTNET);
+  const envelopeJson = JSON.parse(JSON.stringify(tx.toEnvelope())) as {
+    tx: {
+      tx: {
+        source_account: string;
+        fee: number;
+        seq_num: string;
+        operations: Array<{
+          body: { invoke_host_function: { host_function: { invoke_contract: InvokeContractJson } } };
+        }>;
+      };
+      signatures: unknown[];
+    };
+  };
 
-  const invoke = operation.func.invokeContract();
-  const functionName = String(invoke.functionName());
-  const spec = FUNCTIONS.find((candidate) => candidate.name === functionName);
-  if (spec === undefined) throw new Error(`function ${functionName} is not in the spec`);
+  const inner = envelopeJson.tx.tx;
+  const invoke = inner.operations[0]?.body.invoke_host_function.host_function.invoke_contract;
+  if (invoke === undefined) throw new Error("vector has no invokeContract operation");
 
-  const scvals = invoke.args();
+  const spec = FUNCTIONS.find((candidate) => candidate.name === invoke.function_name);
+  if (spec === undefined) throw new Error(`function ${invoke.function_name} is not in the spec`);
+
+  const operation = tx.operations[0] as unknown as {
+    func: { invokeContract: { args: xdr.ScVal[] } };
+  };
+  const scvals = operation.func.invokeContract.args;
 
   const args: Record<string, Canonical> = {};
   spec.argNames.forEach((name, index) => {
@@ -187,11 +222,13 @@ export function decodeVector(vector: VectorFile): Canonical {
 
   const resultScVal = xdr.ScVal.fromXDR(vector.resultXdr, "base64");
   const result = (() => {
-    const switchName = readMember<{ name?: string }>(resultScVal, "switch")?.name;
-    if (switchName === "scvError") {
-      const errorShape = readMember<unknown>(resultScVal, "error");
-      const rawCode = readMember<number>(errorShape, "contractCode");
-      const code = typeof rawCode === "number" ? rawCode : -1;
+    const resultLike = resultScVal as unknown as {
+      type?: string;
+      error?: { contractCode?: number; contract?: number };
+    };
+    const errorShape = resultLike.error;
+    if (resultLike.type === "scvError" && errorShape !== undefined) {
+      const code = errorShape.contractCode ?? errorShape.contract ?? -1;
       const name = contractErrorName(code) ?? "UnknownStreamError";
       return { error: { name, code } };
     }
@@ -206,13 +243,13 @@ export function decodeVector(vector: VectorFile): Canonical {
 
   return {
     transaction: {
-      contract: Address.fromScAddress(invoke.contractAddress()).toString(),
-      function: functionName,
+      contract: invoke.contract_address,
+      function: invoke.function_name,
       args,
-      source: tx.source,
-      fee: String(tx.fee),
-      sequence: String(tx.sequence),
-      signatures: tx.signatures.length,
+      source: inner.source_account,
+      fee: String(inner.fee),
+      sequence: inner.seq_num,
+      signatures: envelopeJson.tx.signatures.length,
     },
     result,
     events,

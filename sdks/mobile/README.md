@@ -44,7 +44,7 @@ plumbing and only wants typed decoding. `spec_fingerprint()` returns the exact
 
 ## Error catalog
 
-All 99 contract error codes from `frontend/lib/errors.ts` become typed UniFFI
+All contract error codes from `frontend/lib/errors.ts` become typed UniFFI
 exceptions, plus `Transport`, `Decode` and `Unknown` for host/decode failures.
 `StreamPayError.code()`/`name()` preserve the stable numeric code for analytics
 and support. A generated catalog test fails if any code is missing or renamed.

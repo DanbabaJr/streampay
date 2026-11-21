@@ -534,24 +534,11 @@ def generate_generated_ts() -> str:
     lines.append("")
 
     lines += [
-        "function readMember<T>(target: unknown, key: string): T {",
-        "  const member = (target as Record<string, unknown> | undefined)?.[key];",
-        "  return (typeof member === \"function\" ? (member as () => T).call(target) : member) as T;",
-        "}",
-        "",
-        "function unwrapContractId(raw: unknown): unknown {",
-        "  if (raw == null || raw instanceof Uint8Array) return raw;",
-        "  const inner = readMember<unknown>(raw, \"value\");",
-        "  if (inner != null && inner !== raw) return unwrapContractId(inner);",
-        "  const contractId = readMember<unknown>(raw, \"contractId\");",
-        "  if (contractId != null) return unwrapContractId(contractId);",
-        "  return raw;",
-        "}",
-        "",
         "function eventContractId(event: xdr.ContractEvent): string {",
-        "  const raw = unwrapContractId(readMember<unknown>(event, \"contractId\"));",
-        "  if (!(raw instanceof Uint8Array)) throw new Error(\"event has no contract id\");",
-        "  return StrKey.encodeContract(Buffer.from(raw));",
+        "  type ContractIdLike = { value: Uint8Array };",
+        "  const raw = (event as unknown as { contractId?: ContractIdLike }).contractId;",
+        "  if (!raw) throw new Error(\"event has no contract id\");",
+        "  return StrKey.encodeContract(Buffer.from(raw.value));",
         "}",
         "",
         "function topicValue(topics: xdr.ScVal[], index: number, name: string): xdr.ScVal {",
@@ -575,16 +562,14 @@ def generate_generated_ts() -> str:
 
     lines.append("/** Decodes a StreamPay contract event; `null` for foreign events. */")
     lines.append("export function decodeStreamPayEvent(event: xdr.ContractEvent): StreamPayEvent | null {")
-    lines.append("  const type = readMember<{ name?: string } | string>(event, \"type\");")
-    lines.append("  const typeName = typeof type === \"string\" ? type : type?.name;")
-    lines.append("  if (typeName !== \"contract\") return null;")
-    lines.append("  const body = readMember<{ v0?: unknown }>(event, \"body\");")
-    lines.append("  const v0 = readMember<unknown>(body, \"v0\") ?? readMember<unknown>(body, \"value\");")
-    lines.append("  if (v0 == null) throw new Error(\"unsupported ContractEvent body\");")
-    lines.append("  const topics = readMember<xdr.ScVal[]>(v0, \"topics\");")
+    lines.append("  const type = (event as unknown as { type?: { name?: string } }).type;")
+    lines.append("  if (type?.name !== \"contract\") return null;")
+    lines.append("  const body = (event as unknown as { body?: { v0?: { topics: xdr.ScVal[]; data: xdr.ScVal } } }).body;")
+    lines.append("  if (!body?.v0) throw new Error(\"unsupported ContractEvent body\");")
+    lines.append("  const topics = body.v0.topics;")
     lines.append("  const name = asString(asNative(topicValue(topics, 0, \"<unknown>\")), \"event name\");")
     lines.append("  const contractId = eventContractId(event);")
-    lines.append("  const data = asNative(readMember<xdr.ScVal>(v0, \"data\")) as Record<string, unknown>;")
+    lines.append("  const data = asNative(body.v0.data) as Record<string, unknown>;")
     lines.append("  switch (name) {")
     for event in SPEC["events"]:
         lines.append(f'    case "{event["topic"]}": {{')

@@ -15,6 +15,7 @@ use std::process::ExitCode;
 
 use serde_json::{json, Value};
 use streampay_mobile::{spec_fingerprint, StreamPayMobile};
+use streampay_sdk::vectors::{decode_vector, Spec};
 
 struct UnreachableTransport;
 
@@ -39,6 +40,23 @@ fn vectors_dir() -> PathBuf {
 
 fn main() -> ExitCode {
     let directory = vectors_dir();
+    let spec_path = directory
+        .parent()
+        .map(|parent| parent.join("spec").join("streampay.spec.json"))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("spec")
+                .join("streampay.spec.json")
+        });
+    let spec = match Spec::load(&spec_path) {
+        Ok(spec) => spec,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
     let client = StreamPayMobile::new("C...".to_string(), Box::new(UnreachableTransport));
     let mut vectors = serde_json::Map::new();
     let mut failures = Vec::new();
@@ -71,7 +89,7 @@ fn main() -> ExitCode {
             }
         };
         let name = vector["name"].as_str().unwrap_or("<unnamed>").to_string();
-        let decoded = match streampay_sdk::vectors::decode_vector(&vector) {
+        let decoded = match decode_vector(&vector, &spec) {
             Ok(decoded) => decoded,
             Err(error) => {
                 failures.push(format!("{name}: {error}"));

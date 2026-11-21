@@ -1,117 +1,78 @@
-# streampay-sdk (Rust)
+# streampay-sdk (Rust, read-only)
 
-Typed Rust bindings for the StreamPay streaming-payments contract, generated
-from [`sdks/spec/streampay.spec.json`](../spec/streampay.spec.json).
+Read-only Rust client for the StreamPay Soroban contract, generated from
+[`sdks/spec/streampay.spec.json`](../spec/streampay.spec.json) by the same
+generator that produces the TypeScript client.
+
+**Reads only.** The crate emits the operations the spec marks non-mutating,
+their argument builders and typed result decoders, and the canonical contract
+error enum. There is no signing, submission or write path, and the crate is
+`#![forbid(unsafe_code)]`.
+
+## Generate and test
 
 ```bash
-cargo add streampay-sdk
+make -C sdks generate      # rewrites src/generated.rs
+make -C sdks check         # spec guard + generator tests + freshness gate
+cd sdks/rust && cargo test # conformance vectors + doctests
 ```
 
-## What you get
+`src/generated.rs` is generated: change `sdks/spec/streampay.spec.json` (or the
+contract, then re-derive the spec) and regenerate. `src/lib.rs` is hand-written
+and holds the transport trait and the shared error types.
 
-* `Client` with one method per entrypoint: `create_stream`, `withdraw`,
-  `withdraw_max`, `cancel_stream`, `top_up`, `get_stream`, `available`,
-  `recipient_streams`, `sender_streams`
-* generated `Stream`, `StreamStatus`, argument structs, and result decoders
-* `Event` with typed `StreamCreated` / `Withdrawn` / `StreamCancelled` /
-  `StreamToppedUp` payloads decoded from `ContractEvent`
-* `stream_ids(role, address)` / `streams_for(role, address)` pagination
-* `StreamError` with stable numeric codes, mapped from `ScVal::Error`
-* `SPEC_FINGERPRINT` for deployment/spec assertions
+## Use
 
-## Quickstart (testnet)
-
-The client is transport-agnostic: implement `Transport` with the RPC and
-signing stack you already use (the typed layer handles argument encoding,
-result decoding, and error mapping).
+`ReadClient<T>` is transport-agnostic. Implement `ReadTransport` over a Soroban
+RPC `simulateTransaction` call, or over fixed values in tests:
 
 ```rust
-use streampay_sdk::{Client, StreamError, SdkError, Transport};
 use stellar_xdr::ScVal;
+use streampay_sdk::{ReadClient, ReadTransport};
 
-struct MyRpc; // wrap soroban-rpc / stellar-rpc-client here
+struct Rpc;
 
-impl Transport for MyRpc {
-    fn invoke(&self, contract: &str, method: &str, args: Vec<ScVal>) -> Result<ScVal, SdkError> {
-        // simulate -> sign -> send -> poll, then return the contract's return value
-        todo!("{contract}.{method}({args:?})")
-    }
-    fn simulate(&self, contract: &str, method: &str, args: Vec<ScVal>) -> Result<ScVal, SdkError> {
-        todo!("{contract}.{method}({args:?})")
+impl ReadTransport for Rpc {
+    type Error = std::io::Error;
+
+    fn simulate(&self, method: &str, args: Vec<ScVal>) -> Result<ScVal, Self::Error> {
+        // POST simulateTransaction with (method, args), return result.retval
+        todo!()
     }
 }
 
-# fn demo() -> Result<(), SdkError> {
-let client = Client::new(
-    "CDLZ…YOUR_TESTNET_CONTRACT_ID",
-    MyRpc,
-);
-
-// Read-only: available(stream_id)
-let available = client.available(1)?;
-println!("{available} stroops accrued");
-
-// Mutating: create_stream(7 args), returns the new id
-let id = client.create_stream(
-    "G…sender", "G…recipient", "C…token",
-    10_000_000_000, // deposit in token units
-    1_700_000_000,  // start
-    1_700_086_400,  // end
-    true,           // cancelable
-)?;
-
-// Typed contract errors:
-match client.withdraw_max(id) {
-    Ok(paid) => println!("paid {paid}"),
-    Err(SdkError::Contract(StreamError::NothingToWithdraw)) => {}
-    Err(error) => return Err(error),
-}
-# Ok(())
-# }
+let client = ReadClient::new(Rpc);
+let stream = client.get_stream(1)?;
+println!("{} {} {:?}", stream.id, stream.deposit, stream.status);
 ```
 
-`Client::decode_events` takes the `ContractEvent`s from your RPC/meta decoder
-and returns typed events, ignoring events from other contracts on the ledger:
+Every read operation the spec declares gets the same treatment
+(`available`, `get_intent`, `treasury_status`, `recipient_streams`, the
+`governance_*` views, …). The request builders (`get_stream_args`,
+`recipient_streams_args`, …) and decoders (`decode_get_stream_result`, …) are
+exported too, for callers that already hold an `ScVal`.
+
+Errors come from the canonical catalog (`frontend/lib/errors.ts`), never a
+second table:
 
 ```rust
-# use streampay_sdk::{Client, SdkError, Transport};
-# use stellar_xdr::ScVal;
-# struct T; impl Transport for T {
-#   fn invoke(&self, _:&str, _:&str, _:Vec<ScVal>) -> Result<ScVal,SdkError>{unimplemented!()}
-#   fn simulate(&self, _:&str, _:&str, _:Vec<ScVal>) -> Result<ScVal,SdkError>{unimplemented!()}
-# }
-# fn f(client: &Client<'_, T>, events: Vec<stellar_xdr::ContractEvent>) -> Result<(), SdkError> {
-for event in client.decode_events(events)? {
-    println!("{event:?}");
+use streampay_sdk::{decode_contract_error, StreamError};
+
+if let Some(Ok(error)) = decode_contract_error(&result) {
+    assert_eq!(error, StreamError::StreamNotActive);
+    println!("{} = {}", error.name(), error.code()); // StreamNotActive = 5
 }
-# Ok(()) }
 ```
-
-## Index pagination
-
-```rust
-use streampay_sdk::Role;
-
-let ids = client.stream_ids(Role::Recipient, "G…address")?;
-let streams = client.streams_for(Role::Recipient, "G…address")?;
-```
-
-Pages are requested at `MAX_PAGE_SIZE` (50) and followed until a short page.
-`streams_for` skips ids that disappeared between the index read and the state
-read, matching the frontend's discovery behaviour.
 
 ## Conformance
 
-The crate's tests decode every vector in [`../vectors`](../vectors) and compare
-it to the recorded canonical JSON:
+`tests/conformance.rs` decodes the shared read fixtures and compares every
+field with the recorded canonical value:
 
-```bash
-cargo test
-cargo run --example conformance -- ../vectors
-```
+* `get-stream-active` → `Stream` (`Active`)
+* `get-stream-cancelled` → `Stream` (`Cancelled`)
+* `error-not-active` → `StreamError::StreamNotActive` (code 5)
 
-## Versioning and publishing
-
-Lockstep with the other SDKs; see [`../README.md`](../README.md#versioning-policy).
-`cargo publish --dry-run` runs in CI; `sdk-v*` tags publish with
-`CARGO_REGISTRY_TOKEN`.
+It also rebuilds `get_stream`'s arguments and compares them with the signed
+invoke envelope in the vector, so argument encoding is checked against a real
+transaction rather than a round trip.

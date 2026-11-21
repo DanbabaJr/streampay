@@ -40,8 +40,8 @@ for (const match of catalogText.matchAll(errorPattern)) {
   errors.push([Number(match[1]), match[2]]);
 }
 errors.sort((left, right) => left[0] - right[0]);
-if (errors.length !== 99) {
-  throw new Error(`expected 99 error codes, read ${errors.length}`);
+if (!errors.length || errors.some(([code], index) => code !== index + 1)) {
+  throw new Error("error catalog codes must be contiguous starting at 1");
 }
 const reserved = new Set(["Transport", "Decode", "Unknown"]);
 for (const [, name] of errors) {

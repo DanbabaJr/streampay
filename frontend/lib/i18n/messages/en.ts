@@ -40,8 +40,30 @@ export const en = {
   "chrome.apiDocs": "API Docs ↗",
   "chrome.simulatorLink": "Accrual Simulator →",
 
+  "settings.navigation": "Settings",
+  "settings.title": "Settings",
+  "settings.description": "Manage notifications, webhooks, and browser telemetry preferences.",
+  "settings.notifications": "Notifications",
+  "settings.webhooks": "Webhooks",
+  "settings.telemetry": "Telemetry",
+  "telemetry.title": "Telemetry and tracing",
+  "telemetry.description": "Choose whether this browser exports diagnostic traces. Your choice applies immediately and is saved on this device.",
+  "telemetry.scope": "This preference controls browser-side traces and transaction correlation requests. Server-side tracing is managed by the deployment.",
+  "telemetry.statusEnabled": "Telemetry is on.",
+  "telemetry.statusDisabled": "Telemetry is off.",
+  "telemetry.toggleLabel": "Allow diagnostic telemetry",
+  "telemetry.toggleHelp": "When off, this browser stops exporting spans and transaction correlation data.",
+  "telemetry.collectedTitle": "What telemetry contains",
+  "telemetry.spans": "Trace spans can include operation names and types, success or error status, timestamps and duration, generated trace and span IDs, parent and link relationships, the app service name and version, event names, and sanitized attributes.",
+  "telemetry.correlation": "After a transaction, correlation data can include its transaction hash, trace context, and optional stream ID. It is sent to the configured indexer so a later ledger event can link to its browser trace.",
+  "telemetry.destinations": "Completed spans are sent to the OTLP HTTP collector configured by NEXT_PUBLIC_OTEL_EXPORTER_OTLP_ENDPOINT (default: http://localhost:4318/v1/traces). Correlation data is sent to the indexer configured by NEXT_PUBLIC_INDEXER_URL (default: http://localhost:8787).",
+  "telemetry.privacyTitle": "Filtering and limits",
+  "telemetry.privacy": "Telemetry attributes omit fields named amount, balance, deposit, or withdrawn. Address fields are shortened to an 8-character prefix; webhook URLs are reduced to their origin; email addresses expose only the domain; and Telegram IDs expose only the last four characters. Secret-key patterns and bearer tokens are redacted from error text. Other diagnostic names and error details may still be included, so avoid putting sensitive information in them.",
+  "telemetry.storage": "This choice is stored in localStorage under streampay:telemetryConsent. No stored choice means telemetry stays on, matching the previous default.",
+
   "home.kicker": "SOROBAN · STELLAR",
   "home.title": "⚡ StreamPay",
+  "home.settings": "Settings",
   "home.browse": "Browse Discovery Directory →",
   "home.unitsWord": "units",
   "home.tagline":
@@ -192,6 +214,63 @@ export const en = {
   "form.amountTooPrecise":
     "This token has at most {decimals, number} decimal places — the amount you typed would have to be rounded.",
   "form.amountInvalid": "That is not a readable amount.",
+  "form.recipientRequired": "Enter a recipient address.",
+  "form.recipientInvalid": "Enter a valid Stellar address (G… with a valid checksum).",
+  "form.tokenRequired": "Enter a token contract id.",
+  "form.tokenInvalid": "Enter a valid token contract id (C… with a valid checksum).",
+  "form.durationInvalid": "Enter a duration in days greater than zero (up to 36,500 days).",
+  "form.durationTooLong": "Duration exceeds the protocol maximum of {max, number} seconds.",
+  "form.depositTooSmallForDuration":
+    "Deposit is too small for this duration — at least {min} is needed so the stream accrues.",
+  "form.depositTooLarge":
+    "Deposit is too large for this duration — reduce the deposit or shorten the duration.",
+  "form.depositTransferFailed":
+    "The deposit could not be pulled — check your balance and token allowance for the deposit plus fee.",
+  "form.recipientPayoutFailed":
+    "The recipient could not be paid — check that the address has a valid trustline and is authorized.",
+  "form.assetNotAllowed": "This token is not on the governance policy allowlist.",
+  "form.batchEmpty": "Add at least one CSV row.",
+  "form.batchTooLarge": "The batch has too many rows (maximum {max, number}).",
+  "form.batchRowIssue": "Row {row, number}: {detail}",
+
+  "notFound.notFound": "Not found",
+  "notFound.badRequest": "Request problem",
+  "notFound.stream.title": "Stream not found",
+  "notFound.stream.lookedFor": "We looked for the stream id in this URL.",
+  "notFound.stream.why":
+    "No stream with that id exists on this network. It may never have been created, or the link may be incomplete.",
+  "notFound.stream.next":
+    "Check the stream id, or head back to the dashboard and open it from your stream list.",
+  "notFound.stream.malformedTitle": "Invalid stream id",
+  "notFound.stream.malformedBody":
+    "“{id}” is not a valid stream id. Stream ids are whole numbers.",
+  "notFound.address.title": "Address not found",
+  "notFound.address.lookedFor": "We looked for the Stellar address in this URL.",
+  "notFound.address.why":
+    "This address has not created or received any payment streams on this network.",
+  "notFound.address.next":
+    "Check the address for typos, or start from the dashboard and open your own streams.",
+  "notFound.address.malformedTitle": "Invalid address",
+  "notFound.address.malformedBody":
+    "“{address}” is not a valid Stellar address. It must be a 56-character public key starting with G.",
+  "notFound.pay.title": "Payment link not found",
+  "notFound.pay.lookedFor": "We looked for the payment reference in this link.",
+  "notFound.pay.why":
+    "This link is unknown. It may have been mistyped or truncated.",
+  "notFound.pay.next":
+    "Ask the payer to send the link again, or open the dashboard.",
+  "notFound.pay.malformedTitle": "Invalid payment link",
+  "notFound.pay.malformedBody": "This payment link is malformed or corrupted.",
+
+  "share.heading": "Share this payment link",
+  "share.body":
+    "Scan the QR code or copy the link. The reference is generated in your browser and never sent to a third party.",
+  "share.qrLabel": "QR code for this payment link",
+  "share.copy": "Copy link",
+  "share.copyLabel": "Copy payment link to clipboard",
+  "share.copied": "Payment link copied to clipboard.",
+  "share.copiedButton": "Copied!",
+  "share.copyFailed": "Could not copy the link. Select it and copy manually.",
 } as const;
 
 export type MessageKey = keyof typeof en;

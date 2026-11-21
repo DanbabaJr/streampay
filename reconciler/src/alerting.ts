@@ -1,6 +1,7 @@
 //! Structured logging and webhook dispatch for the dual-read reconciliation service.
 
 import { createHttpAgent } from "./http.js";
+import type { DivergenceRecord, WebhookPayload } from "./types.js";
 
 export interface AlertingConfig {
   webhookUrl?: string;
@@ -78,13 +79,21 @@ export class AlertingService {
         streamId: d.streamId,
       });
 
+      let responseMessage: string | undefined;
+      if (typeof response.data === "object" && response.data !== null && "message" in response.data) {
+        const msg = (response.data as { message: unknown }).message;
+        if (typeof msg === "string") {
+          responseMessage = msg;
+        }
+      }
+
       return {
         success,
         status: response.status,
-        message: (response.data as any)?.message || response.statusText,
+        message: responseMessage,
         durationMs: Date.now() - start,
       };
-    } catch (err) {
+    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.log("WARN", `Webhook dispatch failed: ${message}`, {
         durationMs: Date.now() - start,
@@ -99,7 +108,20 @@ export class AlertingService {
   /**
    * Dispatch a three-way diagnosis with its layer attribution and evidence.
    */
-  async dispatchDiagnosis(diagnosis: any, report: any): Promise<WebhookDispatchResult> {
+  async dispatchDiagnosis(
+    diagnosis: {
+      recordId?: string;
+      severity?: string;
+      detectedAt?: string;
+      checkType?: string;
+      disagreeingPairs?: string[];
+      suspectedLayer?: string;
+      owner?: string;
+      confidence?: string;
+      evidence?: unknown;
+    },
+    report: { generatedAt?: string; asOfLedger?: number | null; mode?: string; caveats?: string[] }
+  ): Promise<WebhookDispatchResult> {
     const start = Date.now();
     const payload = {
       alert: {
@@ -136,7 +158,10 @@ export class AlertingService {
     }
 
     try {
-      const response = await this.httpAgent.post(this.webhookUrl, payload);
+      const response = await this.httpAgent.post(this.webhookUrl, JSON.stringify(payload), {
+        "Content-Type": "application/json",
+        "User-Agent": `streampay-reconciler/${this.config.reconcilerId}`,
+      });
       const success = response.status >= 200 && response.status < 300;
       this.log(success ? "INFO" : "WARN", `Diagnosis webhook ${success ? "succeeded" : "failed"}`, {
         status: response.status,
@@ -147,10 +172,9 @@ export class AlertingService {
       return {
         success,
         status: response.status,
-        message: (response.data as any)?.message ?? response.statusText,
         durationMs: Date.now() - start,
       };
-    } catch (err) {
+    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.log("WARN", `Diagnosis webhook failed: ${message}`, {
         recordId: diagnosis.recordId,
@@ -192,6 +216,3 @@ export class AlertingService {
     return order[level] >= order[this.config.logLevel];
   }
 }
-
-// Lazy import to avoid circular dependency issues
-import type { DivergenceRecord, WebhookPayload } from "./types.js";

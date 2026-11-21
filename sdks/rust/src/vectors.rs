@@ -1,48 +1,124 @@
 //! Decodes the shared conformance vectors (`sdks/vectors/*.json`).
 //!
 //! This module is the Rust half of the cross-language conformance suite: it
-//! turns a signed envelope, contract events, and a result ScVal into the same
-//! canonical JSON that the TypeScript and Python SDKs must produce.
+//! turns a signed envelope, contract events and a result `ScVal` into the same
+//! canonical JSON every other SDK must produce. The event topic names and
+//! function argument names come from the one shared spec, never from a
+//! hand-maintained table here.
+
+use std::path::Path;
 
 use serde_json::{json, Map, Value};
-use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
-use stellar_strkey::Contract as StrkeyContract;
+use stellar_strkey::{ed25519, Strkey};
 use stellar_xdr::{
-    ContractEvent, ContractId, HostFunction, Limits, MuxedAccount, OperationBody, ReadXdr,
-    ScAddress, ScVal, TransactionEnvelope, Uint256,
+    ContractEvent, ContractEventBody, Hash, HostFunction, Limits, MuxedAccount, OperationBody,
+    ReadXdr, ScAddress, ScVal, TransactionEnvelope, Uint256,
 };
 
-use crate::{
-    scval_to_address, scval_to_bool, scval_to_i128, scval_to_u32, scval_to_u64, scval_to_void,
-    Event, FunctionSpec, SdkError, Stream, StreamError, FUNCTIONS,
-};
+use crate::{address_from_scval, decode_contract_error, DecodeError};
 
-fn xdr_error(error: stellar_xdr::Error) -> SdkError {
-    SdkError::Decode(format!("invalid XDR: {error}"))
+/// The parts of `sdks/spec/streampay.spec.json` the vector decoder needs.
+pub struct Spec {
+    events: Vec<SpecEvent>,
+    functions: Vec<SpecFunction>,
 }
 
-fn field_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, SdkError> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| SdkError::Decode(format!("vector is missing string `{key}`")))
+struct SpecEvent {
+    name: String,
+    topic: String,
+    topic_fields: Vec<String>,
+}
+
+struct SpecFunction {
+    name: String,
+    arg_names: Vec<String>,
+}
+
+impl Spec {
+    /// Reads the spec from disk.
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|error| format!("{} is not valid JSON: {error}", path.display()))?;
+        Self::from_json(&value)
+    }
+
+    /// Builds the decoder view from an already parsed spec.
+    pub fn from_json(value: &Value) -> Result<Self, String> {
+        let events = value["events"]
+            .as_array()
+            .ok_or_else(|| "spec has no events array".to_string())?
+            .iter()
+            .map(|event| SpecEvent {
+                name: string_field(event, "name")?,
+                topic: string_field(event, "topic")?,
+                topic_fields: event["topicFields"]
+                    .as_array()
+                    .ok_or_else(|| "event has no topicFields".to_string())?
+                    .iter()
+                    .map(|field| string_field(field, "name"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+            .collect();
+        let functions = value["functions"]
+            .as_array()
+            .ok_or_else(|| "spec has no functions array".to_string())?
+            .iter()
+            .map(|function| SpecFunction {
+                name: string_field(function, "name")?,
+                arg_names: function["args"]
+                    .as_array()
+                    .ok_or_else(|| "function has no args".to_string())?
+                    .iter()
+                    .map(|arg| string_field(arg, "name"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+            .collect();
+        Ok(Self { events, functions })
+    }
+
+    fn event(&self, topic: &str) -> Option<&SpecEvent> {
+        self.events.iter().find(|event| event.topic == topic)
+    }
+
+    fn function(&self, name: &str) -> Option<&SpecFunction> {
+        self.functions.iter().find(|function| function.name == name)
+    }
+}
+
+fn string_field(value: &Value, key: &str) -> Result<String, String> {
+    value[key]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| format!("spec entry is missing string `{key}`"))
+}
+
+fn xdr_error(error: stellar_xdr::Error) -> DecodeError {
+    DecodeError::MissingField {
+        context: format!("invalid XDR: {error}"),
+    }
+}
+
+fn vector_field<'a>(vector: &'a Value, key: &str) -> Result<&'a str, DecodeError> {
+    vector[key]
+        .as_str()
+        .ok_or_else(|| DecodeError::MissingField {
+            context: format!("vector is missing string `{key}`"),
+        })
 }
 
 /// Decodes one vector into `{ transaction, result, events }`.
-pub fn decode_vector(vector: &Value) -> Result<Value, SdkError> {
-    let envelope = field_str(vector, "transactionEnvelopeXdr")?;
-    let (transaction, function) = decode_transaction(envelope)?;
-
-    let result = decode_result(field_str(vector, "resultXdr")?, function)?;
+pub fn decode_vector(vector: &Value, spec: &Spec) -> Result<Value, DecodeError> {
+    let transaction = decode_transaction(vector_field(vector, "transactionEnvelopeXdr")?, spec)?;
+    let result = decode_result(vector_field(vector, "resultXdr")?)?;
 
     let mut events = Vec::new();
-    if let Some(list) = vector.get("eventsXdr").and_then(Value::as_array) {
-        for item in list {
-            let encoded = item
-                .as_str()
-                .ok_or_else(|| SdkError::Decode("eventsXdr must contain base64 strings".into()))?;
-            events.push(decode_event(encoded)?);
-        }
+    for item in vector["eventsXdr"].as_array().into_iter().flatten() {
+        let encoded = item.as_str().ok_or_else(|| DecodeError::MissingField {
+            context: "eventsXdr must contain base64 strings".into(),
+        })?;
+        events.push(decode_event(encoded, spec)?);
     }
 
     Ok(json!({
@@ -52,244 +128,244 @@ pub fn decode_vector(vector: &Value) -> Result<Value, SdkError> {
     }))
 }
 
-fn address_string(address: &ScAddress) -> Result<String, SdkError> {
-    match address {
-        ScAddress::Contract(id) => Ok(format!("{}", StrkeyContract(id.0 .0))),
-        ScAddress::Account(account) => match &account.0 {
-            stellar_xdr::PublicKey::PublicKeyTypeEd25519(Uint256(bytes)) => {
-                Ok(format!("{}", StrkeyPublicKey(*bytes)))
-            }
-        },
-        other => Err(SdkError::Decode(format!(
-            "unsupported address in vector: {other:?}"
-        ))),
-    }
+fn address_string(address: &ScAddress) -> Result<String, DecodeError> {
+    address_from_scval(&ScVal::Address(address.clone()), "vector address")
 }
 
-fn muxed_string(account: &MuxedAccount) -> Result<String, SdkError> {
-    match account {
-        MuxedAccount::Ed25519(Uint256(bytes)) => Ok(format!("{}", StrkeyPublicKey(*bytes))),
+fn muxed_string(account: &MuxedAccount) -> Result<String, DecodeError> {
+    let bytes = match account {
+        MuxedAccount::Ed25519(Uint256(bytes)) => *bytes,
         MuxedAccount::MuxedEd25519(muxed) => {
             let Uint256(bytes) = &muxed.ed25519;
-            Ok(format!("{}", StrkeyPublicKey(*bytes)))
-        }
-    }
-}
-
-fn decode_transaction(envelope: &str) -> Result<(Value, &'static FunctionSpec), SdkError> {
-    let envelope =
-        TransactionEnvelope::from_xdr_base64(envelope, Limits::none()).map_err(xdr_error)?;
-    let envelope = match envelope {
-        TransactionEnvelope::Tx(envelope) => envelope,
-        other => {
-            return Err(SdkError::Decode(format!(
-                "only v1 transaction envelopes are supported, got {other:?}"
-            )))
+            *bytes
         }
     };
-    let tx = envelope.tx;
-    let operation = tx
-        .operations
-        .first()
-        .ok_or_else(|| SdkError::Decode("transaction has no operations".into()))?;
+    Ok(Strkey::PublicKeyEd25519(ed25519::PublicKey(bytes))
+        .to_string()
+        .to_string())
+}
+
+fn decode_transaction(encoded: &str, spec: &Spec) -> Result<Value, DecodeError> {
+    let envelope = TransactionEnvelope::from_xdr_base64(encoded, Limits::none())
+        .map_err(xdr_error)?;
+    let envelope = match envelope {
+        TransactionEnvelope::Tx(envelope) => envelope,
+        _ => {
+            return Err(DecodeError::MissingField {
+                context: "only v1 transaction envelopes are supported".into(),
+            })
+        }
+    };
+    let operation = envelope.tx.operations.first().ok_or_else(|| {
+        DecodeError::MissingField {
+            context: "transaction has no operations".into(),
+        }
+    })?;
     let invoke = match &operation.body {
         OperationBody::InvokeHostFunction(invoke) => invoke,
-        other => {
-            return Err(SdkError::Decode(format!(
-                "expected invokeHostFunction, got {other:?}"
-            )))
+        _ => {
+            return Err(DecodeError::MissingField {
+                context: "expected an invokeHostFunction operation".into(),
+            })
         }
     };
     let call = match &invoke.host_function {
         HostFunction::InvokeContract(call) => call,
-        other => {
-            return Err(SdkError::Decode(format!(
-                "expected invokeContract, got {other:?}"
-            )))
+        _ => {
+            return Err(DecodeError::MissingField {
+                context: "expected an invokeContract host function".into(),
+            })
         }
     };
 
-    let function_name = call.function_name.0.to_string();
-    let spec = FUNCTIONS
-        .iter()
-        .find(|candidate| candidate.name == function_name)
-        .ok_or_else(|| {
-            SdkError::Decode(format!(
-                "function `{function_name}` is not part of the spec"
-            ))
-        })?;
+    let function_name = call.function_name.0.to_utf8_string_lossy();
+    let function = spec.function(&function_name).ok_or_else(|| {
+        DecodeError::MissingField {
+            context: format!("function `{function_name}` is not part of the spec"),
+        }
+    })?;
 
     let mut args = Map::new();
-    for (index, name) in spec.arg_names.iter().enumerate() {
-        let value = call.args.get(index).ok_or_else(|| {
-            SdkError::Decode(format!("`{function_name}` is missing argument #{index}"))
+    for (index, name) in function.arg_names.iter().enumerate() {
+        let value = call.args.get(index).ok_or_else(|| DecodeError::MissingField {
+            context: format!("`{function_name}` is missing argument #{index}"),
         })?;
-        let arg_type = spec.arg_types.get(index).copied().unwrap_or("unknown");
-        args.insert(name.to_string(), value_json(value, arg_type)?);
+        args.insert(
+            name.clone(),
+            canonical(value, &format!("{function_name}.{name}"))?,
+        );
     }
 
-    Ok((
-        json!({
-            "contract": address_string(&call.contract_address)?,
-            "function": function_name,
-            "args": args,
-            "source": muxed_string(&tx.source_account)?,
-            "fee": tx.fee.to_string(),
-            "sequence": tx.seq_num.0.to_string(),
-            "signatures": envelope.signatures.len(),
-        }),
-        spec,
-    ))
+    let transaction = json!({
+        "contract": address_string(&call.contract_address)?,
+        "function": function_name,
+        "args": args,
+        "source": muxed_string(&envelope.tx.source_account)?,
+        "fee": envelope.tx.fee.to_string(),
+        "sequence": envelope.tx.seq_num.0.to_string(),
+        "signatures": envelope.signatures.len(),
+    });
+    Ok(transaction)
 }
 
-fn value_json(value: &ScVal, kind: &str) -> Result<Value, SdkError> {
-    match kind {
-        "address" => Ok(Value::String(scval_to_address(value)?)),
-        "i128" => Ok(Value::String(scval_to_i128(value)?.to_string())),
-        "u64" => Ok(Value::String(scval_to_u64(value)?.to_string())),
-        "u32" => Ok(Value::String(scval_to_u32(value)?.to_string())),
-        "bool" => Ok(Value::Bool(scval_to_bool(value)?)),
-        "void" => {
-            scval_to_void(value)?;
-            Ok(Value::Null)
-        }
-        "Stream" => Ok(stream_json(&Stream::from_scval(value)?)),
-        other if other.starts_with("vec:") => {
-            let inner = &other[4..];
-            let ScVal::Vec(Some(items)) = value else {
-                return Err(SdkError::Decode(format!("expected a vec, got {value:?}")));
-            };
-            let mut out = Vec::new();
-            for item in items.0.iter() {
-                out.push(value_json(item, inner)?);
-            }
-            Ok(Value::Array(out))
-        }
-        other => Err(SdkError::Decode(format!("unsupported type `{other}`"))),
-    }
-}
-
-fn stream_json(stream: &Stream) -> Value {
-    json!({
-        "id": stream.id.to_string(),
-        "sender": stream.sender,
-        "recipient": stream.recipient,
-        "token": stream.token,
-        "deposit": stream.deposit.to_string(),
-        "withdrawn": stream.withdrawn.to_string(),
-        "start_time": stream.start_time.to_string(),
-        "end_time": stream.end_time.to_string(),
-        "cancelable": stream.cancelable,
-        "status": stream.status.as_str(),
-        "use_oracle": stream.use_oracle,
-    })
-}
-
-fn decode_result(encoded: &str, function: &'static FunctionSpec) -> Result<Value, SdkError> {
+fn decode_result(encoded: &str) -> Result<Value, DecodeError> {
     let value = ScVal::from_xdr_base64(encoded, Limits::none()).map_err(xdr_error)?;
-    if let ScVal::Error(stellar_xdr::ScError::Contract(code)) = &value {
-        let name = StreamError::from_code(*code)
-            .map(|error| error.name())
-            .unwrap_or("UnknownStreamError");
+    if let Some(error) = decode_contract_error(&value) {
+        let (name, code) = match error {
+            Ok(error) => (error.name().to_string(), error.code()),
+            Err(code) => ("UnknownStreamError".to_string(), code),
+        };
         return Ok(json!({ "error": { "name": name, "code": code } }));
     }
-    Ok(json!({ "ok": value_json(&value, function.return_type)? }))
+    Ok(json!({ "ok": canonical(&value, "result")? }))
 }
 
-fn decode_event(encoded: &str) -> Result<Value, SdkError> {
-    let event = ContractEvent::from_xdr_base64(encoded, Limits::none()).map_err(xdr_error)?;
-    let contract = event
-        .contract_id
-        .as_ref()
-        .map(|ContractId(hash)| format!("{}", StrkeyContract(hash.0)))
-        .ok_or_else(|| SdkError::Decode("event has no contract id".into()))?;
-
-    let decoded = Event::decode(&event)?
-        .ok_or_else(|| SdkError::Decode("event is not part of the StreamPay interface".into()))?;
-
-    let (name, topics, data) = match decoded {
-        Event::StreamCreated(event) => (
-            "StreamCreated",
-            json!({ "stream_id": event.stream_id.to_string() }),
-            json!({
-                "sender": event.sender,
-                "recipient": event.recipient,
-                "token": event.token,
-                "deposit": event.deposit.to_string(),
-                "start_time": event.start_time.to_string(),
-                "end_time": event.end_time.to_string(),
-                "cancelable": event.cancelable,
-            }),
-        ),
-        Event::Withdrawn(event) => (
-            "Withdrawn",
-            json!({ "stream_id": event.stream_id.to_string() }),
-            json!({
-                "recipient": event.recipient,
-                "amount": event.amount.to_string(),
-                "withdrawn_total": event.withdrawn_total.to_string(),
-            }),
-        ),
-        Event::StreamCancelled(event) => (
-            "StreamCancelled",
-            json!({ "stream_id": event.stream_id.to_string() }),
-            json!({
-                "cancelled_by": event.cancelled_by,
-                "recipient_amount": event.recipient_amount.to_string(),
-                "sender_amount": event.sender_amount.to_string(),
-            }),
-        ),
-        Event::StreamToppedUp(event) => (
-            "StreamToppedUp",
-            json!({ "stream_id": event.stream_id.to_string() }),
-            json!({
-                "sender": event.sender,
-                "amount": event.amount.to_string(),
-                "new_deposit": event.new_deposit.to_string(),
-            }),
-        ),
+fn decode_event(encoded: &str, spec: &Spec) -> Result<Value, DecodeError> {
+    let event =
+        ContractEvent::from_xdr_base64(encoded, Limits::none()).map_err(xdr_error)?;
+    let contract = match &event.contract_id {
+        Some(stellar_xdr::ContractId(Hash(bytes))) => {
+            Strkey::Contract(stellar_strkey::Contract(*bytes))
+                .to_string()
+                .to_string()
+        }
+        None => {
+            return Err(DecodeError::MissingField {
+                context: "event has no contract id".into(),
+            })
+        }
     };
-
+    let body = match &event.body {
+        ContractEventBody::V0(body) => body,
+        #[allow(unreachable_patterns)]
+        other => {
+            return Err(DecodeError::MissingField {
+                context: format!("unsupported contract event body {other:?}"),
+            })
+        }
+    };
+    let topics = &body.topics;
+    let topic_symbol = match topics.first() {
+        Some(ScVal::Symbol(symbol)) => symbol.0.to_utf8_string_lossy(),
+        _ => {
+            return Err(DecodeError::MissingField {
+                context: "event has no symbol topic-0".into(),
+            })
+        }
+    };
+    let spec_event = spec.event(&topic_symbol).ok_or_else(|| {
+        DecodeError::MissingField {
+            context: format!("event `{topic_symbol}` is not part of the spec"),
+        }
+    })?;
+    if topics.len() - 1 != spec_event.topic_fields.len() {
+        return Err(DecodeError::UnionArity {
+            context: format!("event `{topic_symbol}` topics"),
+            expected: spec_event.topic_fields.len() + 1,
+            found: topics.len(),
+        });
+    }
+    let mut topic_map = Map::new();
+    for (index, field) in spec_event.topic_fields.iter().enumerate() {
+        topic_map.insert(
+            field.clone(),
+            canonical(&topics[index + 1], &format!("{}.{field}", spec_event.name))?,
+        );
+    }
+    let data = match canonical(&body.data, &format!("{}.data", spec_event.name))? {
+        Value::Object(map) => Value::Object(map),
+        _ => {
+            return Err(DecodeError::MissingField {
+                context: format!("event `{topic_symbol}` data is not a map"),
+            })
+        }
+    };
     Ok(json!({
         "contract": contract,
-        "name": name,
-        "topics": topics,
+        "name": spec_event.name,
+        "topics": topic_map,
         "data": data,
     }))
 }
 
-/// Convenience wrapper used by the conformance runner.
-pub fn decode_vector_str(json_text: &str) -> Result<Value, SdkError> {
-    let vector: Value = serde_json::from_str(json_text)
-        .map_err(|error| SdkError::Decode(format!("invalid vector JSON: {error}")))?;
-    decode_vector(&vector)
+/// Canonical JSON for a Soroban scalar: integers become decimal strings,
+/// addresses become StrKeys, unit enums become their case name and maps become
+/// objects (event payloads are maps with symbol keys).
+fn canonical(value: &ScVal, context: &str) -> Result<Value, DecodeError> {
+    let out = match value {
+        ScVal::Void => Value::Null,
+        ScVal::Bool(inner) => Value::Bool(*inner),
+        ScVal::U32(inner) => json!(inner.to_string()),
+        ScVal::I32(inner) => json!(inner.to_string()),
+        ScVal::U64(inner) => json!(inner.to_string()),
+        ScVal::I64(inner) => json!(inner.to_string()),
+        ScVal::Timepoint(stellar_xdr::TimePoint(inner))
+        | ScVal::Duration(stellar_xdr::Duration(inner)) => json!(inner.to_string()),
+        ScVal::U128(parts) => {
+            json!(((u128::from(parts.hi) << 64) | u128::from(parts.lo)).to_string())
+        }
+        ScVal::I128(parts) => {
+            json!((((parts.hi as i128) << 64) | (parts.lo as i128)).to_string())
+        }
+        ScVal::Bytes(bytes) => {
+            let mut encoded = String::with_capacity(bytes.len() * 2);
+            for byte in bytes.as_slice() {
+                encoded.push_str(&format!("{byte:02x}"));
+            }
+            Value::String(encoded)
+        }
+        ScVal::String(inner) => Value::String(inner.0.to_utf8_string_lossy()),
+        ScVal::Symbol(inner) => Value::String(inner.0.to_utf8_string_lossy()),
+        ScVal::Address(_) => Value::String(address_from_scval(value, context)?),
+        ScVal::Vec(Some(items)) => {
+            if items.len() == 1 {
+                if let ScVal::Symbol(symbol) = &items[0] {
+                    return Ok(Value::String(symbol.0.to_utf8_string_lossy()));
+                }
+            }
+            let mut out = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                out.push(canonical(item, context)?);
+            }
+            Value::Array(out)
+        }
+        ScVal::Vec(None) => Value::Array(Vec::new()),
+        ScVal::Map(Some(entries)) => {
+            let mut map = Map::new();
+            for entry in entries.iter() {
+                let key = match &entry.key {
+                    ScVal::Symbol(symbol) => symbol.0.to_utf8_string_lossy(),
+                    ScVal::String(string) => string.0.to_utf8_string_lossy(),
+                    other => {
+                        return Err(DecodeError::Unexpected {
+                            context: context.to_string(),
+                            expected: "symbol map key",
+                            found: crate::scval_kind(other),
+                        })
+                    }
+                };
+                map.insert(key.clone(), canonical(&entry.val, &format!("{context}.{key}"))?);
+            }
+            Value::Object(map)
+        }
+        ScVal::Map(None) => Value::Object(Map::new()),
+        other => {
+            return Err(DecodeError::Unexpected {
+                context: context.to_string(),
+                expected: "canonical scalar",
+                found: crate::scval_kind(other),
+            })
+        }
+    };
+    Ok(out)
 }
 
-/// Returns the typed field map of a `Stream` result (handy for SDK users who
-/// already have a decoded `ScVal`). Kept here so `Stream` stays generated.
-pub fn stream_fields(stream: &Stream) -> Result<Map<String, Value>, SdkError> {
-    let mut fields = Map::new();
-    fields.insert("id".into(), Value::String(stream.id.to_string()));
-    fields.insert("sender".into(), Value::String(stream.sender.clone()));
-    fields.insert("recipient".into(), Value::String(stream.recipient.clone()));
-    fields.insert("token".into(), Value::String(stream.token.clone()));
-    fields.insert("deposit".into(), Value::String(stream.deposit.to_string()));
-    fields.insert(
-        "withdrawn".into(),
-        Value::String(stream.withdrawn.to_string()),
-    );
-    fields.insert(
-        "start_time".into(),
-        Value::String(stream.start_time.to_string()),
-    );
-    fields.insert(
-        "end_time".into(),
-        Value::String(stream.end_time.to_string()),
-    );
-    fields.insert("cancelable".into(), Value::Bool(stream.cancelable));
-    fields.insert(
-        "status".into(),
-        Value::String(stream.status.as_str().into()),
-    );
-    Ok(fields)
+/// Convenience wrapper used by the conformance runner.
+pub fn decode_vector_str(json_text: &str, spec: &Spec) -> Result<Value, DecodeError> {
+    let vector: Value = serde_json::from_str(json_text).map_err(|error| {
+        DecodeError::MissingField {
+            context: format!("invalid vector JSON: {error}"),
+        }
+    })?;
+    decode_vector(&vector, spec)
 }
