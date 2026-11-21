@@ -14,8 +14,8 @@
  * construct iframe URLs that point back at the same host, then loads the
  * web component module.
  *
- * Security note: this file is intentionally tiny and free of eval() or
- * dynamic code execution. The web component module handles all runtime logic.
+ * Security note: this file is intentionally tiny and free of eval and dynamic
+ * code execution. The web component module handles all runtime logic.
  */
 (function () {
   "use strict";
