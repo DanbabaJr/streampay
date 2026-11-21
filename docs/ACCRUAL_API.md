@@ -121,7 +121,9 @@ not part of it.
 
 - **Public Interactive Docs Page**: `/docs` (rendered via Swagger UI)
 - **Raw OpenAPI 3.1 Spec**: `/openapi.json` and [`docs/openapi.json`](./openapi.json)
-- **Regenerate Spec**: `npm run generate:openapi` in `frontend/`
+- **Regenerate Spec**: `npm run generate:openapi` in `frontend/` (also the
+  freshness gate: `bash scripts/check_generated.sh openapi` from the repo root
+  regenerates it and fails if the committed copy is stale)
 
 ---
 

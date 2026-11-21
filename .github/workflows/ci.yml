@@ -359,6 +359,18 @@ jobs:
       - name: Differential vectors are up to date
         run: bash ../scripts/check_generated.sh vectors
 
+      # OpenAPI freshness (issue #517): the runtime route
+      # (frontend/app/openapi.json/route.ts) serves the spec generated from
+      # frontend/lib/openapi.ts, and the committed copies (docs/openapi.json,
+      # frontend/public/openapi.json) must match it. Regenerate and fail on
+      # any drift — the same script contributors run locally
+      # (`npm run generated:openapi` / `generated:check`). `--self-test`
+      # runs first: a deliberately stale fixture must fail the gate, and a
+      # CRLF copy of the committed spec must still pass it, so a gate that
+      # silently stopped catching drift cannot stay green.
+      - name: OpenAPI spec is up to date
+        run: bash ../scripts/check_generated.sh openapi --self-test
+
       - name: Differential tests (against shared vector corpus)
         run: node --experimental-strip-types --test lib/oracle.test.ts
 
