@@ -145,9 +145,7 @@ export function longWordPseudo(message: string): string {
       let result = "";
       for (const [index, char] of Array.from(word).entries()) {
         const accented = ACCENT_MAP[char] ?? char;
-        result += accented;
-        if ("aeiouAEIOU".includes(char)) result += accented.repeat(3);
-        if (index === 0 && word.length === 1) result += accented.repeat(2);
+        result += accented.repeat(3);
       }
       return result;
     })
