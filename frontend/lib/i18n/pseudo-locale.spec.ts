@@ -240,7 +240,8 @@ describe("layout stress testing", () => {
 
       expect(String(accentedText)).toBeTruthy();
       expect(String(accentedText)).not.toContain("undefined");
-      expect(String(accentedText)).toContain(String(count));
+      // The explicit =0 ICU arm intentionally omits the numeric count.
+      if (count !== 0) expect(String(accentedText)).toContain(String(count));
 
       // Long-word
       const longWordMsg = new IntlMessageFormat(longWord[pluralKey], "en");
@@ -248,7 +249,7 @@ describe("layout stress testing", () => {
 
       expect(String(longWordText)).toBeTruthy();
       expect(String(longWordText)).not.toContain("undefined");
-      expect(String(longWordText)).toContain(String(count));
+      if (count !== 0) expect(String(longWordText)).toContain(String(count));
     }
   });
 
