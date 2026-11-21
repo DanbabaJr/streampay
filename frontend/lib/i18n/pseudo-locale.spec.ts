@@ -244,7 +244,7 @@ describe("layout stress testing", () => {
       if (count === 0) {
         expect(String(accentedText)).toContain("ñ");
       } else {
-        expect(String(accentedText)).toContain(String(count));
+        expect(String(accentedText)).toContain(count.toLocaleString("en-US"));
       }
 
       // Long-word
@@ -257,7 +257,7 @@ describe("layout stress testing", () => {
       if (count === 0) {
         expect(String(longWordText)).toContain("ñ");
       } else {
-        expect(String(longWordText)).toContain(String(count));
+        expect(String(longWordText)).toContain(count.toLocaleString("en-US"));
       }
     }
   });
