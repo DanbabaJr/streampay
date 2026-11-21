@@ -231,3 +231,28 @@ impl PasskeySigner {
         registry::is_challenge_used(&env, &challenge)
     }
 }
+
+/// Thin re-exports for the fuzz target. Only compiled when the `testutils`
+/// feature is active so they never reach the deployed Wasm.
+#[cfg(feature = "testutils")]
+pub mod fuzz_helpers {
+    use crate::errors::PasskeyError;
+    use soroban_sdk::{Bytes, BytesN, Env};
+
+    pub fn verify_auth_data(
+        env: &Env,
+        auth_data: &Bytes,
+        rp_id_hash: &BytesN<32>,
+        flags: u32,
+    ) -> Result<(), PasskeyError> {
+        crate::crypto::verify_auth_data(env, auth_data, rp_id_hash, flags)
+    }
+
+    pub fn verify_client_data_json(
+        env: &Env,
+        client_data_json: &Bytes,
+        challenge: &BytesN<32>,
+    ) -> Result<(), PasskeyError> {
+        crate::cbor::verify_client_data_json(env, client_data_json, challenge)
+    }
+}

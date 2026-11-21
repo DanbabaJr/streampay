@@ -121,6 +121,15 @@ lint/typecheck/build when frontend files are touched) are the minimum gate.
   changes — it's the source of truth for design decisions, including
   rejected alternatives, the append-only public-interface rules (§13), and
   the Soroban-specific traps to avoid rediscovering the hard way (§14).
+- **Terms used in this doc.** New and revised docs must not make the reader
+  infer a protocol term from context: define any new term first in
+  [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) (alphabetized, with a definition
+  grounded in the implementation and a link to its authoritative source),
+  link the first use of each glossary term to its entry, and add a short
+  "terms used in this doc" note near the top of a doc that leans on several
+  terms. Never redefine a term inline — extend the glossary entry instead.
+  The full convention lives in
+  [`docs/GLOSSARY.md`](./docs/GLOSSARY.md#writing-docs-the-terms-used-in-this-doc-convention).
 - Error codes and events are documented in tables; keep the tables in sync —
   see **Generated files & CI gates** below for the exact commands.
 
@@ -135,14 +144,15 @@ the source, then regenerate.
 | `docs/ERROR_SURFACE.md` | `contracts/streaming-payments/src/errors.rs` + `surface.rs`, via the `error_surface_doc` cargo example | "Error-surface table is up to date" (Contract) |
 | `docs/errors.md`, `docs/errors/<code>.md`, `frontend/lib/errors.ts` | the same error surface, via `tooling/generate-error-catalog.mjs` | "Error catalog is up to date" (Perf budgets) |
 | `tests/vectors/accrual_vectors.json` | the Rust reference model, via `scripts/generate-vectors.mjs` | "Differential vectors are up to date" (Frontend) |
+| `docs/openapi.json`, `frontend/public/openapi.json` | `frontend/lib/openapi.ts` (the same source the runtime route `frontend/app/openapi.json/route.ts` serves), via `frontend/scripts/generate-openapi.ts` | "OpenAPI spec is up to date" (Frontend) |
 
-All three gates call the same script —
+All four gates call the same script —
 [`scripts/check_generated.sh`](./scripts/check_generated.sh) — so you can run
 every one of them locally, before pushing:
 
 ```bash
-npm run generated:check        # all three areas
-npm run generated:surface      # or one area: surface | catalog | vectors
+npm run generated:check        # all four areas
+npm run generated:surface      # or one area: surface | catalog | vectors | events | openapi
 ```
 
 The script regenerates in place and then fails on any diff, so a failing run has
@@ -284,6 +294,13 @@ Significant architectural choices, invariants, or storage/tooling changes are do
   ```bash
   node scripts/check-adrs.mjs
   ```
+
+## Wave contributors
+
+Working on an issue labelled **Stellar Wave** (Drips Wave program)? Assignment is
+required before you start; [`docs/WAVE_CONTRIBUTORS.md`](./docs/WAVE_CONTRIBUTORS.md)
+explains the flow from claim to resolution and maps each CI job to its local
+command.
 
 ## Good first issues
 

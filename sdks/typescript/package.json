@@ -21,13 +21,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.examples.json",
+    "typecheck:examples": "tsc -p tsconfig.examples.json",
     "test": "npm run build && node --test dist/test/*.test.js",
     "conformance": "npm run build && node dist/src/conformance.js",
     "prepack": "npm run build"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.2.1"
+  },
+  "overrides": {
+    "follow-redirects": "^1.16.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

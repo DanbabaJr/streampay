@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@streampay/sdk": ["./src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "examples/**/*.ts"]
+}

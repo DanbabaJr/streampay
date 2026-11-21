@@ -19,6 +19,8 @@ export const COGNATE_KEYS = [
   "pay.invoice.title",
   "pay.invoice.unit.tokens",
   "pay.terminal.status",
+  // "Webhooks" is the accepted borrowing in Spanish UI copy.
+  "settings.webhooks",
   // "Asset" is the word used in German UI copy, and "/s" is a unit symbol.
   "form.asset",
   "form.unitPerSecond",

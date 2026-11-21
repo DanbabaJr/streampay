@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * StreamPay RPC Failover Manager — Issue #100
  *
@@ -38,6 +40,29 @@ export interface RpcEndpoint {
   url: string;
   /** Relative weight for initial endpoint selection (default 1). */
   weight?: number;
+  /**
+   * Credentials for this endpoint (e.g. `Authorization`, an API-key header).
+   * Applied per request, never held in a connection pool, which is what makes
+   * rotation zero-downtime: `rotateCredentials` swaps the map between requests.
+   */
+  headers?: Record<string, string>;
+}
+
+/** A credential set to promote for one endpoint (issue #615). */
+export interface RpcCredentialUpdate {
+  url: string;
+  headers: Record<string, string>;
+}
+
+export interface CredentialRotationResult {
+  ok: boolean;
+  /** Endpoints whose candidate credential failed its probe. */
+  failed: string[];
+  /** Endpoints whose credential changed. */
+  updated: string[];
+  /** sha256-prefix fingerprints, keyed by URL — safe to log and audit. */
+  fingerprints: Record<string, string>;
+  error?: string;
 }
 
 export interface EndpointHealth {
@@ -176,6 +201,10 @@ export class RpcManager {
   private healthTimer?: ReturnType<typeof setInterval>;
   private bestLedger = 0;
   private ewmaLatencyMs = 0;
+  /** Per-endpoint credentials, swapped atomically by `rotateCredentials`. */
+  private credentials: Map<string, Record<string, string>>;
+  /** Requests currently in flight; a rotation must not abort them. */
+  private inflight = 0;
 
   constructor(options: ManagerOptions) {
     if (options.endpoints.length === 0) {
@@ -191,6 +220,10 @@ export class RpcManager {
       timeoutMs: 15_000,
       ...options,
     };
+
+    this.credentials = new Map(
+      options.endpoints.map((ep) => [ep.url, { ...(ep.headers ?? {}) }])
+    );
 
     this.health = new Map(
       options.endpoints.map((ep) => [
@@ -241,6 +274,15 @@ export class RpcManager {
    * @throws If all endpoints fail, rate budget is exhausted, or timeout elapses.
    */
   async call<T = unknown>(req: JsonRpcRequest, type: CallType = "read"): Promise<T> {
+    this.inflight += 1;
+    try {
+      return await this.callInner<T>(req, type);
+    } finally {
+      this.inflight -= 1;
+    }
+  }
+
+  private async callInner<T = unknown>(req: JsonRpcRequest, type: CallType): Promise<T> {
     // Rate budget check.
     if (!this.bucket.tryConsume()) {
       const wait = this.bucket.waitMs();
@@ -321,6 +363,125 @@ export class RpcManager {
     };
   }
 
+  // ── Credential rotation (issue #615) ────────────────────────────────────
+
+  /**
+   * Hot-reload endpoint credentials without dropping connections or resetting
+   * failover state.
+   *
+   * Every request carries a snapshot of the credential map, so requests already
+   * in flight finish against the credential they started with and new requests
+   * immediately use the new one. The health map — failure counts, ledger lag,
+   * unhealthy endpoints — is deliberately untouched: a credential change says
+   * nothing about whether an endpoint was failing before it.
+   *
+   * Each candidate is probed with `getLatestLedger` *before* anything is
+   * swapped. One failing probe aborts the whole update and the previous
+   * credentials stay in place (fail-safe), because a credential that does not
+   * work is worse than a stale one.
+   */
+  async rotateCredentials(
+    updates: RpcCredentialUpdate[],
+    options: { probe?: boolean } = {}
+  ): Promise<CredentialRotationResult> {
+    const probesEnabled = options.probe ?? true;
+    const fingerprints: Record<string, string> = {};
+    const known: RpcCredentialUpdate[] = [];
+    const failed: string[] = [];
+
+    for (const update of updates) {
+      if (!this.health.has(update.url)) {
+        failed.push(update.url);
+        continue;
+      }
+      known.push(update);
+      fingerprints[update.url] = RpcManager.fingerprintHeaders(update.headers);
+      if (probesEnabled) {
+        const healthy = await this.probeCredentials(update.url, update.headers);
+        if (!healthy) failed.push(update.url);
+      }
+    }
+
+    if (failed.length > 0) {
+      // Fail-safe: nothing is swapped, so the old credentials remain active on
+      // every endpoint, including the ones that probed fine.
+      return {
+        ok: false,
+        failed,
+        updated: [],
+        fingerprints,
+        error: `credential probe failed for ${failed.join(", ")}; previous credentials remain active`,
+      };
+    }
+
+    const updated: string[] = [];
+    for (const update of known) {
+      this.credentials.set(update.url, { ...update.headers });
+      updated.push(update.url);
+    }
+    return { ok: true, failed: [], updated, fingerprints };
+  }
+
+  /** Fingerprint of a URL's active credential: safe to log, never the value. */
+  credentialFingerprint(url: string): string | null {
+    const headers = this.credentials.get(url);
+    if (!headers) return null;
+    return RpcManager.fingerprintHeaders(headers);
+  }
+
+  /**
+   * Observability for the rotation pipeline: how many credentials each endpoint
+   * currently holds (always 1 — overlap happens in the secrets manager, not
+   * here) and how many requests are mid-flight across a swap.
+   */
+  getCredentialState(): {
+    endpoints: Array<{ url: string; fingerprint: string; headerNames: string[] }>;
+    inflight: number;
+  } {
+    return {
+      endpoints: [...this.credentials.entries()].map(([url, headers]) => ({
+        url,
+        fingerprint: RpcManager.fingerprintHeaders(headers),
+        headerNames: Object.keys(headers).sort(),
+      })),
+      inflight: this.inflight,
+    };
+  }
+
+  static fingerprintHeaders(headers: Record<string, string>): string {
+    const canonical = JSON.stringify(
+      Object.keys(headers)
+        .sort()
+        .map((name) => [name.toLowerCase(), headers[name]])
+    );
+    return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+  }
+
+  /**
+   * Does this credential work? Probes the endpoint directly and does not touch
+   * health/failover state — a probe is not traffic, and a rejected candidate
+   * must not mark a working endpoint unhealthy.
+   */
+  private async probeCredentials(url: string, headers: Record<string, string>): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs);
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestLedger", params: {} }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) return false;
+      const json = (await resp.json()) as { result?: unknown; error?: { message: string } };
+      return !json.error;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // ── Private implementation ─────────────────────────────────────────────────
 
   /** Exponentially weighted moving average; the first sample seeds it. */
@@ -357,11 +518,14 @@ export class RpcManager {
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: req.method, params: req.params });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs);
+    // Snapshot the credential for this request. A rotation that lands while it
+    // is in flight changes nothing here, so no request is aborted by rotation.
+    const headers = { "Content-Type": "application/json", ...(this.credentials.get(url) ?? {}) };
 
     try {
       const resp = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body,
         signal: controller.signal,
       });

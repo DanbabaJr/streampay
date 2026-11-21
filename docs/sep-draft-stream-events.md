@@ -63,6 +63,9 @@ All events MUST be emitted via `env.events().publish(...)` (or the `#[contractev
 
 This section defines the event name, topic list, and data fields for each lifecycle transition. The event name is the XDR symbol placed in topic[0] by `#[contractevent]`; it MUST match the name below exactly (case-sensitive).
 
+> **Naming resolution (was open question 1).** `#[contractevent]` emits the **`PascalCase` struct name** as the topic[0] XDR symbol — `"StreamCreated"`, `"Withdrawn"`, `"StreamCancelled"`, `"StreamToppedUp"`, `"FeeCharged"`, `"StreamPaused"`, `"StreamResumed"`. The `snake_case` forms (`stream_created`, `withdrawn`, …) are **not** on-chain symbols: they are the registry's normalised `event_key` identifier, derived from the struct name by the generator that parses `contracts/streaming-payments/src/events.rs` (see `schemas/events/README.md` §"How it works") and used as the schema file name and the `EVENT_KEYS` decode index for the generated TypeScript consumers (`indexer/src/generated/events.ts`, `frontend/lib/generated/events.ts`). The SEP standardises the **`PascalCase` on-chain symbol**; the `snake_case` key is a tooling-side stable identifier and never appears on the wire. Rationale: matching the macro output keeps the on-chain symbol a pure function of the Rust struct name, so codegen consumers cannot drift from the contract. See the implementation-status table in §11.
+
+
 #### 3.1 `StreamCreated`
 
 Emitted when a new stream is opened and the deposit has been successfully transferred to the contract.
@@ -143,7 +146,7 @@ Same semantics as `sender_streams`, but keyed by the recipient address.
 
 #### 4.3 Stream count
 
-A compliant contract SHOULD expose a `total_streams() -> u64` read that returns the number of streams ever created. This enables verification tools to know the full id space without paginating both indexes.
+A compliant contract SHOULD expose a `total_streams() -> u64` read that returns the number of streams ever created. This enables verification tools to know the full id space without paginating both indexes. The reference implementation exposes `total_streams` (`src/lib.rs`); it is verified on every differential-fuzz step against the model (`src/differential_harness.rs`), so it is present and tested but still normatively a SHOULD — see resolved decision 4 in §12.
 
 ---
 
@@ -245,7 +248,25 @@ A contract MAY charge a non-refundable protocol fee at stream creation, deducted
 
 #### 8.3 Pause / Resume
 
-A contract MAY support pausing accrual. If supported, `StreamPaused` and `StreamResumed` events SHOULD be emitted, and the `available_amount` calculation MUST account for paused intervals. Pause support MUST be indicated in the stream's state (e.g. an additional `paused: bool` field or a `Paused` status variant). This SEP does not standardise the pause interface.
+A contract MAY support pausing accrual. The reference implementation **does** implement this extension (it is no longer aspirational — the draft previously listed it as out of scope, which was incorrect). Two events are standardised here:
+
+**`StreamPaused`** — emitted when the sender freezes accrual at the current time.
+
+| Position | Field | Type |
+|---|---|---|
+| topic[0] | `"StreamPaused"` | Symbol |
+| topic[1] | `stream_id` | `u64` |
+| data | `paused_at` | `u64` |
+
+**`StreamResumed`** — emitted when the sender resumes; the window shifts by the paused length so accrual continues from the frozen point.
+
+| Position | Field | Type |
+|---|---|---|
+| topic[0] | `"StreamResumed"` | Symbol |
+| topic[1] | `stream_id` | `u64` |
+| data | `new_end_time` | `u64` |
+
+**Resolved model (correction).** Pause is **not** represented by a `paused: bool` field or a `Paused` status variant — the `StreamStatus` enum has exactly `Active`, `Cancelled`, `Depleted` and a paused stream stays `Active`. Instead the reference implementation keeps a sidecar `paused_at: Option<u64>` keyed by `stream_id` (get/set in `src/stream.rs`) and, on resume, advances `end_time` by the frozen interval (`new_end_time`) rather than subtracting paused time inside the accrual formula. `available_amount` therefore needs no pause-aware branch: after a resume, `elapsed` is computed against the shifted window and accrual continues from where it stopped. Contracts MAY adopt any equivalent representation as long as the two events and the effective window shift are observable.
 
 #### 8.4 Milestones and Cliff Vesting
 
@@ -267,16 +288,63 @@ A compliant contract MUST use stable, monotonically appended numeric error codes
 | 8 | `DurationTooLong` | Duration exceeds the implementation's maximum |
 | 9 | `ZeroAmount` | A provided amount is zero or negative |
 | 10 | `AmountExceedsAvailable` | Withdrawal amount exceeds accrued balance |
+| 11 | `MathOverflow` | An intermediate computation would overflow (all math is checked) |
 | 12 | `NotAuthorized` | Caller is not a permitted party for this operation |
 | 13 | `NothingToWithdraw` | Atomic full-withdrawal call found nothing to pay out |
 
-Implementors MUST NOT assign a meaning to a code that conflicts with the above. Codes 2 and 3 are retired in the reference implementation (reserved, never produced) and SHOULD be treated as reserved across compliant implementations.
+Codes 14–17 and above (`FeeRateTooHigh`, `NotGovernor`, `NoPendingGovernor`, `InsufficientTreasuryBalance`, and the dispute, sponsor, scheduled-intent, oracle, governance, policy, and upgrade families) belong to the optional-extension surfaces and are outside this SEP's base error registry; they follow the same append-only rule and are enumerated in `src/errors.rs` and [`docs/ERROR_SURFACE.md`](ERROR_SURFACE.md).
+
+Implementors MUST NOT assign a meaning to a code that conflicts with the above. Codes 2 (`NotStreamSender`) and 3 (`NotStreamRecipient`) are retired in the reference implementation — the variants are kept in the enum but never produced — and SHOULD be treated as reserved across compliant implementations.
 
 ---
 
 ### 10. Checks-Effects-Interactions Ordering
 
 All state-mutating entrypoints in a compliant contract MUST follow the CEI pattern: all state writes and event emissions MUST happen before any token transfers. This prevents reentrant token callbacks from observing stale state and double-spending.
+
+---
+
+### 11. Implementation Status
+
+Every field and event named in this SEP maps to a live entry in the shipped event registry under `schemas/events/v1/events/`. The registry is generated from `contracts/streaming-payments/src/events.rs` and pinned in CI (the `event_registry::*` tests and the drift gate described in `schemas/events/README.md`), so this table describes what exists on `main`, not aspirations. `topic[0]` (the event-name symbol) is omitted from the registry's `topics` array because the generator derives it from the struct name; `stream_id` is the first registry-declared topic.
+
+| Drafted surface | Live registry entry | On-chain symbol (topic[0]) | Data fields (registry → draft §) | Status |
+|---|---|---|---|---|
+| `StreamCreated` (§3.1) | `schemas/events/v1/events/stream_created.json` | `StreamCreated` | `sender, recipient, token, deposit, start_time, end_time, cancelable` | **Implemented** — exact match |
+| `Withdrawn` (§3.2) | `schemas/events/v1/events/withdrawn.json` | `Withdrawn` | `recipient, amount, withdrawn_total` | **Implemented** — exact match |
+| `StreamCancelled` (§3.3) | `schemas/events/v1/events/stream_cancelled.json` | `StreamCancelled` | `cancelled_by, recipient_amount, sender_amount` | **Implemented** — exact match |
+| `sender_streams` (§4.1) | `src/lib.rs::sender_streams` | n/a (read) | — | **Implemented** — `MAX_PAGE_SIZE = 50` (ADR 0007) |
+| `recipient_streams` (§4.2) | `src/lib.rs::recipient_streams` | n/a (read) | — | **Implemented** |
+| `total_streams` (§4.3) | `src/lib.rs::total_streams` | n/a (read) | — | **Implemented** — verified in differential harness |
+| `get_stream` (§5) | `src/lib.rs::get_stream` → `Stream` | n/a (read) | `id, sender, recipient, token, deposit, withdrawn, start_time, end_time, cancelable, status` | **Implemented** — `Stream` carries additional extension fields (oracle/piecewise-rate); the table's "at minimum" holds |
+| `StreamStatus` (§5) | `src/stream.rs::StreamStatus` | — | `Active, Cancelled, Depleted` | **Implemented** — exact match; no `Paused` variant |
+| `StreamToppedUp` (§8.1) | `schemas/events/v1/events/stream_topped_up.json` | `StreamToppedUp` | `sender, amount, new_deposit` | **Implemented** — exact match |
+| `FeeCharged` (§8.2) | `schemas/events/v1/events/fee_charged.json` | `FeeCharged` | `token, payer, amount, fee_bps` | **Implemented** — exact match |
+| `StreamPaused` (§8.3) | `schemas/events/v1/events/stream_paused.json` | `StreamPaused` | `paused_at` | **Implemented** — draft corrected (§8.3) |
+| `StreamResumed` (§8.3) | `schemas/events/v1/events/stream_resumed.json` | `StreamResumed` | `new_end_time` | **Implemented** — draft corrected (§8.3) |
+| Error codes 1,4–13 (§9) | `src/errors.rs::StreamError` | — | see §9 | **Implemented** — `MathOverflow` (11) added to §9; 2 and 3 retired |
+
+Out-of-scope registry events (governance, dispute, sponsor, scheduled-intent, oracle, policy, upgrade, batch/streaming helpers such as `StreamsCreated` and `BatchWithdrawSummary`) exist in the registry but are not part of this SEP's normative surface; wallets may ignore them without breaking conformance.
+
+---
+
+### 12. Design Decisions (resolved)
+
+Each item below resolves one of the community questions in the discussion thread, with the decision grounded in the shipped implementation. Where the pre-resolution draft disagreed with the registry, the registry won and the body was corrected (see the Changelog and §11).
+
+**1. Event name casing — RESOLVED: `PascalCase` on-chain, `snake_case` registry key.** The on-chain topic[0] symbol is the `#[contractevent]` struct name (`StreamCreated`, …); the registry's `snake_case` `event_key` (`stream_created`) is a tooling identifier only, never on the wire. Rationale: keeping the symbol a pure function of the Rust struct name lets `schemas/events/README.md` codegen and the `event_registry::registry_matches_contract_event_structs` in-crate pin guarantee that consumer types cannot drift from the contract. See §3 naming resolution note.
+
+**2. Topic layout — RESOLVED: `stream_id` in topic[1] only.** Every per-stream event declares exactly one registry topic, `stream_id: u64` (`"topics": [{"name": "stream_id", "type": "u64"}]` in §11's files). `sender`/`recipient` stay in the data payload, not topics. Rationale: Soroban allows at most 4 positional topics and treats them as part of the frozen ABI (`schemas/events/README.md`: re-ordering/removing a topic field is a breaking change). Because a client subscribes per contract and filters by `stream_id`, cross-contract address indexing is delegated to the append-only per-address discovery indexes (§4) rather than to event topics — the two `#[topic]`-by-address events that do exist (`StreamsCreated`, `BatchWithdrawSummary`) are batch helpers outside the base surface.
+
+**3. `i128` vs `u128` — RESOLVED: `i128` for amounts, `u64` for timestamps.** The registry encodes `deposit`, `amount`, `withdrawn_total`, `recipient_amount`, `sender_amount`, `new_deposit` as `x-soroban-type: i128`, and `start_time`, `end_time`, `paused_at`, `new_end_time` as `u64`, `fee_bps` as `u32`. Rationale: the Soroban `token::TokenClient::transfer` signature is `i128`, so amounts must match to avoid pervasive casts at the CEI transfer boundary (§10); the `>= 0` constraints in §3 keep the semantics non-negative even though the wire type is signed.
+
+**4. Mandatory `total_streams` vs optional — RESOLVED: keep SHOULD; it is implemented.** `src/lib.rs::total_streams` exists and is checked on every differential-fuzz step (`src/differential_harness.rs`), so verification tools can rely on it in this reference implementation. But it remains a SHOULD: a wallet that only paginates §4 indexes does not need it, and making it MUST would burden minimal contracts. `MAX_PAGE_SIZE = 50` (ADR 0007) lets a verifier stop paginating a per-address index when a page returns fewer than 50 ids without needing `total_streams`; `total_streams` is the cheaper global bound. The `has_more: bool` alternative was rejected — it changes the frozen `Vec<u64>` return of §4 and is a breaking registry change.
+
+**5. Accrual formula normative or informative — RESOLVED: normative default, informative for documented variants.** §6 states the linear floor formula as the behaviour for contracts that document nothing else; §6 already permits non-linear schedules only if the event/discovery surface is preserved and the formula documented. Rationale: the formula is derivable from `deposit`, `start_time`, `end_time`, and ledger time, so a wallet that recalculates it locally stays correct for the default case; the residual risk (an undocumented non-linear schedule) is addressed by requiring documentation rather than by making the default formula informative. Grounded in ADR 0004 (floor-per-second accrual) and ADR 0005 (pure `streamed_at`).
+
+**6. Error-code registry — RESOLVED: no separate namespace; reuse the append-only `StreamError` discriminants.** §9 lists base codes as RECOMMENDED, not required, and codes are the raw `#[contracterror]` discriminants in `src/errors.rs`. A registered human-readable namespace was rejected for v1 as heavier than the value it adds: `docs/ERROR_SURFACE.md` already generates a code→message table from the enum with doc comments, and `error_surface_test.rs` is a CI gate that keeps committed codes and emitted branches in lock-step (ADR 0003 append-only rule). Tooling can key off the numeric code plus the SEP-anchored name in §9 without a second registry.
+
+**7. Scope of `StreamCancelled` data — RESOLVED: keep both `recipient_amount` and `sender_amount`.** The registry emits both (`stream_cancelled.json`). Rationale: making the event self-contained lets an explorer settle a cancellation from the event log alone, avoiding a state replay of the pre-cancellation accrual point; on-chain amounts are already public, so publishing them in the event adds no new disclosure beyond the token transfer records in the same transaction. The invariant in §3.3 (`recipient_amount + sender_amount == deposit − prior_withdrawn`) is checkable directly from the event, which is the audit benefit.
 
 ---
 
@@ -337,13 +405,13 @@ Optional extensions implemented (non-normative from this SEP's perspective):
 
 - **Deposit top-up** (`top_up`): `src/lib.rs`, `src/events.rs` (`StreamToppedUp`)
 - **Protocol fee treasury**: `src/treasury.rs`, `src/events.rs` (`FeeCharged`, `FeeWithdrawn`)
+- **Pause / resume** (`pause_stream`, `resume_stream`): `src/lib.rs`, `src/events.rs` (`StreamPaused`, `StreamResumed`), sidecar `paused_at` storage and window-shift in `src/stream.rs`
 
 Optional extensions **not** implemented (out of scope for v1):
 
-- Pause / resume
 - Cliff vesting
 - Milestone-based release
-- End-time extension
+- Sender-initiated end-time extension (distinct from the pause-driven window shift above)
 
 ### Deployed contracts
 
@@ -364,3 +432,4 @@ This SEP is a new standard; there are no prior SEPs to be compatible with. Contr
 | Date | Change |
 |---|---|
 | 2026-10-15 | Initial draft for community review |
+| 2026-11-20 | Resolved the seven open questions against the shipped event registry (§12); added the implementation-status table (§11). Corrections to the body: §3 clarified on-chain `PascalCase` symbol vs `snake_case` registry key; §4.3 noted `total_streams` is implemented; §8.3 rewritten to match the shipped `StreamPaused`/`StreamResumed` sidecar-window-shift model (paused stream stays `Active`, no `Paused` variant / `paused: bool`); §9 added the produced `MathOverflow` (11) code and clarified the extension-code range; Reference Implementation moved Pause/Resume from "not implemented" to "implemented". No schema files were changed. |

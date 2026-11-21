@@ -12,15 +12,34 @@ import { readStreamPolicyAction } from "@/app/actions";
 import type { StreamPolicyView } from "@/lib/stream-types";
 import { useLocale } from "@/lib/i18n/provider";
 import { parseTokenAmount } from "@/lib/i18n/amounts";
-import { describeParseFailure } from "@/lib/i18n/parse-error";
+import { durationSecondsFromDays } from "@/lib/duration";
+import {
+  durationSeconds,
+  mapCreationErrorToField,
+  validateDeposit,
+  validateRecipientAddress,
+  validateStreamForm,
+  validateTokenContractId,
+  type FieldIssue,
+  type StreamFormField,
+  type ValidationOptions,
+} from "@/lib/stream-validation";
 
 /** Asset choices on the create form: native XLM, or a token contract id. */
 type AssetChoice = "native" | "contract";
 
 export default function StreamForm({
   onCreate,
+  submitting = false,
 }: {
   onCreate: (args: StreamArgs) => Promise<void>;
+  /**
+   * Render the in-flight (submitting) state directly instead of only reaching it
+   * by interaction. The internal `busy` flag is seeded from this prop, so the
+   * disabled/pending UI is reachable from props — which a static visual capture
+   * and unit tests depend on. Normal callers omit it and drive `busy` via submit.
+   */
+  submitting?: boolean;
 }) {
   const [asset, setAsset] = useState<AssetChoice>("native");
   const [contractMeta, setContractMeta] = useState<AssetMeta | null>(null);
@@ -31,9 +50,13 @@ export default function StreamForm({
     days: "30",
     cancelable: true,
   });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(submitting);
   const [policy, setPolicy] = useState<StreamPolicyView | null>(null);
-  const [policyError, setPolicyError] = useState<string | null>(null);
+  // Per-field messages, shown at the field (and announced via role="alert").
+  // Empty until a field is blurred or submit is attempted, so the resting
+  // render is unchanged. `formError` is only for rejections no field can fix.
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<StreamFormField, string>>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   const { t, locale, formatToken } = useLocale();
 
@@ -94,89 +117,110 @@ export default function StreamForm({
   const assetId = `${formId}-asset`;
   const tokenId = `${formId}-token`;
   const tokenHintId = `${formId}-token-hint`;
+  const tokenErrorId = `${formId}-token-error`;
   const recipientId = `${formId}-recipient`;
   const recipientHintId = `${formId}-recipient-hint`;
+  const recipientErrorId = `${formId}-recipient-error`;
   const depositId = `${formId}-deposit`;
   const depositHintId = `${formId}-deposit-hint`;
   const depositErrorId = `${formId}-deposit-error`;
   const daysId = `${formId}-days`;
+  const daysErrorId = `${formId}-days-error`;
   const cancelableId = `${formId}-cancelable`;
   const formDescId = `${formId}-desc`;
+
+  const validationOptions = (policyView: StreamPolicyView | null): ValidationOptions => ({
+    locale,
+    t,
+    policy: policyView,
+    decimals: assetMeta.decimals,
+    formatToken,
+  });
+
+  // The issue for one field, against explicit values (so a change handler can
+  // re-validate the field it just edited before state has settled).
+  const issueForField = (
+    field: StreamFormField,
+    values: StreamArgs,
+    assetChoice: AssetChoice,
+    policyView: StreamPolicyView | null
+  ): FieldIssue | null => {
+    const options = validationOptions(policyView);
+    if (field === "token") {
+      if (assetChoice !== "contract") return null;
+      const message = validateTokenContractId(values.token, t);
+      return message ? { field, message } : null;
+    }
+    if (field === "recipient") {
+      const message = validateRecipientAddress(values.recipient, t);
+      return message ? { field, message } : null;
+    }
+    if (field === "deposit") {
+      let seconds: bigint | null = null;
+      try {
+        seconds = durationSecondsFromDays(values.days);
+      } catch {
+        // Duration has its own field error; deposit checks that need it wait.
+      }
+      return validateDeposit(values.deposit, seconds, options);
+    }
+    return durationSeconds(values.days, policyView, t).issue;
+  };
+
+  const setFieldError = (field: StreamFormField, issue: FieldIssue | null) => {
+    setFieldErrors((prev) => {
+      if (!issue && !prev[field]) return prev;
+      const next = { ...prev };
+      if (issue) next[field] = issue.message;
+      else delete next[field];
+      return next;
+    });
+  };
+
+  const fieldForKey = (k: keyof StreamArgs): StreamFormField | null => {
+    if (k === "token" || k === "recipient" || k === "deposit") return k;
+    if (k === "days") return "duration";
+    return null;
+  };
 
   const set =
     (k: keyof StreamArgs) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-      setPolicyError(null);
-      setArgs((prev) => ({
-        ...prev,
+      const next: StreamArgs = {
+        ...args,
         [k]:
           k === "cancelable"
             ? (e.target as HTMLSelectElement).value === "yes"
             : e.target.value,
-      }));
+      };
+      setArgs(next);
+      setFormError(null);
+      // A field already showing an error re-validates as it is fixed; a
+      // clean field stays silent while typing so nothing flashes mid-word.
+      const field = fieldForKey(k);
+      if (field && fieldErrors[field]) {
+        setFieldError(field, issueForField(field, next, asset, policy));
+      }
     };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setPolicyError(null);
+    setFormError(null);
 
-    if (!depositParse.ok) {
-      setPolicyError(
-        describeParseFailure(t, depositParse.reason, {
-          input: args.deposit,
-          locale,
-          decimals: 0,
-        })
+    const issues = validateStreamForm(
+      { asset, token: args.token, recipient: args.recipient, deposit: args.deposit, days: args.days },
+      validationOptions(policy)
+    );
+    if (issues.length > 0) {
+      setFieldErrors(
+        Object.fromEntries(issues.map((issue) => [issue.field, issue.message]))
       );
       return;
     }
 
-    // Client-side pre-validation against governance policy floors
-    if (policy) {
-      const depositValParsed = depositParse.value;
-      const durationSeconds = Math.floor(Number(args.days || "0") * 86400);
-
-      if (BigInt(policy.minDeposit) > 0n && depositValParsed < BigInt(policy.minDeposit)) {
-        setPolicyError(
-          t("form.policyDepositLow", {
-            min: formatToken(BigInt(policy.minDeposit), assetMeta.decimals),
-          })
-        );
-        return;
-      }
-      if (policy.minDuration > 0 && durationSeconds < policy.minDuration) {
-        setPolicyError(
-          t("form.policyDurationLow", { actual: durationSeconds, min: policy.minDuration })
-        );
-        return;
-      }
-      if (policy.maxDuration > 0 && durationSeconds > policy.maxDuration) {
-        setPolicyError(
-          t("form.policyDurationHigh", { actual: durationSeconds, max: policy.maxDuration })
-        );
-        return;
-      }
-
-      const rate = depositValParsed / BigInt(Math.max(1, durationSeconds));
-      if (BigInt(policy.minRate) > 0n && rate < BigInt(policy.minRate)) {
-        setPolicyError(
-          t("form.policyRateLow", {
-            rate: formatToken(rate, assetMeta.decimals),
-            min: formatToken(BigInt(policy.minRate), assetMeta.decimals),
-          })
-        );
-        return;
-      }
-      if (BigInt(policy.maxRate) > 0n && rate > BigInt(policy.maxRate)) {
-        setPolicyError(
-          t("form.policyRateHigh", {
-            rate: formatToken(rate, assetMeta.decimals),
-            max: formatToken(BigInt(policy.maxRate), assetMeta.decimals),
-          })
-        );
-        return;
-      }
-    }
+    // validateStreamForm already rejected an unparseable deposit; this only
+    // narrows the type for the submit below.
+    if (!depositParse.ok) return;
 
     setBusy(true);
     try {
@@ -188,6 +232,28 @@ export default function StreamForm({
         deposit: depositParse.value.toString(),
         token: asset === "native" ? NATIVE_XLM : args.token.trim(),
       });
+    } catch (err) {
+      // A rejection after submit maps back to the field that can fix it; only
+      // rejections no field can fix stay form-level.
+      let durationSecondsValue = 0n;
+      try {
+        durationSecondsValue = durationSecondsFromDays(args.days);
+      } catch {
+        // Unreachable: submit already validated the duration.
+      }
+      const mapped = mapCreationErrorToField(err, t, {
+        kind: "single",
+        deposit: depositParse.value,
+        durationSeconds: durationSecondsValue,
+        policy,
+        decimals: assetMeta.decimals,
+        formatToken,
+      });
+      if (mapped.field) {
+        setFieldErrors((prev) => ({ ...prev, [mapped.field as StreamFormField]: mapped.message }));
+      } else {
+        setFormError(mapped.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -218,6 +284,7 @@ export default function StreamForm({
             id={assetId}
             value={asset}
             onChange={(e) => setAsset(e.target.value as AssetChoice)}
+            disabled={busy}
             required
           >
             <option value="native">{t("form.assetNative")}</option>
@@ -238,11 +305,20 @@ export default function StreamForm({
               placeholder={t("form.tokenPlaceholder")}
               value={args.token}
               onChange={set("token")}
-              aria-describedby={tokenHintId}
+              onBlur={() => setFieldError("token", issueForField("token", args, asset, policy))}
+              aria-describedby={`${tokenHintId} ${tokenErrorId}`}
+              aria-invalid={fieldErrors.token ? true : undefined}
               autoComplete="off"
+              disabled={busy}
             />
             <span id={tokenHintId} className="sr-only">
               {t("form.tokenHint")}
+            </span>
+            {/* Always present so `aria-describedby` never points at a missing id.
+                The alert role is only set while a message is shown: an empty
+                alert still matches a bare `getByRole("alert")` query. */}
+            <span id={tokenErrorId} className="err" role={fieldErrors.token ? "alert" : undefined}>
+              {fieldErrors.token ?? ""}
             </span>
           </div>
         )}
@@ -259,11 +335,26 @@ export default function StreamForm({
             placeholder="G…"
             value={args.recipient}
             onChange={set("recipient")}
-            aria-describedby={recipientHintId}
+            onBlur={() =>
+              setFieldError("recipient", issueForField("recipient", args, asset, policy))
+            }
+            aria-describedby={`${recipientHintId} ${recipientErrorId}`}
+            aria-invalid={fieldErrors.recipient ? true : undefined}
             autoComplete="off"
+            disabled={busy}
           />
           <span id={recipientHintId} className="sr-only">
             {t("form.recipientHint")}
+          </span>
+          {/* Always present so `aria-describedby` never points at a missing id.
+              The alert role is only set while a message is shown: an empty
+              alert still matches a bare `getByRole("alert")` query. */}
+          <span
+            id={recipientErrorId}
+            className="err"
+            role={fieldErrors.recipient ? "alert" : undefined}
+          >
+            {fieldErrors.recipient ?? ""}
           </span>
         </div>
       </div>
@@ -287,21 +378,25 @@ export default function StreamForm({
             required
             value={args.deposit}
             onChange={set("deposit")}
+            onBlur={() =>
+              setFieldError("deposit", issueForField("deposit", args, asset, policy))
+            }
             aria-describedby={`${depositHintId} ${depositErrorId}`}
-            aria-invalid={depositParse.ok ? undefined : true}
+            aria-invalid={fieldErrors.deposit ? true : undefined}
+            disabled={busy}
           />
           <span id={depositHintId} className="sr-only">
             {t("form.depositHint")}
           </span>
-          {/* Always present so `aria-describedby` never points at a missing id. */}
-          <span id={depositErrorId} className="sr-only" aria-live="polite">
-            {depositParse.ok
-              ? ""
-              : describeParseFailure(t, depositParse.reason, {
-                  input: args.deposit,
-                  locale,
-                  decimals: 0,
-                })}
+          {/* Always present so `aria-describedby` never points at a missing id.
+              The alert role is only set while a message is shown: an empty
+              alert still matches a bare `getByRole("alert")` query. */}
+          <span
+            id={depositErrorId}
+            className="err"
+            role={fieldErrors.deposit ? "alert" : undefined}
+          >
+            {fieldErrors.deposit ?? ""}
           </span>
         </div>
 
@@ -318,7 +413,23 @@ export default function StreamForm({
             required
             value={args.days}
             onChange={set("days")}
+            onBlur={() =>
+              setFieldError("duration", issueForField("duration", args, asset, policy))
+            }
+            aria-describedby={daysErrorId}
+            aria-invalid={fieldErrors.duration ? true : undefined}
+            disabled={busy}
           />
+          {/* Always present so `aria-describedby` never points at a missing id.
+              The alert role is only set while a message is shown: an empty
+              alert still matches a bare `getByRole("alert")` query. */}
+          <span
+            id={daysErrorId}
+            className="err"
+            role={fieldErrors.duration ? "alert" : undefined}
+          >
+            {fieldErrors.duration ?? ""}
+          </span>
         </div>
 
         <div>
@@ -327,6 +438,7 @@ export default function StreamForm({
             id={cancelableId}
             value={args.cancelable ? "yes" : "no"}
             onChange={set("cancelable")}
+            disabled={busy}
           >
             <option value="yes">{t("form.yes")}</option>
             <option value="no">{t("form.no")}</option>
@@ -431,13 +543,18 @@ export default function StreamForm({
         </p>
       )}
 
-      {policyError && (
+      {formError && (
         <div role="alert" style={{ color: "#ef4444", marginBottom: "1rem", fontSize: "0.9rem" }}>
-          {policyError}
+          {formError}
         </div>
       )}
 
-      <button type="submit" disabled={busy}>
+      <button type="submit" disabled={busy} aria-busy={busy || undefined}>
+        {busy && (
+          <span className="spinner" aria-hidden="true" style={{ marginRight: "0.5rem" }}>
+            {"◌"}
+          </span>
+        )}
         {busy ? t("form.submitting") : t("form.submit")}
       </button>
     </form>

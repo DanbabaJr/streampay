@@ -1706,6 +1706,417 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .mock_all_auths()
                 .try_resume_stream(&f.sender, &id)))
         }
+        // ----------------------------------------------------------- receivables
+        Branch::AdvanceExceedsMaxLtv => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &DEPOSIT, &5_000)))
+        }
+        Branch::AdvanceAmountNonPositive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &0, &5_000)))
+        }
+        Branch::AdvanceAlreadyActive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
+            f.client
+                .mock_all_auths()
+                .draw_advance(&id, &lender, &100, &5_000);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &100, &5_000)))
+        }
+        Branch::AdvanceNotFound => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
+                &f.recipient,
+                &id,
+                &100
+            )))
+        }
+        Branch::AdvanceRepaymentNonPositive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
+            f.client
+                .mock_all_auths()
+                .draw_advance(&id, &lender, &100, &5_000);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
+                &f.recipient,
+                &id,
+                &0
+            )))
+        }
+        Branch::AdvanceRepaymentExceedsBalance => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
+            f.client
+                .mock_all_auths()
+                .draw_advance(&id, &lender, &100, &5_000);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
+                &f.recipient,
+                &id,
+                &100_000
+            )))
+        }
+        Branch::InvalidLtvBps => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &100, &0)))
+        }
+        Branch::StreamNotEligibleForAdvance => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &100, &5_000)))
+        }
+        // --------------------------------------------------- conditional streams
+        Branch::ConditionNotMet => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::ConditionExpired => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &now,
+            )))
+        }
+        Branch::ConditionAlreadyRegistered => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            )))
+        }
+        Branch::ConditionNotFound => {
+            let f = Fixture::setup_quiet();
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &999,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::ConditionAlreadySatisfied => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.client.mock_all_auths().attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::InvalidConditionThreshold => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &0,
+                &(now + 5 * DAY),
+            )))
+        }
+        Branch::NotConditionPublisher => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let rogue = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &rogue,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::ConditionAttestationStale => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::TimeWindow(now, now + 10),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.advance_time(20);
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::TimeWindow(now, now + 10),
+            )))
+        }
+        // ------------------------------------------------------ stream templates
+        Branch::TemplateNotFound => {
+            let f = Fixture::setup_quiet();
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_instantiate_template(
+                    &999,
+                    &1,
+                    &f.sender,
+                    &f.recipient,
+                    &DEPOSIT,
+                    &0,
+                )))
+        }
+        Branch::TemplateAlreadyApproved => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 100,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            f.client
+                .mock_all_auths()
+                .approve_template(&f.governor, &1, &1, &t);
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        Branch::TemplateVersionMismatch => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 2,
+                token: f.token.clone(),
+                duration: 100,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &2,
+                &t,
+            )))
+        }
+        Branch::TemplateValidationFailed => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 0,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        Branch::TemplateRateInvalid => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 10_000,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 100,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        // ------------------------------------------------------ integrator hooks
+        Branch::HookAlreadyRegistered => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let sel = soroban_sdk::Symbol::new(&f.env, "on_wd");
+            f.client.mock_all_auths().register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
+            );
+            Some(rejected!(f.client.mock_all_auths().try_register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
+            )))
+        }
+        Branch::HookNotFound => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f.client.mock_all_auths().try_unregister_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+            )))
+        }
+        Branch::HookReentrancyBlocked => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.env.as_contract(&f.client.address, || {
+                crate::hooks::set_stream_locked(&f.env, id, true);
+            });
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::HookExecutionFailed => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let sel = soroban_sdk::Symbol::new(&f.env, "on_wd");
+            f.client.mock_all_auths().register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::Revert,
+            );
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::InvalidHookSelector => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let empty_sel = soroban_sdk::Symbol::new(&f.env, "");
+            Some(rejected!(f.client.mock_all_auths().try_register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &empty_sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
+            )))
+        }
     }
 }
 
@@ -1914,7 +2325,33 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::RefundTargetUnchanged
             | StreamError::WithdrawBatchEmpty
             | StreamError::WithdrawBatchTooLarge
-            | StreamError::WithdrawDuplicateStreamIds => StreamError::ALL.contains(&e),
+            | StreamError::WithdrawDuplicateStreamIds
+            | StreamError::AdvanceExceedsMaxLtv
+            | StreamError::AdvanceAmountNonPositive
+            | StreamError::AdvanceAlreadyActive
+            | StreamError::AdvanceNotFound
+            | StreamError::AdvanceRepaymentNonPositive
+            | StreamError::AdvanceRepaymentExceedsBalance
+            | StreamError::InvalidLtvBps
+            | StreamError::StreamNotEligibleForAdvance
+            | StreamError::ConditionNotMet
+            | StreamError::ConditionExpired
+            | StreamError::ConditionAlreadyRegistered
+            | StreamError::ConditionNotFound
+            | StreamError::ConditionAlreadySatisfied
+            | StreamError::InvalidConditionThreshold
+            | StreamError::NotConditionPublisher
+            | StreamError::ConditionAttestationStale
+            | StreamError::TemplateNotFound
+            | StreamError::TemplateAlreadyApproved
+            | StreamError::TemplateVersionMismatch
+            | StreamError::TemplateValidationFailed
+            | StreamError::TemplateRateInvalid
+            | StreamError::HookAlreadyRegistered
+            | StreamError::HookNotFound
+            | StreamError::HookReentrancyBlocked
+            | StreamError::HookExecutionFailed
+            | StreamError::InvalidHookSelector => StreamError::ALL.contains(&e),
         }
     }
 

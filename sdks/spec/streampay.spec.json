@@ -12,6 +12,10 @@
       "value": 10000,
       "type": "u32"
     },
+    "DEFAULT_MAX_LTV_BPS": {
+      "value": 7500,
+      "type": "u32"
+    },
     "DEFAULT_MAX_STALE_SECONDS": {
       "value": 3600,
       "type": "u64"
@@ -1850,6 +1854,345 @@
       "returns": "u64",
       "error": null,
       "mutating": false
+    },
+    {
+      "name": "set_receivables_config",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "max_ltv_bps",
+          "type": "u32"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u32"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_receivables_config",
+      "doc": "",
+      "args": [],
+      "returns": "ReceivablesConfig",
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "draw_advance",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "lender",
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "repayment_bps",
+          "type": "u32"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "repay_advance",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_advance",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "Advance"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "register_condition",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "predicate",
+          "type": "ConditionPredicate"
+        },
+        {
+          "name": "publishers",
+          "type": {
+            "vec": "address"
+          }
+        },
+        {
+          "name": "threshold",
+          "type": "u32"
+        },
+        {
+          "name": "timeout",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "attest_condition",
+      "doc": "",
+      "args": [
+        {
+          "name": "publisher",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "attestation",
+          "type": "ConditionPredicate"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_condition",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "StreamCondition"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "is_release_gated",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "bool",
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "approve_template",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "template_id",
+          "type": "u32"
+        },
+        {
+          "name": "version",
+          "type": "u32"
+        },
+        {
+          "name": "template",
+          "type": "StreamTemplate"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "instantiate_template",
+      "doc": "",
+      "args": [
+        {
+          "name": "template_id",
+          "type": "u32"
+        },
+        {
+          "name": "version",
+          "type": "u32"
+        },
+        {
+          "name": "sender",
+          "type": "address"
+        },
+        {
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "name": "deposit",
+          "type": "i128"
+        },
+        {
+          "name": "start_time",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_template",
+      "doc": "",
+      "args": [
+        {
+          "name": "template_id",
+          "type": "u32"
+        },
+        {
+          "name": "version",
+          "type": "u32"
+        }
+      ],
+      "returns": {
+        "option": "StreamTemplate"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "get_stream_lineage",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "TemplateLineage"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "register_hook",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "event_class",
+          "type": "HookEventClass"
+        },
+        {
+          "name": "callback_contract",
+          "type": "address"
+        },
+        {
+          "name": "selector",
+          "type": "symbol"
+        },
+        {
+          "name": "failure_policy",
+          "type": "HookFailurePolicy"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "unregister_hook",
+      "doc": "",
+      "args": [
+        {
+          "name": "caller",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "event_class",
+          "type": "HookEventClass"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_hook",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "event_class",
+          "type": "HookEventClass"
+        }
+      ],
+      "returns": {
+        "option": "StreamHook"
+      },
+      "error": null,
+      "mutating": true
     }
   ],
   "structs": [
@@ -1969,6 +2312,32 @@
       ]
     },
     {
+      "name": "StreamHook",
+      "doc": "Registered callback hook definition.",
+      "fields": [
+        {
+          "name": "callback_contract",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "selector",
+          "type": "symbol",
+          "doc": ""
+        },
+        {
+          "name": "failure_policy",
+          "type": "HookFailurePolicy",
+          "doc": ""
+        },
+        {
+          "name": "registered_by",
+          "type": "address",
+          "doc": ""
+        }
+      ]
+    },
+    {
       "name": "OracleConfig",
       "doc": "Oracle configuration stored in instance storage.",
       "fields": [
@@ -2024,6 +2393,49 @@
       ]
     },
     {
+      "name": "StreamCondition",
+      "doc": "A release condition gating whether accrued value is withdrawable.",
+      "fields": [
+        {
+          "name": "condition_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "predicate",
+          "type": "ConditionPredicate",
+          "doc": ""
+        },
+        {
+          "name": "publishers",
+          "type": {
+            "vec": "address"
+          },
+          "doc": ""
+        },
+        {
+          "name": "threshold",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "timeout",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "status",
+          "type": "ConditionStatus",
+          "doc": ""
+        }
+      ]
+    },
+    {
       "name": "StreamPolicy",
       "doc": "Governance-managed policy floors and ceilings for streams.",
       "fields": [
@@ -2072,6 +2484,68 @@
           "name": "executable_after",
           "type": "u64",
           "doc": "Ledger timestamp at or after which the change can be executed."
+        }
+      ]
+    },
+    {
+      "name": "ReceivablesConfig",
+      "doc": "Governance receivables configuration stored in instance storage.",
+      "fields": [
+        {
+          "name": "max_ltv_bps",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "fee_bps",
+          "type": "u32",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "Advance",
+      "doc": "An active advance against future stream accrual.",
+      "fields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "lender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "principal",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "fee",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "total_owed",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "repaid",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "repayment_bps",
+          "type": "u32",
+          "doc": ""
         }
       ]
     },
@@ -2683,6 +3157,73 @@
       ]
     },
     {
+      "name": "StreamTemplate",
+      "doc": "Immutable, versioned stream template preset.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "version",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "token",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "duration",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "cancelable",
+          "type": "bool",
+          "doc": ""
+        },
+        {
+          "name": "use_oracle",
+          "type": "bool",
+          "doc": ""
+        },
+        {
+          "name": "min_deposit",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "max_deposit",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "created_at",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "TemplateLineage",
+      "doc": "Lineage linking an instantiated stream to its template preset.",
+      "fields": [
+        {
+          "name": "template_id",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "version",
+          "type": "u32",
+          "doc": ""
+        }
+      ]
+    },
+    {
       "name": "TreasuryStatus",
       "doc": "One call snapshot of the treasury state for a token: governance, current\nfee configuration, and the fee ledger totals that verifiers reconcile\nagainst events and per-stream fees.",
       "fields": [
@@ -2768,6 +3309,67 @@
     }
   ],
   "enums": [
+    {
+      "name": "HookEventClass",
+      "doc": "Lifecycle transition event classes supported for callbacks.",
+      "encoding": "u32",
+      "cases": [
+        {
+          "name": "Withdraw",
+          "value": 1,
+          "doc": ""
+        },
+        {
+          "name": "Cancel",
+          "value": 2,
+          "doc": ""
+        },
+        {
+          "name": "Complete",
+          "value": 3,
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "HookFailurePolicy",
+      "doc": "Failure policy for a callback invocation.",
+      "encoding": "u32",
+      "cases": [
+        {
+          "name": "EmitAndContinue",
+          "value": 0,
+          "doc": ""
+        },
+        {
+          "name": "Revert",
+          "value": 1,
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "ConditionStatus",
+      "doc": "Status of an oracle-attested release condition.",
+      "encoding": "u32",
+      "cases": [
+        {
+          "name": "Pending",
+          "value": 0,
+          "doc": ""
+        },
+        {
+          "name": "Met",
+          "value": 1,
+          "doc": ""
+        },
+        {
+          "name": "Expired",
+          "value": 2,
+          "doc": ""
+        }
+      ]
+    },
     {
       "name": "IntentStatus",
       "doc": "Lifecycle state of a scheduled intent.",
@@ -2916,6 +3518,35 @@
           "name": "SetVetoWindow",
           "doc": "Replace the veto window.",
           "types": [
+            "u64"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ConditionPredicate",
+      "doc": "Typed predicate gating the release of a conditional stream.",
+      "cases": [
+        {
+          "name": "PriceBand",
+          "doc": "",
+          "types": [
+            "i128",
+            "i128"
+          ]
+        },
+        {
+          "name": "Boolean",
+          "doc": "",
+          "types": [
+            "bool"
+          ]
+        },
+        {
+          "name": "TimeWindow",
+          "doc": "",
+          "types": [
+            "u64",
             "u64"
           ]
         }
@@ -4356,6 +4987,320 @@
           "name": "at_creation",
           "type": "bool",
           "doc": "True when the routing was set by `create_stream_with_refund`, so a\nreader can tell a creation-time destination from a later amendment."
+        }
+      ]
+    },
+    {
+      "name": "AdvanceDrawn",
+      "topic": "advance_drawn",
+      "doc": "Emitted when a recipient draws an advance against future stream accrual.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "lender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "amount",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "fee",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "repayment_bps",
+          "type": "u32",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "AdvanceRepaid",
+      "topic": "advance_repaid",
+      "doc": "Emitted when an advance is partially or fully repaid.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "lender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "amount",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "remaining_owed",
+          "type": "i128",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "AdvanceLiquidated",
+      "topic": "advance_liquidated",
+      "doc": "Emitted when an advance is liquidated upon stream cancellation.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "lender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "amount",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "remaining_unpaid",
+          "type": "i128",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "ConditionRegistered",
+      "topic": "condition_registered",
+      "doc": "Emitted when a release condition is registered for a stream.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "condition_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "ConditionMet",
+      "topic": "condition_met",
+      "doc": "Emitted when a release condition is attested and met.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "condition_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "ConditionExpired",
+      "topic": "condition_expired",
+      "doc": "Emitted when a release condition expires without being met.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "condition_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "TemplateApproved",
+      "topic": "template_approved",
+      "doc": "Emitted when governance approves a new stream template or version.",
+      "topicFields": [
+        {
+          "name": "template_id",
+          "type": "u32",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "version",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "token",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "duration",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "TemplateInstantiated",
+      "topic": "template_instantiated",
+      "doc": "Emitted when a stream is instantiated from an approved template.",
+      "topicFields": [
+        {
+          "name": "template_id",
+          "type": "u32",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "version",
+          "type": "u32",
+          "doc": ""
+        },
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "sender",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "deposit",
+          "type": "i128",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "HookRegistered",
+      "topic": "hook_registered",
+      "doc": "Emitted when an integrator callback hook is registered.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "event_class",
+          "type": "symbol",
+          "doc": ""
+        },
+        {
+          "name": "callback_contract",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "selector",
+          "type": "symbol",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "HookInvoked",
+      "topic": "hook_invoked",
+      "doc": "Emitted when an integrator callback hook is invoked successfully.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "event_class",
+          "type": "symbol",
+          "doc": ""
+        },
+        {
+          "name": "callback_contract",
+          "type": "address",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "HookFailed",
+      "topic": "hook_failed",
+      "doc": "Emitted when an integrator callback hook fails or reverts.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "event_class",
+          "type": "symbol",
+          "doc": ""
+        },
+        {
+          "name": "callback_contract",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "error_code",
+          "type": "u32",
+          "doc": ""
         }
       ]
     }
