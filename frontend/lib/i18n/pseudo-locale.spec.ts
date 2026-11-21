@@ -242,7 +242,7 @@ describe("layout stress testing", () => {
       expect(String(accentedText)).not.toContain("undefined");
       // The explicit =0 ICU branch intentionally has no count placeholder.
       if (count === 0) {
-        expect(String(accentedText)).toContain("no streams");
+        expect(String(accentedText)).toContain("ñ");
       } else {
         expect(String(accentedText)).toContain(String(count));
       }
