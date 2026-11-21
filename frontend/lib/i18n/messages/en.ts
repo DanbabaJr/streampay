@@ -214,6 +214,24 @@ export const en = {
   "form.amountTooPrecise":
     "This token has at most {decimals, number} decimal places — the amount you typed would have to be rounded.",
   "form.amountInvalid": "That is not a readable amount.",
+  "form.recipientRequired": "Enter a recipient address.",
+  "form.recipientInvalid": "Enter a valid Stellar address (G… with a valid checksum).",
+  "form.tokenRequired": "Enter a token contract id.",
+  "form.tokenInvalid": "Enter a valid token contract id (C… with a valid checksum).",
+  "form.durationInvalid": "Enter a duration in days greater than zero (up to 36,500 days).",
+  "form.durationTooLong": "Duration exceeds the protocol maximum of {max, number} seconds.",
+  "form.depositTooSmallForDuration":
+    "Deposit is too small for this duration — at least {min} is needed so the stream accrues.",
+  "form.depositTooLarge":
+    "Deposit is too large for this duration — reduce the deposit or shorten the duration.",
+  "form.depositTransferFailed":
+    "The deposit could not be pulled — check your balance and token allowance for the deposit plus fee.",
+  "form.recipientPayoutFailed":
+    "The recipient could not be paid — check that the address has a valid trustline and is authorized.",
+  "form.assetNotAllowed": "This token is not on the governance policy allowlist.",
+  "form.batchEmpty": "Add at least one CSV row.",
+  "form.batchTooLarge": "The batch has too many rows (maximum {max, number}).",
+  "form.batchRowIssue": "Row {row, number}: {detail}",
 
   "notFound.notFound": "Not found",
   "notFound.badRequest": "Request problem",
