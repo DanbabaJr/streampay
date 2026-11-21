@@ -1,0 +1,95 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-20T00:00:00Z",
+    "component": {
+      "type": "application",
+      "name": "streampay",
+      "version": "0.1.0"
+    },
+    "properties": [
+      {
+        "name": "streampay:vex:convention",
+        "value": "security/vex/README.md"
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "id": "RUSTSEC-2024-0436",
+      "source": {
+        "name": "cargo-deny",
+        "url": "https://rustsec.org/advisories/RUSTSEC-2024-0436"
+      },
+      "description": "paste is unmaintained: archived by its author, no fixed release exists.",
+      "recommendation": "Drop the ignore when soroban-sdk stops pulling paste.",
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "detail": "Build-time-only macro crate, pulled transitively by soroban-env-common. It generates trait impls at compile time and contributes no runtime code to the published contract Wasm (cargo tree --target wasm32v1-none -p streampay-contract -e normal contains no paste). Archived upstream, so there is no fixed version to move to. This mirrors the RUSTSEC-2024-0436 entry in deny.toml; the two must stay in step."
+      },
+      "affects": [
+        {
+          "ref": "pkg:cargo/paste@1.0.15"
+        }
+      ],
+      "properties": [
+        {
+          "name": "streampay:vex:owner",
+          "value": "security"
+        },
+        {
+          "name": "streampay:vex:reviewed_at",
+          "value": "2026-11-20"
+        },
+        {
+          "name": "streampay:vex:expires",
+          "value": "2027-04-30"
+        },
+        {
+          "name": "streampay:vex:deny_ignore",
+          "value": "RUSTSEC-2024-0436"
+        }
+      ]
+    },
+    {
+      "id": "RUSTSEC-2026-0387",
+      "source": {
+        "name": "cargo-deny",
+        "url": "https://rustsec.org/advisories/RUSTSEC-2026-0387"
+      },
+      "description": "crypto-bigint: timing variability in operations intended to be constant-time.",
+      "recommendation": "Drop the ignore when soroban-sdk moves off the RustCrypto 0.13 stack.",
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "detail": "Transitive through soroban-env-host 29.0.1 -> elliptic-curve 0.13.8, which requires crypto-bigint 0.5.x, so the upstream fix (>=0.7.6) cannot be selected while soroban-sdk 29.0.1 is current. Host-side only: the wasm32v1-none dependency graph for streampay-contract contains no crypto-bigint, so it is not linked into the published contract Wasm. Where it does run (env host under tests and simulation) the arithmetic is public-key signature verification, not a secret scalar. This mirrors the RUSTSEC-2026-0387 entry in deny.toml."
+      },
+      "affects": [
+        {
+          "ref": "pkg:cargo/crypto-bigint@0.5.5"
+        }
+      ],
+      "properties": [
+        {
+          "name": "streampay:vex:owner",
+          "value": "security"
+        },
+        {
+          "name": "streampay:vex:reviewed_at",
+          "value": "2026-11-20"
+        },
+        {
+          "name": "streampay:vex:expires",
+          "value": "2027-04-30"
+        },
+        {
+          "name": "streampay:vex:deny_ignore",
+          "value": "RUSTSEC-2026-0387"
+        }
+      ]
+    }
+  ]
+}
