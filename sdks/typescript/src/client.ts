@@ -18,6 +18,7 @@ import { MAX_PAGE_SIZE, type Stream } from "./generated.js";
 import { StreamPayMethods } from "./methods.js";
 import { StreamPayError } from "./errors.js";
 import { collectPages, type IndexRole } from "./pagination.js";
+import { sdkTelemetry } from "./telemetry.js";
 import { subscribeEvents as createEventSubscription, type SubscribeEventsOptions, type StreamFeedEvent } from "./subscription.js";
 
 /** Wallet adapter: Freighter, a server keypair, or a hardware signer. */
@@ -142,6 +143,18 @@ export class StreamPayClient extends StreamPayMethods {
   }
 
   protected async call<T>(
+    method: string,
+    args: xdr.ScVal[],
+    mutating: boolean,
+    decode: (value: xdr.ScVal) => T
+  ): Promise<T> {
+    // Opt-in telemetry (#595) wraps the whole pipeline so it sees one method
+    // name, one outcome and one latency bucket. It is disabled by default and
+    // never changes the result or the error.
+    return sdkTelemetry.track(method, () => this.invoke(method, args, mutating, decode));
+  }
+
+  private async invoke<T>(
     method: string,
     args: xdr.ScVal[],
     mutating: boolean,
