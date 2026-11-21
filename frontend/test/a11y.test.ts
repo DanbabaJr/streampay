@@ -17,6 +17,10 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { JSDOM } from "jsdom";
 import axe from "axe-core";
+import {
+  createModalFocusController,
+  getFocusableElements,
+} from "../lib/modal-focus.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -737,6 +741,173 @@ describe("Protocol Benchmark Dashboard", () => {
 
     const violations = await runAxe(html);
     assertNoViolations(violations, "Protocol Benchmark Dashboard");
+  });
+});
+
+// ===========================================================================
+// 11. Modal keyboard contract (issue #508)
+//
+// The dialogs share one focus controller (lib/modal-focus.ts): initial focus
+// lands on the labelled title, Tab/Shift+Tab cycle inside, Escape dismisses,
+// and closing returns focus to the opener. These tests exercise that
+// controller against a real JSDOM document, so a regression fails here rather
+// than in a browser manual pass.
+// ===========================================================================
+describe("WalletModal keyboard contract", () => {
+  const DIALOG_MARKUP = `
+    <button id="trigger">Connect wallet</button>
+    <div id="dialog" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
+      <h2 id="wallet-modal-title" tabindex="-1" data-autofocus>Connect a wallet</h2>
+      <button id="close" aria-label="Close wallet picker">×</button>
+      <button id="freighter">Freighter</button>
+      <a id="albedo" href="#albedo">Albedo</a>
+    </div>`;
+
+  function build() {
+    const dom = new JSDOM(`<!DOCTYPE html><html><body>${DIALOG_MARKUP}</body></html>`, {
+      pretendToBeVisual: true,
+    });
+    return { win: dom.window, doc: dom.window.document };
+  }
+
+  function press(
+    win: JSDOM["window"],
+    target: EventTarget,
+    key: string,
+    shiftKey = false
+  ): KeyboardEvent {
+    const event = new win.KeyboardEvent("keydown", {
+      key,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  test("moves initial focus to the labelled title", () => {
+    const { doc } = build();
+    const trigger = doc.getElementById("trigger") as HTMLElement;
+    trigger.focus();
+
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {},
+      ownerDocument: doc,
+    });
+    controller.activate();
+
+    assert.equal(doc.activeElement?.id, "wallet-modal-title");
+  });
+
+  test("lists only tab-reachable controls inside the dialog", () => {
+    const { doc } = build();
+    const ids = getFocusableElements(
+      doc.getElementById("dialog") as HTMLElement
+    ).map((element) => element.id);
+    assert.deepEqual(ids, ["close", "freighter", "albedo"]);
+  });
+
+  test("wraps Tab from the last control to the first", () => {
+    const { win, doc } = build();
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {},
+      ownerDocument: doc,
+    });
+    controller.activate();
+
+    const last = doc.getElementById("albedo") as HTMLElement;
+    last.focus();
+    const event = press(win, last, "Tab");
+
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(doc.activeElement?.id, "close");
+  });
+
+  test("wraps Shift+Tab from the first control to the last", () => {
+    const { win, doc } = build();
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {},
+      ownerDocument: doc,
+    });
+    controller.activate();
+
+    const first = doc.getElementById("close") as HTMLElement;
+    first.focus();
+    const event = press(win, first, "Tab", true);
+
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(doc.activeElement?.id, "albedo");
+  });
+
+  test("leaves Tab in the middle of the dialog to the browser", () => {
+    const { win, doc } = build();
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {},
+      ownerDocument: doc,
+    });
+    controller.activate();
+
+    const middle = doc.getElementById("freighter") as HTMLElement;
+    middle.focus();
+    const event = press(win, middle, "Tab");
+
+    assert.equal(event.defaultPrevented, false);
+  });
+
+  test("dismisses on Escape", () => {
+    const { win, doc } = build();
+    let closed = 0;
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {
+        closed += 1;
+      },
+      ownerDocument: doc,
+    });
+    controller.activate();
+
+    const event = press(win, doc, "Escape");
+
+    assert.equal(closed, 1);
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  test("restores focus to the opener on close", () => {
+    const { doc } = build();
+    const trigger = doc.getElementById("trigger") as HTMLElement;
+    trigger.focus();
+
+    const controller = createModalFocusController({
+      container: doc.getElementById("dialog") as HTMLElement,
+      onClose: () => {},
+      ownerDocument: doc,
+    });
+    controller.activate();
+    assert.notEqual(doc.activeElement?.id, "trigger");
+
+    controller.deactivate();
+    assert.equal(doc.activeElement?.id, "trigger");
+  });
+
+  test("dialog semantics pass WCAG 2.1 AA", async () => {
+    const html = withLayout(`
+<main class="wrap"><h1>Wallet</h1></main>
+<div role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
+  <h2 id="wallet-modal-title">Connect a wallet</h2>
+  <button type="button" aria-label="Close wallet picker">×</button>
+  <ul>
+    <li><button type="button">Freighter</button></li>
+    <li><a href="https://albedo.link/install">Albedo — Install ↗</a></li>
+  </ul>
+</div>`);
+
+    const violations = await runAxe(html);
+    assertNoViolations(violations, "WalletModal dialog");
   });
 });
 

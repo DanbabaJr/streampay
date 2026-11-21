@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
+import { useModalFocus } from "@/lib/use-modal-focus";
 import { WALLET_DESCRIPTORS, type WalletId } from "@/lib/wallet-adapter";
 import { FreighterAdapter } from "@/lib/adapters/freighter";
 import { AlbedoAdapter } from "@/lib/adapters/albedo";
@@ -67,6 +68,10 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
     return () => dialog.removeEventListener("close", handler);
   }, [onClose]);
 
+  // Initial focus, Tab trap, Escape dismiss and focus restoration. Declared
+  // after the showModal effect so the dialog is already open when it runs.
+  useModalFocus(dialogRef, open, onClose);
+
   async function handleChoose(id: WalletId) {
     setConnecting(id);
     try {
@@ -83,12 +88,21 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
     <dialog
       ref={dialogRef}
       id="wallet-modal"
+      role="dialog"
+      aria-modal="true"
       aria-labelledby="wallet-modal-title"
       className="wallet-modal"
     >
       <div className="wallet-modal__inner">
         <header className="wallet-modal__header">
-          <h2 id="wallet-modal-title" className="wallet-modal__title">
+          {/* Programmatic focus target: context first, then the choices. */}
+          <h2
+            id="wallet-modal-title"
+            className="wallet-modal__title"
+            tabIndex={-1}
+            data-autofocus
+            style={{ outline: "none" }}
+          >
             Connect a wallet
           </h2>
           <button
