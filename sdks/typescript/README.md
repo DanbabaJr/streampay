@@ -164,38 +164,6 @@ for (const event of events) {
 
 Malformed XDR throws; events from other contracts are not returned.
 
-### Resumable indexer subscription
-
-Configure the indexer's SSE endpoint on the client to subscribe to one stream:
-
-```ts
-const client = new StreamPayClient({
-  contractId: process.env.STREAM_CONTRACT_ID!,
-  eventFeedUrl: "https://indexer.example/events/stream",
-});
-const controller = new AbortController();
-
-for await (const event of client.subscribeEvents(1n, {
-  fromCursor: "evt-123",
-  signal: controller.signal,
-  onError: (error) => console.warn("Event feed reconnecting:", error),
-})) {
-  // `event.type` is the generated event discriminator.
-  // The feed may replay events, so deduplicate by `event.id` before applying
-  // non-idempotent state changes.
-  console.log(event.id, event.type, event.data);
-}
-
-// Stop the iterator from another task:
-controller.abort();
-```
-
-The indexer feed is at-least-once: a reconnect may replay the last event.
-`id`/`cursor` is the stable deduplication key. The subscription reconnects
-from its latest received ID with exponential backoff; unknown event names are
-skipped, matching the generated decoder's `null` result for unregistered
-events.
-
 ## Index pagination
 
 ```ts

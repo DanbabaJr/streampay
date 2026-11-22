@@ -30,7 +30,6 @@ import {
   type SubmitRetryPolicy,
 } from "./retry.js";
 import { collectPages, type IndexRole } from "./pagination.js";
-import { subscribeEvents as createEventSubscription, type SubscribeEventsOptions, type StreamFeedEvent } from "./subscription.js";
 
 /** Wallet adapter: Freighter, a server keypair, or a hardware signer. */
 export interface Signer {
@@ -62,8 +61,6 @@ export interface StreamPayClientOptions {
   server?: rpc.Server;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
-  /** Base URL for the indexer SSE event feed. */
-  eventFeedUrl?: string;
   /**
    * Opt-in retry policy for mutating calls. Off by default: without it every
    * failure surfaces exactly as before. `true` uses the defaults
@@ -88,7 +85,6 @@ export class StreamPayClient extends StreamPayMethods {
   private readonly signer?: Signer;
   private readonly pollIntervalMs: number;
   private readonly pollTimeoutMs: number;
-  private readonly eventFeedUrl: string | undefined;
   private readonly retry: ResolvedRetryPolicy;
   private readonly clock: Clock;
 
@@ -101,21 +97,8 @@ export class StreamPayClient extends StreamPayMethods {
     if (options.signer !== undefined) this.signer = options.signer;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.pollTimeoutMs = options.pollTimeoutMs ?? 30_000;
-    this.eventFeedUrl = options.eventFeedUrl;
     this.retry = resolveRetryPolicy(options.retry);
     this.clock = options.clock ?? systemClock;
-  }
-
-  /** Streams typed feed events for a stream, resuming after `fromCursor`. */
-  subscribeEvents(
-    streamId: bigint | number | string,
-    options: Omit<SubscribeEventsOptions, "eventFeedUrl"> & { eventFeedUrl?: string } = {}
-  ): AsyncGenerator<StreamFeedEvent> {
-    const eventFeedUrl = options.eventFeedUrl ?? this.eventFeedUrl;
-    if (!eventFeedUrl) {
-      throw new Error("eventFeedUrl is required to subscribe to stream events");
-    }
-    return createEventSubscription(streamId, { ...options, eventFeedUrl });
   }
 
   // ------------------------------------------------------------- pagination

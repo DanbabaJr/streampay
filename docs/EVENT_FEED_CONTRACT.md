@@ -135,10 +135,6 @@ data: <json_payload>
 - Incoming events are checked against `seenEventIdsRef.has(event.id)`.
 - If an event ID has already been processed, it is dropped as a duplicate.
 - **Guarantee:** At-least-once upstream transport + client-side event ID deduplication guarantees **strictly exactly-once state mutation** in the UI.
-- SDK consumers receive the same at-least-once contract. The TypeScript
-  `subscribeEvents` iterator resumes with `Last-Event-ID`; consumers must
-  deduplicate state changes by the feed event `id` (also exposed as `cursor`).
-  The SDK does not claim exactly-once delivery or exactly-once side effects.
 
 ---
 
