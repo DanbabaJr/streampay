@@ -93,6 +93,8 @@ mod differential_test;
 mod error_surface_test;
 
 mod dispute;
+#[cfg(test)]
+mod dispute_lifecycle_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
