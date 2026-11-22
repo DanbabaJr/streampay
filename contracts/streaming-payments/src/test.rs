@@ -5349,11 +5349,12 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
     );
 
     // Verify agent_status read
-    let (cfg, cap) = f
+    let status = f
         .client
         .mock_all_auths()
         .agent_status(&id, &agent)
         .expect("agent should be authorized");
+    let (cfg, cap) = (status.config, status.cap);
     assert_eq!(cfg.max_per_period, max_per_period);
     assert_eq!(cfg.max_per_stream, max_per_stream);
     assert_eq!(cfg.period_duration, period_duration);
@@ -5378,7 +5379,12 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
     assert_eq!(TokenClient::new(&f.env, &f.token).balance(&agent), 0);
 
     // Cap state updated
-    let (_, cap1) = f.client.mock_all_auths().agent_status(&id, &agent).unwrap();
+    let cap1 = f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .unwrap()
+        .cap;
     assert_eq!(cap1.period_withdrawn, withdraw_1);
     assert_eq!(cap1.total_withdrawn, withdraw_1);
 

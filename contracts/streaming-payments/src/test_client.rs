@@ -97,11 +97,7 @@ pub trait StreamingPaymentsApi {
         agent: Address,
         amount: i128,
     ) -> Result<(), StreamError>;
-    fn agent_status(
-        env: Env,
-        stream_id: u64,
-        agent: Address,
-    ) -> Option<(crate::AgentConfig, crate::AgentCapState)>;
+    fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<crate::AgentStatus>;
     fn withdraw_many(
         env: Env,
         recipient: Address,

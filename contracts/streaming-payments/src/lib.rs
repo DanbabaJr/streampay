@@ -172,15 +172,15 @@ pub use sponsor::{PeriodSpend, SponsorConfig};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{
-    streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AssetTransfer,
-    BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds, PendingOwnership,
-    PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory,
-    SenderTransferRecord, Stream, StreamStatus, StreamVersionReport, VersionedStream,
-    WithdrawAllResult, WithdrawEntry, WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION,
-    INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE,
-    MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS,
-    OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1,
-    STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
+    streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AgentStatus,
+    AssetTransfer, BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds,
+    PendingOwnership, PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment,
+    SenderHistory, SenderTransferRecord, Stream, StreamStatus, StreamVersionReport,
+    VersionedStream, WithdrawAllResult, WithdrawEntry, WithdrawOutcome,
+    CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS,
+    MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH,
+    MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
+    STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
 };
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
 
@@ -1771,11 +1771,7 @@ impl StreamingPayments {
     }
 
     /// Read-only view for checking an agent's delegation configuration and cap state.
-    pub fn agent_status(
-        env: Env,
-        stream_id: u64,
-        agent: Address,
-    ) -> Option<(AgentConfig, AgentCapState)> {
+    pub fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<AgentStatus> {
         let s = stream::get_stream(&env, stream_id).ok()?;
         let config = stream::get_agent_auth(&env, stream_id, &agent)?;
         let now = env.ledger().timestamp();
@@ -1798,7 +1794,10 @@ impl StreamingPayments {
                 .saturating_add(period_idx.saturating_mul(config.period_duration));
             cap_state.period_withdrawn = 0;
         }
-        Some((config, cap_state))
+        Some(AgentStatus {
+            config,
+            cap: cap_state,
+        })
     }
 
     #[cfg_attr(

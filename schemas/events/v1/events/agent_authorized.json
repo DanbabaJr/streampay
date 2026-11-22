@@ -1,0 +1,65 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/agent_authorized.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a stream recipient authorizes a session key agent with caps.",
+  "properties": {
+    "expires_at": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "max_per_period": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "max_per_stream": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "period_duration": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "max_per_period",
+    "max_per_stream",
+    "period_duration",
+    "expires_at"
+  ],
+  "title": "AgentAuthorized",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "agent_authorized",
+    "fingerprint": "sha256:4dfb405cd582dffeed64b66ee9297ba4aa37f608760db13c5e1ecb8ca4a65f8e",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      },
+      {
+        "name": "agent",
+        "type": "Address"
+      }
+    ]
+  }
+}

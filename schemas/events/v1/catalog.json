@@ -20,6 +20,18 @@
       "struct": "AdvanceRepaid"
     },
     {
+      "event_key": "agent_authorized",
+      "fingerprint": "sha256:4dfb405cd582dffeed64b66ee9297ba4aa37f608760db13c5e1ecb8ca4a65f8e",
+      "schema": "events/agent_authorized.json",
+      "struct": "AgentAuthorized"
+    },
+    {
+      "event_key": "agent_revoked",
+      "fingerprint": "sha256:a96acdc2e00253728af03989e1d61ce1f94a32b973a4a4bc9bd3cdaf824c78bf",
+      "schema": "events/agent_revoked.json",
+      "struct": "AgentRevoked"
+    },
+    {
       "event_key": "batch_withdraw_summary",
       "fingerprint": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
       "schema": "events/batch_withdraw_summary.json",
