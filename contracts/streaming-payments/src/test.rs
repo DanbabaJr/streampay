@@ -1916,6 +1916,86 @@ fn streamed_at_handles_degenerate_inputs() {
     );
 }
 
+/// Boundary matrix for the pure `streamed_at` arithmetic (ADR 0004 floor
+/// per-second accrual, ADR 0005 pure `streamed_at`). Each row pins one
+/// extreme: `Ok(v)` = exact floored/capped value, `Err(MathOverflow)` =
+/// `deposit * elapsed` exceeds `u128` (revert, never wrap or saturate).
+#[test]
+fn streamed_at_boundary_matrix() {
+    const M: u64 = u64::MAX;
+    const OVF: Result<i128, StreamError> = Err(StreamError::MathOverflow);
+    let rows: [(&str, i128, u64, u64, Result<i128, StreamError>); 14] = [
+        // Zero rate: nothing ever accrues.
+        ("zero rate", 0, 10, 5, Ok(0)),
+        // Non-positive deposits are treated as a zero rate, not an error.
+        ("negative deposit", i128::MIN, 10, 5, Ok(0)),
+        // Max rate, duration 1: product fits u128, exact full deposit.
+        ("max rate", i128::MAX, 1, 1, Ok(i128::MAX)),
+        // Max rate, elapsed 2: product 2^128-2 still fits; cap at deposit.
+        ("max rate capped past window", i128::MAX, 1, 2, Ok(i128::MAX)),
+        // Largest fitting product is floored, not rounded up (ADR 0004).
+        ("max rate floored", i128::MAX, 4, 2, Ok(i128::MAX / 2)),
+        // Product exceeds u128: reverts with MathOverflow.
+        ("i128 product overflow", i128::MAX, 3, 3, OVF),
+        ("i128 product overflow, huge elapsed", i128::MAX, 1, 3, OVF),
+        // Zero duration: no window, no accrual (and no divide-by-zero).
+        ("zero duration", 100, 0, 5, Ok(0)),
+        // Max duration, full elapsed: exactly the deposit.
+        ("max duration full", 100, M, M, Ok(100)),
+        // Max duration, one second short: floors to deposit - 1.
+        ("max duration one short", 100, M, M - 1, Ok(99)),
+        // Zero elapsed: nothing accrued even with extreme deposit.
+        ("zero elapsed", i128::MAX, M, 0, Ok(0)),
+        // Elapsed far beyond duration: capped at deposit when product fits.
+        ("far past end", 1, 1, M, Ok(1)),
+        // Same, but the product overflows u128: reverts.
+        ("far past end overflow", i128::MAX, 1, M, OVF),
+        // Plain mid-window floor: 7 * 1 / 3 = 2.
+        ("floor mid window", 7, 3, 1, Ok(2)),
+    ];
+    for (name, deposit, duration, elapsed, expected) in rows {
+        assert_eq!(
+            streamed_at(deposit, duration, elapsed),
+            expected,
+            "row: {name}"
+        );
+    }
+}
+
+/// Boundary matrix for the timestamp window feeding `streamed_at`:
+/// `(name, now, start, end, deposit, expected accrued)`.
+#[test]
+fn streamed_amount_window_boundary_matrix() {
+    use crate::stream::elapsed_seconds_at;
+    const M: u64 = u64::MAX;
+    let rows: [(&str, u64, u64, u64, i128, i128); 8] = [
+        // now < start: nothing accrued.
+        ("now before start", 5, 10, 20, 100, 0),
+        // now == start: still zero elapsed.
+        ("now at start", 10, 10, 20, 100, 0),
+        // Mid-window: linear.
+        ("now mid window", 15, 10, 20, 100, 50),
+        // now == end: full deposit.
+        ("now at end", 20, 10, 20, 100, 100),
+        // now far past end: clamped, full deposit (no overflow).
+        ("now u64::MAX past end", M, 10, 20, 100, 100),
+        // Start in the far future: nothing accrued.
+        ("start far in future", 100, M - 10, M, 100, 0),
+        // Timestamps at u64::MAX: window of 10s ending at the max timestamp.
+        ("now == end == u64::MAX", M, M - 10, M, 100, 100),
+        // Halfway through a window that ends at u64::MAX.
+        ("mid window at u64::MAX", M - 5, M - 10, M, 100, 50),
+    ];
+    for (name, now, start, end, deposit, expected) in rows {
+        let elapsed = elapsed_seconds_at(now, start, end);
+        assert_eq!(
+            streamed_at(deposit, end - start, elapsed),
+            Ok(expected),
+            "row: {name}"
+        );
+    }
+}
+
 // ------------------------------------------------------------ events --------
 
 #[test]
