@@ -86,13 +86,13 @@ mod client_parity_test;
 #[cfg(test)]
 mod clock_skew_test;
 #[cfg(test)]
-mod oracle_staleness_test;
-#[cfg(test)]
 mod differential_harness;
 #[cfg(test)]
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod oracle_staleness_test;
 
 mod dispute;
 mod errors;
