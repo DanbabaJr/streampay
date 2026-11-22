@@ -22,6 +22,15 @@
 # upgrade; then it proves the new bytecode still writes (execute_scheduled,
 # withdraw_max).
 #
+# Offline verification & self-test modes:
+#   scripts/storage_golden_smoke.sh --verify-only   # offline SHA-256 verification
+#   scripts/storage_golden_smoke.sh --self-test     # test verification + byte-flip detection
+#
+# The baseline release wasm is pinned with a SHA-256 digest in
+# digests/streampay-v0.3.0-baseline.sha256. Re-pin procedure on release moves:
+#   (cd "$REPO/test_fixtures/storage/baseline" && sha256sum "streampay-<version>-baseline.wasm") \
+#     > "$REPO/digests/streampay-<version>-baseline.sha256"
+#
 # State lives in .storage_golden_smoke/ (gitignored). `write` refuses to run on
 # top of an in-flight smoke — delete the directory to start over.
 #
@@ -29,6 +38,7 @@
 #   DEPLOYER_KEY   Stellar identity alias used as governor/deployer (default: deployer)
 #   NETWORK        Stellar network (default: testnet)
 #   BASELINE_WASM  baseline artifact to boot (default: the committed fixture)
+#   DIGEST_FILE    digest pin file (default: digests/streampay-v0.3.0-baseline.sha256)
 #   SKIP_BUILD=1   reuse target/wasm32v1-none/release/streampay_contract.wasm
 #
 # Requires stellar-cli >= 25.2 (tested on 28.1.0), cargo, node, curl, network
@@ -42,20 +52,184 @@ STATE_DIR="${STATE_DIR:-$REPO_ROOT/.storage_golden_smoke}"
 NETWORK="${NETWORK:-testnet}"
 DEPLOYER_KEY="${DEPLOYER_KEY:-deployer}"
 BASELINE_WASM="${BASELINE_WASM:-test_fixtures/storage/baseline/streampay-v0.3.0-baseline.wasm}"
+DIGEST_FILE="${DIGEST_FILE:-digests/streampay-v0.3.0-baseline.sha256}"
 UPGRADE_DELAY="${UPGRADE_DELAY:-86400}"    # the contract-enforced minimum
 HORIZON="https://horizon-$NETWORK.stellar.org"
 FRIENDBOT="https://friendbot.stellar.org"
+
+# Verify the baseline wasm matches its committed SHA-256 digest.
+# Arguments:
+#   $1 - path to baseline wasm (default: $REPO_ROOT/$BASELINE_WASM)
+#   $2 - path to digest file (default: $DIGEST_FILE or $REPO_ROOT/digests/streampay-v0.3.0-baseline.sha256)
+verify_baseline_digest() {
+  local fixture_in="${1:-$BASELINE_WASM}"
+  local digest_in="${2:-${DIGEST_FILE:-digests/streampay-v0.3.0-baseline.sha256}}"
+
+  local fixture="$fixture_in"
+  if [ ! -f "$fixture" ] && [ -f "$REPO_ROOT/$fixture_in" ]; then
+    fixture="$REPO_ROOT/$fixture_in"
+  fi
+
+  local digest_file="$digest_in"
+  if [ ! -f "$digest_file" ] && [ -f "$REPO_ROOT/$digest_in" ]; then
+    digest_file="$REPO_ROOT/$digest_in"
+  fi
+
+  if [ ! -f "$fixture" ]; then
+    echo "ERROR: baseline wasm missing: $fixture_in (resolved: $fixture)" >&2
+    return 1
+  fi
+
+  if [ ! -f "$digest_file" ]; then
+    echo "ERROR: baseline digest file missing: $digest_in (resolved: $digest_file)" >&2
+    return 1
+  fi
+
+  local expected_hash actual_hash
+  expected_hash="$(awk '{print $1}' "$digest_file" | tr -d '\r\n')"
+  if [ -z "$expected_hash" ]; then
+    echo "ERROR: baseline digest file $digest_file is empty or missing hash" >&2
+    return 1
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_hash="$(sha256sum "$fixture" | awk '{print $1}' | tr -d '\r\n')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual_hash="$(shasum -a 256 "$fixture" | awk '{print $1}' | tr -d '\r\n')"
+  else
+    echo "ERROR: neither sha256sum nor shasum found on PATH" >&2
+    return 1
+  fi
+
+  local expected_lower actual_lower
+  expected_lower="$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')"
+  actual_lower="$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')"
+
+  if [ "$expected_lower" != "$actual_lower" ]; then
+    cat >&2 <<EOF
+ERROR: baseline wasm SHA-256 digest mismatch!
+  Fixture:  $fixture
+  Digest:   $digest_file
+  Expected: $expected_lower
+  Actual:   $actual_lower
+EOF
+    return 1
+  fi
+
+  info "baseline wasm verified ($actual_lower)"
+  return 0
+}
+
+run_self_test() {
+  say "Running storage_golden_smoke baseline digest self-test"
+  # Deliberately not local: EXIT trap must see it if triggered on exit
+  _self_test_tmpdir="$(mktemp -d)"
+  cleanup_self_test() {
+    [ -d "${_self_test_tmpdir:-}" ] && rm -rf "$_self_test_tmpdir"
+  }
+  trap cleanup_self_test EXIT INT TERM
+
+  local clean_fixture="$BASELINE_WASM"
+  if [ ! -f "$clean_fixture" ] && [ -f "$REPO_ROOT/$BASELINE_WASM" ]; then
+    clean_fixture="$REPO_ROOT/$BASELINE_WASM"
+  fi
+
+  local clean_digest="$DIGEST_FILE"
+  if [ ! -f "$clean_digest" ] && [ -f "$REPO_ROOT/$DIGEST_FILE" ]; then
+    clean_digest="$REPO_ROOT/$DIGEST_FILE"
+  fi
+
+  [ -f "$clean_fixture" ] \
+    || die "self-test: baseline fixture missing at $clean_fixture"
+  [ -f "$clean_digest" ] \
+    || die "self-test: baseline digest file missing at $clean_digest"
+
+  local failed=0
+
+  # Case 1: Committed clean fixture must pass verification
+  if verify_baseline_digest "$clean_fixture" "$clean_digest" >/dev/null 2>&1; then
+    info "ok 1 - clean baseline wasm passes verification"
+  else
+    warn "FAIL 1 - clean baseline wasm failed verification"
+    failed=1
+  fi
+
+  # Case 2: Corrupted copy with one flipped byte must fail and print expected vs actual
+  local corrupt_wasm="$_self_test_tmpdir/corrupt-baseline.wasm"
+  cp "$clean_fixture" "$corrupt_wasm"
+
+  # Flip one byte in the temporary copy (do not touch committed fixture)
+  if command -v node >/dev/null 2>&1; then
+    node -e "const fs=require('fs'); const b=fs.readFileSync(process.argv[1]); b[0]^=1; fs.writeFileSync(process.argv[1], b);" "$corrupt_wasm"
+  elif command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+    python3 -c "import sys; p=sys.argv[1]; f=open(p,'r+b'); b=f.read(1); f.seek(0); f.write(bytes([b[0]^0x01])); f.close()" "$corrupt_wasm"
+  else
+    printf '\001' | dd of="$corrupt_wasm" bs=1 count=1 conv=notrunc 2>/dev/null || echo "corrupt" >> "$corrupt_wasm"
+  fi
+
+  local corrupt_err="$_self_test_tmpdir/corrupt_err.log"
+  if verify_baseline_digest "$corrupt_wasm" "$clean_digest" >/dev/null 2>"$corrupt_err"; then
+    warn "FAIL 2 - corrupted baseline wasm unexpectedly passed verification"
+    failed=1
+  else
+    if grep -q "Expected:" "$corrupt_err" && grep -q "Actual:" "$corrupt_err"; then
+      info "ok 2 - single-byte flip in baseline wasm fails and reports expected vs actual"
+    else
+      warn "FAIL 2 - corrupted baseline wasm failed but did not log expected vs actual digests"
+      cat "$corrupt_err" >&2
+      failed=1
+    fi
+  fi
+
+  # Case 3: Missing fixture must fail cleanly
+  if verify_baseline_digest "$_self_test_tmpdir/nonexistent.wasm" "$clean_digest" >/dev/null 2>&1; then
+    warn "FAIL 3 - missing fixture unexpectedly passed"
+    failed=1
+  else
+    info "ok 3 - missing fixture rejected"
+  fi
+
+  # Case 4: Missing digest file must fail cleanly
+  if verify_baseline_digest "$clean_fixture" "$_self_test_tmpdir/nonexistent.sha256" >/dev/null 2>&1; then
+    warn "FAIL 4 - missing digest unexpectedly passed"
+    failed=1
+  else
+    info "ok 4 - missing digest rejected"
+  fi
+
+  trap - EXIT INT TERM
+  cleanup_self_test
+
+  if [ "$failed" -ne 0 ]; then
+    die "self-test failed ($failed failure(s))"
+  fi
+
+  say "Self-test passed: baseline verification behaves as specified (4/4 cases passed)"
+}
 
 MODE=""
 DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
     write | verify) MODE="$arg" ;;
+    verify-digest | --verify-only) MODE="verify-digest" ;;
+    --self-test) MODE="self-test" ;;
     --dry-run | -n) DRY_RUN=1 ;;
-    *) die "unknown argument: $arg (expected write | verify | --dry-run)" ;;
+    *) die "unknown argument: $arg (expected write | verify | --dry-run | --verify-only | --self-test)" ;;
   esac
 done
-[ -n "$MODE" ] || die "usage: $0 write | verify | --dry-run"
+[ -n "$MODE" ] || die "usage: $0 write | verify | --dry-run | --verify-only | --self-test"
+
+if [ "$MODE" = "self-test" ]; then
+  run_self_test
+  exit 0
+fi
+
+if [ "$MODE" = "verify-digest" ]; then
+  say "Verifying baseline wasm digest"
+  verify_baseline_digest || die "baseline wasm verification failed"
+  exit 0
+fi
 
 clean_str() { tr -d '\r'; }
 
@@ -149,9 +323,8 @@ ensure_identity_and_funding() {
 # ------------------------------------------------------------------- preflight
 
 say "Preflight"
+verify_baseline_digest || die "baseline wasm verification failed"
 require node
-[ -f "$REPO_ROOT/$BASELINE_WASM" ] \
-  || die "baseline wasm missing at $BASELINE_WASM — it is a committed fixture; check your checkout"
 info "baseline: $BASELINE_WASM ($(wc -c < "$REPO_ROOT/$BASELINE_WASM") bytes)"
 info "network: $NETWORK   governor: $DEPLOYER_KEY   state: ${STATE_DIR#$REPO_ROOT/}"
 
