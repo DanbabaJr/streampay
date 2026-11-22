@@ -515,8 +515,8 @@ export default function NotificationsSettingsPage() {
             headers (e.g. <code>evt_123:sub_456</code>) so downstream sinks can deduplicate retries safely.
           </li>
           <li>
-            <strong>HMAC Request Authentication:</strong> Webhooks include an <code>X-StreamPay-Signature</code>
-            header computed with HMAC-SHA256 over timestamp and JSON body.
+            <strong>HMAC Request Authentication:</strong> Webhooks include a <code>Streampay-Signature</code>
+            header computed with HMAC-SHA256 over the timestamp and exact raw request body.
           </li>
           <li>
             <strong>Exponential Backoff:</strong> Failures are retried using <code>delay(n) = min(32s, 1s * 2^n) +/- 20% jitter</code>
