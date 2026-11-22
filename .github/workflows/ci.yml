@@ -155,6 +155,67 @@ jobs:
         working-directory: contracts/streaming-payments
         run: stellar contract build
 
+      # The golden corpus is a pinned RELEASE-LINE artifact (v0.3.0 shape), and
+      # the `#[ignore]`d generator writes the layout of whatever build it runs
+      # on. Regenerating it here and diffing could therefore never pass: the
+      # first layout change since the cut makes the dev build emit a different
+      # (still-valid) shape, and the step would fail on the corpus being
+      # current rather than on anything wrong. It also rewrites the pinned
+      # blobs inside the CI workspace, which is the one artifact whose whole
+      # value is that it does not move.
+      #
+      # The unreviewed-layout-change signal this step claimed to own is already
+      # enforced, with better failure messages, by the storage_golden tests in
+      # "Unit + property tests" below: `decode` fails if a release-line record
+      # stops decoding (that is how the `use_oracle` widening was caught),
+      # `mid_enum` catches renames and semantic shifts a typed decode cannot
+      # see, and `replay` proves every untouched record survives the upgrade
+      # byte-for-byte. Accepting a real layout change is the procedure in
+      # docs/STORAGE_LAYOUT.md, which re-captures the corpus from a release-line
+      # checkout — never from the build under review.
+      #
+      # Verifying corpus completeness and baseline wasm SHA-256 digest before
+      # "Unit + property tests" guarantees the fixture the replay boots has not
+      # drifted or suffered supply-chain tampering.
+      - name: Storage-layout corpus is intact
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, sys
+          root = pathlib.Path("test_fixtures/storage")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          entries = list(manifest["records"]) + list(manifest["events"])
+          listed = {e["file"] for e in entries}
+          on_disk = {p.relative_to(root).as_posix()
+                     for p in list(root.glob("records/*.bin")) + list(root.glob("events/*.bin"))}
+          problems = [f"manifest names {f} but no such blob is committed" for f in sorted(listed - on_disk)]
+          problems += [f"{f} is committed but the manifest does not cover it" for f in sorted(on_disk - listed)]
+          problems += [f"{f} is empty" for f in sorted(on_disk) if (root / f).stat().st_size == 0]
+          baseline = root / "baseline" / "streampay-v0.3.0-baseline.wasm"
+          if not (baseline.is_file() and baseline.stat().st_size > 0):
+              problems.append("the baseline wasm the replay boots is missing or empty")
+          else:
+              digest_file = pathlib.Path("digests/streampay-v0.3.0-baseline.sha256")
+              if not digest_file.is_file():
+                  problems.append(f"baseline digest file missing: {digest_file}")
+              else:
+                  expected_hash = digest_file.read_text(encoding="utf-8").strip().split()[0].lower()
+                  actual_hash = hashlib.sha256(baseline.read_bytes()).hexdigest().lower()
+                  if expected_hash != actual_hash:
+                      problems.append(
+                          f"baseline wasm SHA-256 digest mismatch:\n"
+                          f"  Expected: {expected_hash}\n"
+                          f"  Actual:   {actual_hash}"
+                      )
+          for p in problems:
+              print(f"::error::{p}")
+          if problems:
+              sys.exit(1)
+          print(f"corpus intact: {len(manifest['records'])} records, "
+                f"{len(manifest['events'])} events, baseline wasm verified")
+          PY
+          bash scripts/storage_golden_smoke.sh --verify-only
+          bash scripts/storage_golden_smoke.sh --self-test
+
       - name: Unit + property tests
         run: cargo test --workspace --locked
 
@@ -172,48 +233,6 @@ jobs:
       # green local run means a green gate here.
       - name: Error-surface table is up to date
         run: bash scripts/check_generated.sh surface
-
-      # The golden corpus is a pinned RELEASE-LINE artifact (v0.3.0 shape), and
-      # the `#[ignore]`d generator writes the layout of whatever build it runs
-      # on. Regenerating it here and diffing could therefore never pass: the
-      # first layout change since the cut makes the dev build emit a different
-      # (still-valid) shape, and the step would fail on the corpus being
-      # current rather than on anything wrong. It also rewrites the pinned
-      # blobs inside the CI workspace, which is the one artifact whose whole
-      # value is that it does not move.
-      #
-      # The unreviewed-layout-change signal this step claimed to own is already
-      # enforced, with better failure messages, by the storage_golden tests in
-      # "Unit + property tests" above: `decode` fails if a release-line record
-      # stops decoding (that is how the `use_oracle` widening was caught),
-      # `mid_enum` catches renames and semantic shifts a typed decode cannot
-      # see, and `replay` proves every untouched record survives the upgrade
-      # byte-for-byte. Accepting a real layout change is the procedure in
-      # docs/STORAGE_LAYOUT.md, which re-captures the corpus from a release-line
-      # checkout — never from the build under review.
-      - name: Storage-layout corpus is intact
-        run: |
-          python3 - <<'PY'
-          import json, pathlib, sys
-          root = pathlib.Path("test_fixtures/storage")
-          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-          entries = list(manifest["records"]) + list(manifest["events"])
-          listed = {e["file"] for e in entries}
-          on_disk = {p.relative_to(root).as_posix()
-                     for p in list(root.glob("records/*.bin")) + list(root.glob("events/*.bin"))}
-          problems = [f"manifest names {f} but no such blob is committed" for f in sorted(listed - on_disk)]
-          problems += [f"{f} is committed but the manifest does not cover it" for f in sorted(on_disk - listed)]
-          problems += [f"{f} is empty" for f in sorted(on_disk) if (root / f).stat().st_size == 0]
-          baseline = root / "baseline" / "streampay-v0.3.0-baseline.wasm"
-          if not (baseline.is_file() and baseline.stat().st_size > 0):
-              problems.append("the baseline wasm the replay boots is missing or empty")
-          for p in problems:
-              print(f"::error::{p}")
-          if problems:
-              sys.exit(1)
-          print(f"corpus intact: {len(manifest['records'])} records, "
-                f"{len(manifest['events'])} events, baseline wasm present")
-          PY
 
       - name: Coverage
         uses: taiki-e/install-action@cargo-llvm-cov
