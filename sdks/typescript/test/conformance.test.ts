@@ -25,3 +25,34 @@ test("every vector decodes to its expected canonical JSON", () => {
     assert.deepEqual(decodeVector(vector), vector.expected, `${file} drifted`);
   }
 });
+
+test("batch-withdraw vectors pin the event schema shape", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      join(fileURLToPath(new URL("../../../../", import.meta.url)), "schemas/events/v1/events/batch_withdraw_summary.json"),
+      "utf8"
+    )
+  ) as {
+    required: string[];
+    properties: Record<string, unknown>;
+  };
+
+  const batchVectors = files.filter((file) => file.startsWith("batch-withdraw-"));
+  assert.ok(batchVectors.length >= 2);
+
+  for (const file of batchVectors) {
+    const vector = JSON.parse(readFileSync(join(vectorsDir, file), "utf8")) as
+      VectorFile & {
+        expected: {
+          events: Array<{ name: string; data: Record<string, unknown> }>;
+        };
+      };
+    for (const event of vector.expected.events) {
+      if (event.name !== "BatchWithdrawSummary") continue;
+      assert.deepEqual(Object.keys(event.data).sort(), [...schema.required].sort());
+      for (const settled of (event.data.settled as Array<Record<string, unknown>>)) {
+        assert.deepEqual(Object.keys(settled).sort(), ["amount", "stream_id"]);
+      }
+    }
+  }
+});

@@ -240,8 +240,12 @@ describe("layout stress testing", () => {
 
       expect(String(accentedText)).toBeTruthy();
       expect(String(accentedText)).not.toContain("undefined");
-      // The explicit =0 ICU arm intentionally omits the numeric count.
-      if (count !== 0) expect(String(accentedText)).toContain(new Intl.NumberFormat("en").format(count));
+      // The explicit =0 ICU branch intentionally has no count placeholder.
+      if (count === 0) {
+        expect(String(accentedText)).toContain("ñ");
+      } else {
+        expect(String(accentedText)).toContain(count.toLocaleString("en-US"));
+      }
 
       // Long-word
       const longWordMsg = new IntlMessageFormat(longWord[pluralKey], "en");
@@ -249,7 +253,12 @@ describe("layout stress testing", () => {
 
       expect(String(longWordText)).toBeTruthy();
       expect(String(longWordText)).not.toContain("undefined");
-      if (count !== 0) expect(String(longWordText)).toContain(new Intl.NumberFormat("en").format(count));
+      // The explicit =0 ICU branch intentionally has no count placeholder.
+      if (count === 0) {
+        expect(String(longWordText)).toContain("ñ");
+      } else {
+        expect(String(longWordText)).toContain(count.toLocaleString("en-US"));
+      }
     }
   });
 

@@ -33,24 +33,39 @@ export interface SorobanStreamStorage {
   ledger: number;
 }
 
+export type DivergenceClassification =
+  | "rounding_within_epsilon"
+  | "value_mismatch"
+  | "status_mismatch"
+  | "missing_record";
+
 export interface DivergenceRecord {
   streamId: string;
   checkType: "stream_balance" | "stream_status" | "missing_record";
   severity: "warning" | "critical";
+  classification: DivergenceClassification;
   indexedValue: Record<string, unknown>;
   onChainValue: Record<string, unknown>;
   horizonLagMs?: number;
   sorobanLagMs?: number;
   detectedAt: string;
+  delta?: string;
+  toleranceEpsilon?: string;
 }
 
 export interface ReconciliationResult {
   totalChecked: number;
   inSync: number;
   withinLagWindow: number;
+  roundingWithinTolerance?: number;
+  realDivergences?: number;
   divergences: DivergenceRecord[];
   timestamp: string;
   ledgerGap: number;
+  metrics?: {
+    roundingCount: number;
+    divergenceCount: number;
+  };
 }
 
 export interface AlertingConfig {
