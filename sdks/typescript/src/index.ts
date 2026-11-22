@@ -23,3 +23,5 @@ export type {
 } from "./retry.js";
 export { collectPages } from "./pagination.js";
 export type { IndexRole } from "./pagination.js";
+export { subscribeEvents } from "./subscription.js";
+export type { StreamFeedEvent, SubscribeEventsOptions } from "./subscription.js";
