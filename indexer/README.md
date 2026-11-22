@@ -89,6 +89,36 @@ Repeated events are safe and idempotent: event IDs are unique, preventing double
 
 ## 4. HTTP API Reference
 
+### Machine-readable spec (OpenAPI 3.1)
+
+The read surface is described by [`openapi.json`](openapi.json) (OpenAPI 3.1). It
+covers every `GET` route the server registers — health, stream queries, the
+outbox replay feed, signed proofs, webhook/outbox/WASM admin reads, the SSE
+stream, the persisted-query GraphQL reads and `/metrics`. Mutating routes
+(`POST`/`DELETE`) are intentionally out of scope.
+
+The document is not hand-waved: `src/contract/openapi.test.ts` (wired into
+`npm test`) checks the component schemas against the `Stream`,
+`StreamServerEvent` and `RpcEvent` interfaces in `src/types.ts` using the
+TypeScript compiler API, then calls every documented operation against a real
+`createApp` server and validates the actual response body against the schema for
+that status code. Adding a path to the spec without exercising it fails the
+suite. A response that gains, loses or retypes a field fails with the JSON path
+that drifted.
+
+```bash
+npm test              # full suite, includes the contract tests
+npm run spec:check    # just the spec + contract tests
+```
+
+The validator (`src/contract/validate.ts`) implements the small JSON Schema
+subset the spec uses, so no extra dependency was added.
+
+Documented wire/type mismatch: `StreamServerEvent.streamId` is typed `string`,
+but the SSE endpoint emits `null` for events the registry binds to no stream.
+`openapi.json` describes the wire behaviour (`string | null`) and the contract
+test allow-lists that one field; the type itself is unchanged here.
+
 ### Health Check
 `GET /health`
 
