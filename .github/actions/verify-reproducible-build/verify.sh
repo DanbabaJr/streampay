@@ -8,7 +8,7 @@ TAG="${TAG:-${1:-}}"
 EXPECTED_DIGEST="${EXPECTED_DIGEST:-${2:-}}"
 USE_DOCKER="${USE_DOCKER:-auto}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-REPO_ROOT="$(pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "${ACTION_PATH}/../../.." && pwd)}"
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -137,15 +137,7 @@ else
     arch_type=$(uname -m 2>/dev/null || echo "unknown")
     if [ "$os_kernel" = "Linux" ] && [ "$arch_type" = "x86_64" ]; then
       info "Attempting to install pinned stellar-cli ${stellar_cli_version}..."
-      curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v${stellar_cli_version}/stellar-cli-${stellar_cli_version}-x86_64-unknown-linux-gnu.tar.gz" | tar xz
-      if [ -w "/usr/local/bin" ] || [ "$(id -u)" -eq 0 ]; then
-        sudo install stellar /usr/local/bin/stellar 2>/dev/null || install stellar /usr/local/bin/stellar
-      else
-        mkdir -p "$HOME/.local/bin"
-        install stellar "$HOME/.local/bin/stellar"
-        export PATH="$HOME/.local/bin:$PATH"
-      fi
-      rm -f stellar
+      bash "${REPO_ROOT}/scripts/install_stellar_cli.sh" "${stellar_cli_version}"
     fi
   fi
 

@@ -146,10 +146,7 @@ jobs:
       # and the artifact upload further down, so repeating it would just pay the
       # build twice.
       - name: Install stellar-cli
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Wasm build (stellar contract build)
         working-directory: contracts/streaming-payments
@@ -758,10 +755,7 @@ jobs:
       # Pin must stay in sync with STELLAR_CLI_VERSION in devcontainer.json
       # and the version used in the contract / release jobs above.
       - name: Install stellar-cli v28.1.0
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Wasm build (devcontainer path)
         working-directory: contracts/streaming-payments
