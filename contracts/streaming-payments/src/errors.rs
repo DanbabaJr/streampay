@@ -759,25 +759,121 @@ pub enum StreamError {
         doc = " paused, or `resume_stream` on a stream that is not paused."
     )]
     InvalidPauseTransition = 99,
-    BatchAmendmentNotFound = 100,
-    BatchAmendmentExpired = 101,
-    BatchAmendmentThresholdNotMet = 102,
-    BatchAmendmentRecipientNotConsented = 103,
-    BatchAmendmentTooManyAmendments = 104,
-    BatchAmendmentInvalidTerms = 105,
-    BatchAmendmentStreamPaused = 106,
-    VotingPowerAlreadyVoted = 107,
-    VotingPowerInsufficient = 108,
-    VotingPowerProposalNotFound = 109,
-    InsurancePoolInsolvent = 110,
-    InsuranceClaimNotFound = 111,
-    InsuranceClaimNotApproved = 112,
-    InsuranceClaimTimelockNotElapsed = 113,
-    InsuranceCapExceeded = 114,
-    InsuranceInvalidLossProof = 115,
-    SenderPolicyViolated = 116,
-    SenderPolicyNotFound = 117,
-    SenderPolicyInvalidBounds = 118,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Advance drawn exceeds governance maximum loan-to-value ratio."
+    )]
+    AdvanceExceedsMaxLtv = 100,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Advance requested amount must be positive."
+    )]
+    AdvanceAmountNonPositive = 101,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Stream already has an active advance."
+    )]
+    AdvanceAlreadyActive = 102,
+    #[cfg_attr(not(target_family = "wasm"), doc = " Advance not found on stream.")]
+    AdvanceNotFound = 103,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Advance repayment amount must be positive."
+    )]
+    AdvanceRepaymentNonPositive = 104,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Advance repayment amount exceeds outstanding balance."
+    )]
+    AdvanceRepaymentExceedsBalance = 105,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Invalid loan-to-value basis points configuration."
+    )]
+    InvalidLtvBps = 106,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Stream is not eligible for advance financing."
+    )]
+    StreamNotEligibleForAdvance = 107,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Release condition has not been met."
+    )]
+    ConditionNotMet = 108,
+    #[cfg_attr(not(target_family = "wasm"), doc = " Release condition has expired.")]
+    ConditionExpired = 109,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Release condition is already registered for this stream."
+    )]
+    ConditionAlreadyRegistered = 110,
+    #[cfg_attr(not(target_family = "wasm"), doc = " Release condition not found.")]
+    ConditionNotFound = 111,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Release condition is already satisfied."
+    )]
+    ConditionAlreadySatisfied = 112,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Invalid quorum threshold for condition publishers."
+    )]
+    InvalidConditionThreshold = 113,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Caller is not an authorized condition publisher."
+    )]
+    NotConditionPublisher = 114,
+    #[cfg_attr(not(target_family = "wasm"), doc = " Condition attestation is stale.")]
+    ConditionAttestationStale = 115,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Template not found for given id and version."
+    )]
+    TemplateNotFound = 116,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Template version has already been approved."
+    )]
+    TemplateAlreadyApproved = 117,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Template version sequence mismatch."
+    )]
+    TemplateVersionMismatch = 118,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Template parameter validation failed against stream policy."
+    )]
+    TemplateValidationFailed = 119,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Template rate calculation is invalid."
+    )]
+    TemplateRateInvalid = 120,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Hook already registered for event class."
+    )]
+    HookAlreadyRegistered = 121,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Hook not found for stream and event class."
+    )]
+    HookNotFound = 122,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Nested entry blocked by stream reentrancy guard."
+    )]
+    HookReentrancyBlocked = 123,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Hook execution failed on callback contract."
+    )]
+    HookExecutionFailed = 124,
+    #[cfg_attr(not(target_family = "wasm"), doc = " Invalid hook selector.")]
+    InvalidHookSelector = 125,
 }
 
 impl StreamError {
@@ -884,25 +980,32 @@ impl StreamError {
         StreamError::WithdrawBatchTooLarge,
         StreamError::WithdrawDuplicateStreamIds,
         StreamError::InvalidPauseTransition,
-        StreamError::BatchAmendmentNotFound,
-        StreamError::BatchAmendmentExpired,
-        StreamError::BatchAmendmentThresholdNotMet,
-        StreamError::BatchAmendmentRecipientNotConsented,
-        StreamError::BatchAmendmentTooManyAmendments,
-        StreamError::BatchAmendmentInvalidTerms,
-        StreamError::BatchAmendmentStreamPaused,
-        StreamError::VotingPowerAlreadyVoted,
-        StreamError::VotingPowerInsufficient,
-        StreamError::VotingPowerProposalNotFound,
-        StreamError::InsurancePoolInsolvent,
-        StreamError::InsuranceClaimNotFound,
-        StreamError::InsuranceClaimNotApproved,
-        StreamError::InsuranceClaimTimelockNotElapsed,
-        StreamError::InsuranceCapExceeded,
-        StreamError::InsuranceInvalidLossProof,
-        StreamError::SenderPolicyViolated,
-        StreamError::SenderPolicyNotFound,
-        StreamError::SenderPolicyInvalidBounds,
+        StreamError::AdvanceExceedsMaxLtv,
+        StreamError::AdvanceAmountNonPositive,
+        StreamError::AdvanceAlreadyActive,
+        StreamError::AdvanceNotFound,
+        StreamError::AdvanceRepaymentNonPositive,
+        StreamError::AdvanceRepaymentExceedsBalance,
+        StreamError::InvalidLtvBps,
+        StreamError::StreamNotEligibleForAdvance,
+        StreamError::ConditionNotMet,
+        StreamError::ConditionExpired,
+        StreamError::ConditionAlreadyRegistered,
+        StreamError::ConditionNotFound,
+        StreamError::ConditionAlreadySatisfied,
+        StreamError::InvalidConditionThreshold,
+        StreamError::NotConditionPublisher,
+        StreamError::ConditionAttestationStale,
+        StreamError::TemplateNotFound,
+        StreamError::TemplateAlreadyApproved,
+        StreamError::TemplateVersionMismatch,
+        StreamError::TemplateValidationFailed,
+        StreamError::TemplateRateInvalid,
+        StreamError::HookAlreadyRegistered,
+        StreamError::HookNotFound,
+        StreamError::HookReentrancyBlocked,
+        StreamError::HookExecutionFailed,
+        StreamError::InvalidHookSelector,
     ];
 
     /// The stable numeric value carried across the contract boundary

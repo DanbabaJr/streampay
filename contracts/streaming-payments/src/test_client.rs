@@ -8,13 +8,15 @@
 //! implementation without building Wasm.
 #![cfg(any(test, feature = "testutils"))]
 
-use soroban_sdk::{contractclient, Address, BytesN, Env, Vec};
+use soroban_sdk::{contractclient, Address, BytesN, Env, Symbol, Vec};
 
 use crate::{
-    BatchEntry, Dispute, FeeScan, GovernanceAction, MigrationStatus, PageBounds, PendingOwnership,
-    PendingRateChange, PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment,
-    ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamError, StreamInput, StreamPolicy,
-    TreasuryStatus, WithdrawAllResult, WithdrawEntry,
+    Advance, BatchEntry, ConditionPredicate, Dispute, FeeScan, GovernanceAction, HookEventClass,
+    HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership, PendingRateChange,
+    PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment, ReceivablesConfig,
+    ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamCondition, StreamError,
+    StreamHook, StreamInput, StreamPolicy, StreamTemplate, TemplateLineage, TreasuryStatus,
+    WithdrawAllResult, WithdrawEntry,
 };
 
 /// Interface of the StreamPay streaming-payments contract.
@@ -310,94 +312,83 @@ pub trait StreamingPaymentsApi {
     fn governance_proposal(env: Env, proposal_id: u64) -> Option<Proposal>;
     fn governance_proposal_count(env: Env) -> u64;
 
-    // ------------------------------------------------------- batch amendments
-    fn propose_batch_amendment(
+    // ----------------------------------------------------------- receivables
+    fn set_receivables_config(
         env: Env,
         caller: Address,
-        items: Vec<crate::BatchAmendmentItem>,
-        threshold: u32,
-        expires_at: u64,
-    ) -> Result<u64, StreamError>;
-    fn consent_batch_amendment(
-        env: Env,
-        caller: Address,
-        batch_id: u64,
+        max_ltv_bps: u32,
+        fee_bps: u32,
     ) -> Result<(), StreamError>;
-    fn apply_batch_amendment(
-        env: Env,
-        caller: Address,
-        batch_id: u64,
-    ) -> Result<(), StreamError>;
-    fn get_batch_amendment(
-        env: Env,
-        batch_id: u64,
-    ) -> Option<crate::BatchAmendmentProposal>;
-    fn get_amendment_log(
+    fn get_receivables_config(env: Env) -> ReceivablesConfig;
+    fn get_advance(env: Env, stream_id: u64) -> Option<Advance>;
+    fn draw_advance(
         env: Env,
         stream_id: u64,
-    ) -> Vec<crate::AmendmentRecord>;
-
-    // ------------------------------------------------------- voting power
-    fn get_voting_power(env: Env, participant: Address) -> u128;
-    fn cast_community_vote(
-        env: Env,
-        voter: Address,
-        proposal_id: u64,
-        support: bool,
-    ) -> Result<u128, StreamError>;
-    fn get_community_proposal_tally(
-        env: Env,
-        proposal_id: u64,
-    ) -> Option<crate::ProposalTally>;
-
-    // ------------------------------------------------------- insurance
-    fn file_insurance_claim(
+        lender: Address,
+        amount: i128,
+        repayment_bps: u32,
+    ) -> Result<(), StreamError>;
+    fn repay_advance(
         env: Env,
         caller: Address,
         stream_id: u64,
         amount: i128,
-    ) -> Result<u64, StreamError>;
-    fn approve_insurance_claim(
-        env: Env,
-        caller: Address,
-        claim_id: u64,
-    ) -> Result<(), StreamError>;
-    fn reject_insurance_claim(
-        env: Env,
-        caller: Address,
-        claim_id: u64,
-        reason: u32,
-    ) -> Result<(), StreamError>;
-    fn payout_insurance_claim(
-        env: Env,
-        claim_id: u64,
-    ) -> Result<(), StreamError>;
-    fn get_insurance_pool(
-        env: Env,
-        token: Address,
-    ) -> Option<crate::InsurancePool>;
-    fn get_insurance_claim(
-        env: Env,
-        claim_id: u64,
-    ) -> Option<crate::InsuranceClaim>;
-    fn set_insurance_config(
-        env: Env,
-        caller: Address,
-        config: crate::InsuranceConfig,
     ) -> Result<(), StreamError>;
 
-    // ------------------------------------------------------- sender policy
-    fn set_sender_policy(
+    // --------------------------------------------------- conditional streams
+    fn register_condition(
         env: Env,
-        sender: Address,
-        policy: crate::SenderPolicy,
+        caller: Address,
+        stream_id: u64,
+        predicate: ConditionPredicate,
+        publishers: Vec<Address>,
+        threshold: u32,
+        timeout: u64,
+    ) -> Result<u64, StreamError>;
+    fn attest_condition(
+        env: Env,
+        publisher: Address,
+        stream_id: u64,
+        attestation: ConditionPredicate,
     ) -> Result<(), StreamError>;
-    fn revoke_sender_policy(
+    fn get_condition(env: Env, stream_id: u64) -> Option<StreamCondition>;
+    fn is_release_gated(env: Env, stream_id: u64) -> bool;
+
+    // ------------------------------------------------------ stream templates
+    fn approve_template(
         env: Env,
-        sender: Address,
+        caller: Address,
+        template_id: u32,
+        version: u32,
+        template: StreamTemplate,
     ) -> Result<(), StreamError>;
-    fn get_sender_policy(
+    fn instantiate_template(
         env: Env,
+        template_id: u32,
+        version: u32,
         sender: Address,
-    ) -> Option<crate::SenderPolicy>;
+        recipient: Address,
+        deposit: i128,
+        start_time: u64,
+    ) -> Result<u64, StreamError>;
+    fn get_template(env: Env, template_id: u32, version: u32) -> Option<StreamTemplate>;
+    fn get_stream_lineage(env: Env, stream_id: u64) -> Option<TemplateLineage>;
+
+    // ------------------------------------------------------ integrator hooks
+    fn register_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+        callback_contract: Address,
+        selector: Symbol,
+        failure_policy: HookFailurePolicy,
+    ) -> Result<(), StreamError>;
+    fn unregister_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+    ) -> Result<(), StreamError>;
+    fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook>;
 }

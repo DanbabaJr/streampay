@@ -1,0 +1,212 @@
+// Proto definitions for the StreamPay indexer gRPC transport (issue #579).
+//
+// Source of truth: the canonical event schema in `schemas/events/registry.json`
+// (issue #213) and its generated table in `indexer/src/generated/events.ts`.
+// The `EventName` enum below mirrors the registry's event keys exactly —
+// `indexer/src/grpc.test.ts` ("proto/registry freshness gate") parses this
+// file and fails CI on any drift between the enum, the registry and the
+// generated table. When the registry gains an event, add its enum value
+// here (in the same alphabetical order) and regenerate the table.
+//
+// Mapping — StreamEvent fields to the canonical records:
+//   seq              <- outbox_events.seq (monotonic cursor; see below)
+//   event_id         <- events.id / outbox_events.event_id
+//   stream_id        <- outbox_events.stream_id (the registry-declared
+//                       stream_id topic; null-stream events have no gRPC
+//                       subscription, exactly as they have no REST
+//                       /streams/:id/events row)
+//   name             <- the registry event key, e.g. "stream_created".
+//                       Kept a string (not the enum) for forward
+//                       compatibility: an additive registry change must not
+//                       break decoding of older clients. The enum is the
+//                       freshness mirror, not the wire type.
+//   ledger           <- events.ledger / outbox_events.ledger
+//   ledger_closed_at <- events.ledger_closed_at
+//   payload_json     <- JSON of the outbox payload (the same JSON the REST
+//                       endpoints return for the same event: bigints are
+//                       decimal strings, because the store stringifies
+//                       them on ingest). A consumer that JSON-parses
+//                       payload_json gets the REST record.
+//   idempotency_key  <- outbox_events.idempotency_key (== event_id today)
+//   cursor           <- seq, repeated as the resume cursor: a client
+//                       reconnecting with `SubscribeRequest.cursor` equal
+//                       to the last acked seq resumes after it.
+//   redacted         <- true when `redact_addresses` truncated an address
+//                       in payload_json (see src/redaction.ts).
+//
+// Flow control — server-streaming Subscribe honours, in order:
+//   1. HTTP/2 flow control (the transport pauses when the stream's
+//      `write()` returns false and resumes on 'drain');
+//   2. application-level credit: the client grants `initial_credit`
+//      messages and tops it up with Ack messages; the server delivers
+//      at most that many messages per subscription;
+//   3. a bounded per-subscription queue (default 100 events). A slow
+//      consumer pauses its own subscription only: its undelivered seq
+//      stays un-advanced, so a later drain replays the same rows from
+//      the outbox, and ingestion / other subscribers are never blocked.
+//
+// Resume / dedup — delivery is at-least-once from the transactional
+// outbox. A client acks seqs with the unary Ack RPC; on reconnect it
+// sends the last acked seq as `cursor` and the server replays from
+// `seq > cursor`. Unacked events are redelivered; clients dedup by
+// `seq` (or `event_id`), which is unique per event.
+
+syntax = "proto3";
+
+package streampay.indexer.v1;
+
+option go_package = "github.com/Neziahtech/streampay/indexer/grpc";
+
+// Mirror of the canonical registry's event keys
+// (schemas/events/registry.json, registry v1; 62 events).
+// Alphabetical order, matching ALL_CONTRACT_EVENT_NAMES in
+// src/generated/events.ts. EVENT_NAME_UNSPECIFIED is the proto3 zero value.
+enum EventName {
+  EVENT_NAME_UNSPECIFIED = 0;
+  ADVANCE_DRAWN = 1;
+  ADVANCE_LIQUIDATED = 2;
+  ADVANCE_REPAID = 3;
+  BATCH_WITHDRAW_SUMMARY = 4;
+  BENEFICIARY_ENROLLED = 5;
+  CONDITION_EXPIRED = 6;
+  CONDITION_MET = 7;
+  CONDITION_REGISTERED = 8;
+  CONTRACT_FROZEN_STATE_CHANGED = 9;
+  CONTRACT_UPGRADED = 10;
+  DISPUTE_EXPIRED = 11;
+  DISPUTE_RAISED = 12;
+  DISPUTE_RESOLVED = 13;
+  FEE_CHARGED = 14;
+  FEE_WITHDRAWN = 15;
+  GOVERNANCE_ACTION_EXECUTED = 16;
+  GOVERNANCE_ACTION_PROPOSED = 17;
+  GOVERNANCE_ACTION_SIGNED = 18;
+  GOVERNANCE_ACTION_VETOED = 19;
+  GOVERNANCE_SIGNERS_SET = 20;
+  HOOK_FAILED = 21;
+  HOOK_INVOKED = 22;
+  HOOK_REGISTERED = 23;
+  OPERATOR_KEY_ROTATED = 24;
+  ORACLE_CONFIG_UPDATED = 25;
+  ORACLE_STALE_FALLBACK = 26;
+  ORACLE_TIME_REPORTED = 27;
+  OWNERSHIP_ACCEPTED = 28;
+  OWNERSHIP_PROPOSED = 29;
+  POLICY_ASSET_EXECUTED = 30;
+  POLICY_ASSET_QUEUED = 31;
+  POLICY_HANDOFF_ACCEPTED = 32;
+  POLICY_HANDOFF_CANCELLED = 33;
+  POLICY_HANDOFF_PROPOSED = 34;
+  POLICY_INITIALIZED = 35;
+  RATE_CHANGE_ACCEPTED = 36;
+  RATE_CHANGE_PROPOSED = 37;
+  SCHEDULED_INTENT_CANCELLED = 38;
+  SCHEDULED_INTENT_EXPIRED = 39;
+  SCHEDULED_STREAM_EXECUTED = 40;
+  SENDER_TRANSFER_EXPIRED = 41;
+  SENDER_TRANSFER_PROPOSED = 42;
+  SENDER_TRANSFERRED = 43;
+  SPONSOR_ACTIVE_SET = 44;
+  SPONSOR_CLAIM = 45;
+  SPONSOR_REGISTERED = 46;
+  STORAGE_MIGRATED = 47;
+  STREAM_CANCELLED = 48;
+  STREAM_CREATED = 49;
+  STREAM_PAUSED = 50;
+  STREAM_POLICY_SET = 51;
+  STREAM_RECORD_MIGRATED = 52;
+  STREAM_REFUND_TARGET_CHANGED = 53;
+  STREAM_RESUMED = 54;
+  STREAM_SCHEDULED = 55;
+  STREAM_TOPPED_UP = 56;
+  STREAMS_CREATED = 57;
+  TEMPLATE_APPROVED = 58;
+  TEMPLATE_INSTANTIATED = 59;
+  UPGRADE_CANCELLED = 60;
+  UPGRADE_PROPOSED = 61;
+  WITHDRAWN = 62;
+}
+
+// One indexed event, as delivered on the wire.
+message StreamEvent {
+  // Outbox seq: the monotonic cursor for this event.
+  uint64 seq = 1;
+  // Journal event id (== idempotency_key today).
+  string event_id = 2;
+  // The stream this event is about (registry stream_id topic).
+  string stream_id = 3;
+  // Registry event key, e.g. "stream_created".
+  string name = 4;
+  // Ledger the event was committed in.
+  uint64 ledger = 5;
+  // Ledger close time (RFC 3339, from the events journal).
+  string ledger_closed_at = 6;
+  // JSON of the event payload — identical to the REST record's payload.
+  string payload_json = 7;
+  // Outbox idempotency key, for dedup across transports.
+  string idempotency_key = 8;
+  // Resume cursor for this event (== seq).
+  uint64 cursor = 9;
+  // True when redact_addresses truncated an address in payload_json.
+  bool redacted = 10;
+}
+
+// Subscribe to live + replayed events for one stream.
+message SubscribeRequest {
+  // Required: the stream to subscribe to (numeric, as in REST).
+  string stream_id = 1;
+  // Resume cursor: only events with seq > cursor are delivered (0 = from
+  // the start of the outbox for this stream).
+  uint64 cursor = 2;
+  // Application-level credit: max messages before the client must Ack
+  // with more credit. 0 means the server default (100).
+  uint32 initial_credit = 3;
+  // Tenant for per-tenant subscription limits / rate budgets.
+  // Empty means "default". Also readable from the x-tenant-id metadata.
+  string tenant = 4;
+  // When true, Stellar addresses in payload_json are truncated to their
+  // 8-character prefix (src/redaction.ts), identically to the shared
+  // privacy helper. When false the payload is byte-identical to REST.
+  bool redact_addresses = 5;
+  // Optional filter: only events whose name is in this list are delivered.
+  // Every entry must be a registry-known event key.
+  repeated string event_names = 6;
+  // Optional cap: close the stream (grpc-status OK) after this many
+  // messages. 0 means no cap — the stream stays open for live events.
+  uint32 limit = 7;
+}
+
+// Acknowledge delivered seqs and grant more credit (unary).
+message AckRequest {
+  // Subscription id from the x-subscription-id response metadata.
+  // If empty, the ack applies to the caller's subscriptions for
+  // (tenant, stream_id).
+  string subscription_id = 1;
+  string tenant = 2;
+  string stream_id = 3;
+  // Highest seq the client has durably processed. The server resumes
+  // after this seq on reconnect.
+  uint64 acked_seq = 4;
+  // Additional credit granted (messages the server may now deliver).
+  uint32 credit = 5;
+}
+
+message AckResponse {
+  // Highest acked seq the server now holds for this subscription.
+  uint64 acked_seq = 1;
+  // Credit remaining after this ack.
+  uint32 credit_available = 2;
+  // False when the subscription is already closed.
+  bool active = 3;
+}
+
+service StreamPayIndexer {
+  // Server-streaming live event delivery for one stream, replaying the
+  // outbox from `cursor` first and then streaming new events as they are
+  // ingested. The stream stays open until the client cancels, the server
+  // closes it after `limit` messages, or the tenant limit is hit.
+  rpc Subscribe(SubscribeRequest) returns (stream StreamEvent);
+
+  // Acknowledge seqs and grant credit for a Subscribe stream.
+  rpc Ack(AckRequest) returns (AckResponse);
+}

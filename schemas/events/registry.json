@@ -469,48 +469,93 @@
     }
   },
   "events": {
-    "BatchAmendmentApplied": {
-      "canonical": "streampay-event/v1|BatchAmendmentApplied|key=batch_amendment_applied|topics=[batch_id:u64],data=[effective_timestamp:u64,stream_ids:Vec<u64>]",
+    "AdvanceDrawn": {
+      "canonical": "streampay-event/v1|AdvanceDrawn|key=advance_drawn|topics=[stream_id:u64],data=[amount:i128,fee:i128,lender:Address,recipient:Address,repayment_bps:u32]",
       "data": [
         {
-          "name": "stream_ids",
-          "type": "Vec<u64>"
+          "name": "recipient",
+          "type": "Address"
         },
         {
-          "name": "effective_timestamp",
-          "type": "u64"
+          "name": "lender",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "fee",
+          "type": "i128"
+        },
+        {
+          "name": "repayment_bps",
+          "type": "u32"
         }
       ],
-      "event_key": "batch_amendment_applied",
-      "fingerprint": "sha256:4907f66aa084a06905923da33a5643b66130fd301f98b86d27d9fda5003d2bbf",
+      "event_key": "advance_drawn",
+      "fingerprint": "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30",
       "topics": [
         {
-          "name": "batch_id",
+          "name": "stream_id",
           "type": "u64"
         }
       ]
     },
-    "BatchAmendmentProposed": {
-      "canonical": "streampay-event/v1|BatchAmendmentProposed|key=batch_amendment_proposed|topics=[batch_id:u64],data=[expires_at:u64,sender:Address,stream_ids:Vec<u64>]",
+    "AdvanceLiquidated": {
+      "canonical": "streampay-event/v1|AdvanceLiquidated|key=advance_liquidated|topics=[stream_id:u64],data=[amount:i128,lender:Address,recipient:Address,remaining_unpaid:i128]",
       "data": [
         {
-          "name": "sender",
+          "name": "recipient",
           "type": "Address"
         },
         {
-          "name": "stream_ids",
-          "type": "Vec<u64>"
+          "name": "lender",
+          "type": "Address"
         },
         {
-          "name": "expires_at",
-          "type": "u64"
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "remaining_unpaid",
+          "type": "i128"
         }
       ],
-      "event_key": "batch_amendment_proposed",
-      "fingerprint": "sha256:7c7b94e9404deca9c36bb504141d5970828d9aaaa2fd40db5403471765d18e77",
+      "event_key": "advance_liquidated",
+      "fingerprint": "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97",
       "topics": [
         {
-          "name": "batch_id",
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ]
+    },
+    "AdvanceRepaid": {
+      "canonical": "streampay-event/v1|AdvanceRepaid|key=advance_repaid|topics=[stream_id:u64],data=[amount:i128,lender:Address,recipient:Address,remaining_owed:i128]",
+      "data": [
+        {
+          "name": "recipient",
+          "type": "Address"
+        },
+        {
+          "name": "lender",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "remaining_owed",
+          "type": "i128"
+        }
+      ],
+      "event_key": "advance_repaid",
+      "fingerprint": "sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49",
+      "topics": [
+        {
+          "name": "stream_id",
           "type": "u64"
         }
       ]
@@ -565,69 +610,53 @@
         }
       ]
     },
-    "ClaimFiled": {
-      "canonical": "streampay-event/v1|ClaimFiled|key=claim_filed|topics=[claim_id:u64],data=[amount:i128,recipient:Address,stream_id:u64]",
+    "ConditionExpired": {
+      "canonical": "streampay-event/v1|ConditionExpired|key=condition_expired|topics=[stream_id:u64],data=[condition_id:u64]",
       "data": [
+        {
+          "name": "condition_id",
+          "type": "u64"
+        }
+      ],
+      "event_key": "condition_expired",
+      "fingerprint": "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036",
+      "topics": [
         {
           "name": "stream_id",
           "type": "u64"
-        },
+        }
+      ]
+    },
+    "ConditionMet": {
+      "canonical": "streampay-event/v1|ConditionMet|key=condition_met|topics=[stream_id:u64],data=[condition_id:u64]",
+      "data": [
         {
-          "name": "recipient",
-          "type": "Address"
-        },
-        {
-          "name": "amount",
-          "type": "i128"
+          "name": "condition_id",
+          "type": "u64"
         }
       ],
-      "event_key": "claim_filed",
-      "fingerprint": "sha256:7c12db9e7f65ed7fb296c8126d15e99d468689658ec4e9a7d3f68933a4c12839",
+      "event_key": "condition_met",
+      "fingerprint": "sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2",
       "topics": [
         {
-          "name": "claim_id",
+          "name": "stream_id",
           "type": "u64"
         }
       ]
     },
-    "ClaimPaid": {
-      "canonical": "streampay-event/v1|ClaimPaid|key=claim_paid|topics=[claim_id:u64],data=[amount:i128,recipient:Address,remaining_balance:i128]",
+    "ConditionRegistered": {
+      "canonical": "streampay-event/v1|ConditionRegistered|key=condition_registered|topics=[stream_id:u64],data=[condition_id:u64]",
       "data": [
         {
-          "name": "recipient",
-          "type": "Address"
-        },
-        {
-          "name": "amount",
-          "type": "i128"
-        },
-        {
-          "name": "remaining_balance",
-          "type": "i128"
-        }
-      ],
-      "event_key": "claim_paid",
-      "fingerprint": "sha256:946cca73f9740203f4348ee5127467ec30bc69e832680a890863483a710509e9",
-      "topics": [
-        {
-          "name": "claim_id",
+          "name": "condition_id",
           "type": "u64"
         }
-      ]
-    },
-    "ClaimRejected": {
-      "canonical": "streampay-event/v1|ClaimRejected|key=claim_rejected|topics=[claim_id:u64],data=[reason:u32]",
-      "data": [
-        {
-          "name": "reason",
-          "type": "u32"
-        }
       ],
-      "event_key": "claim_rejected",
-      "fingerprint": "sha256:9e9ad4bd703bda333f8ad1f182fcf8bb002087722163eb1a76807d3f3d9dffbd",
+      "event_key": "condition_registered",
+      "fingerprint": "sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6",
       "topics": [
         {
-          "name": "claim_id",
+          "name": "stream_id",
           "type": "u64"
         }
       ]
@@ -909,6 +938,77 @@
         {
           "name": "set_by",
           "type": "Address"
+        }
+      ]
+    },
+    "HookFailed": {
+      "canonical": "streampay-event/v1|HookFailed|key=hook_failed|topics=[stream_id:u64],data=[callback_contract:Address,error_code:u32,event_class:Symbol]",
+      "data": [
+        {
+          "name": "event_class",
+          "type": "Symbol"
+        },
+        {
+          "name": "callback_contract",
+          "type": "Address"
+        },
+        {
+          "name": "error_code",
+          "type": "u32"
+        }
+      ],
+      "event_key": "hook_failed",
+      "fingerprint": "sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f",
+      "topics": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ]
+    },
+    "HookInvoked": {
+      "canonical": "streampay-event/v1|HookInvoked|key=hook_invoked|topics=[stream_id:u64],data=[callback_contract:Address,event_class:Symbol]",
+      "data": [
+        {
+          "name": "event_class",
+          "type": "Symbol"
+        },
+        {
+          "name": "callback_contract",
+          "type": "Address"
+        }
+      ],
+      "event_key": "hook_invoked",
+      "fingerprint": "sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e",
+      "topics": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ]
+    },
+    "HookRegistered": {
+      "canonical": "streampay-event/v1|HookRegistered|key=hook_registered|topics=[stream_id:u64],data=[callback_contract:Address,event_class:Symbol,selector:Symbol]",
+      "data": [
+        {
+          "name": "event_class",
+          "type": "Symbol"
+        },
+        {
+          "name": "callback_contract",
+          "type": "Address"
+        },
+        {
+          "name": "selector",
+          "type": "Symbol"
+        }
+      ],
+      "event_key": "hook_registered",
+      "fingerprint": "sha256:be27fe4f3537259a7dbc0b805c963dd2393d49967ca47f74de98d438b47fb9c0",
+      "topics": [
+        {
+          "name": "stream_id",
+          "type": "u64"
         }
       ]
     },
@@ -1846,6 +1946,64 @@
         }
       ]
     },
+    "TemplateApproved": {
+      "canonical": "streampay-event/v1|TemplateApproved|key=template_approved|topics=[template_id:u32],data=[duration:u64,token:Address,version:u32]",
+      "data": [
+        {
+          "name": "version",
+          "type": "u32"
+        },
+        {
+          "name": "token",
+          "type": "Address"
+        },
+        {
+          "name": "duration",
+          "type": "u64"
+        }
+      ],
+      "event_key": "template_approved",
+      "fingerprint": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",
+      "topics": [
+        {
+          "name": "template_id",
+          "type": "u32"
+        }
+      ]
+    },
+    "TemplateInstantiated": {
+      "canonical": "streampay-event/v1|TemplateInstantiated|key=template_instantiated|topics=[template_id:u32],data=[deposit:i128,recipient:Address,sender:Address,stream_id:u64,version:u32]",
+      "data": [
+        {
+          "name": "version",
+          "type": "u32"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "sender",
+          "type": "Address"
+        },
+        {
+          "name": "recipient",
+          "type": "Address"
+        },
+        {
+          "name": "deposit",
+          "type": "i128"
+        }
+      ],
+      "event_key": "template_instantiated",
+      "fingerprint": "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af",
+      "topics": [
+        {
+          "name": "template_id",
+          "type": "u32"
+        }
+      ]
+    },
     "UpgradeCancelled": {
       "canonical": "streampay-event/v1|UpgradeCancelled|key=upgrade_cancelled|topics=[new_wasm_hash:BytesN<32>],data=[cancelled_by:Address]",
       "data": [
@@ -1936,13 +2094,14 @@
     }
   },
   "fingerprints": {
-    "BatchAmendmentApplied": "sha256:4907f66aa084a06905923da33a5643b66130fd301f98b86d27d9fda5003d2bbf",
-    "BatchAmendmentProposed": "sha256:7c7b94e9404deca9c36bb504141d5970828d9aaaa2fd40db5403471765d18e77",
+    "AdvanceDrawn": "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30",
+    "AdvanceLiquidated": "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97",
+    "AdvanceRepaid": "sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49",
     "BatchWithdrawSummary": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
     "BeneficiaryEnrolled": "sha256:8a457d9c30ee67b51c5709af2eb838deacb19d55dc53a93055734d920e77e7d7",
-    "ClaimFiled": "sha256:7c12db9e7f65ed7fb296c8126d15e99d468689658ec4e9a7d3f68933a4c12839",
-    "ClaimPaid": "sha256:946cca73f9740203f4348ee5127467ec30bc69e832680a890863483a710509e9",
-    "ClaimRejected": "sha256:9e9ad4bd703bda333f8ad1f182fcf8bb002087722163eb1a76807d3f3d9dffbd",
+    "ConditionExpired": "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036",
+    "ConditionMet": "sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2",
+    "ConditionRegistered": "sha256:0ac12047ea7f10bc08646b56173ed2a639ac5ba1e6de4c4474b2eac59b1a09a6",
     "ContractFrozenStateChanged": "sha256:090c0be66d60a23f3122acb9d4df26f1c2efea8c18828a5d48614b93692f8f7f",
     "ContractUpgraded": "sha256:0228c88243ed185f32359dd32f813d0c1df5ef393fbe5416fc120720020dc2fe",
     "DisputeExpired": "sha256:36b0c23354cbcac4fb502ca41a70ddfe1f9eb2c559c9db99d3de4f790abf7ca1",
@@ -1955,6 +2114,9 @@
     "GovernanceActionSigned": "sha256:05a46601921e524677a6b100a6b1d038f189fe1ab4e796b2ecf3cef374d94b4d",
     "GovernanceActionVetoed": "sha256:fe6590a48703dc9d3f3f61e0e05c54467fc771245b0c63f546451909ad4230a7",
     "GovernanceSignersSet": "sha256:c80b3f90f2621ff7578044e47b82978b1f997300723831e782bc137d0ac33a16",
+    "HookFailed": "sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f",
+    "HookInvoked": "sha256:11cae2306cfb934411dc921d7d98e1441f494b980474db591c2f7f9ff6555a2e",
+    "HookRegistered": "sha256:be27fe4f3537259a7dbc0b805c963dd2393d49967ca47f74de98d438b47fb9c0",
     "OperatorKeyRotated": "sha256:e173c61697b4045d0fb1e94358fe8b4675bfca312369ac887f2ff23f21fb413b",
     "OracleConfigUpdated": "sha256:91f894797f41c1566560dd5c04581611fb8d29bd0ac48bfc022d0ab4de0e6099",
     "OracleStaleFallback": "sha256:d1baed22ab39c524cd1297b2a5f14d39eeec300ef27ce95583562f1e2e26dbec",
@@ -1994,6 +2156,8 @@
     "StreamScheduled": "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487",
     "StreamToppedUp": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
     "StreamsCreated": "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3",
+    "TemplateApproved": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",
+    "TemplateInstantiated": "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af",
     "UpgradeCancelled": "sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523",
     "UpgradeProposed": "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed",
     "VoteCast": "sha256:df7a22f9ea409c602d3b89e28f5da15a3295136e9b7c9972ec532b3546b6518b",

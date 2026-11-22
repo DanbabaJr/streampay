@@ -4,7 +4,7 @@
 //! sender and carries the batch ids, and `BatchWithdrawSummary` is keyed by the
 //! recipient of a `withdraw_many` call. Non-topic fields are event data.
 
-use soroban_sdk::{contractevent, Address, BytesN, Vec};
+use soroban_sdk::{contractevent, Address, BytesN, Symbol, Vec};
 
 use crate::stream::{OwnershipRole, WithdrawOutcome};
 
@@ -1226,103 +1226,155 @@ pub struct StreamRefundTargetChanged {
     pub at_creation: bool,
 }
 
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when a recipient draws an advance against future stream accrual."
+)]
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BatchAmendmentProposed {
+pub struct AdvanceDrawn {
     #[topic]
-    pub batch_id: u64,
-    pub sender: Address,
-    pub stream_ids: Vec<u64>,
-    pub expires_at: u64,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BatchAmendmentApplied {
-    #[topic]
-    pub batch_id: u64,
-    pub stream_ids: Vec<u64>,
-    pub effective_timestamp: u64,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PowerAccrued {
-    #[topic]
-    pub participant: Address,
     pub stream_id: u64,
-    pub power: u128,
+    pub recipient: Address,
+    pub lender: Address,
+    pub amount: i128,
+    pub fee: i128,
+    pub repayment_bps: u32,
 }
 
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an advance is partially or fully repaid."
+)]
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VoteCast {
+pub struct AdvanceRepaid {
     #[topic]
-    pub proposal_id: u64,
-    pub voter: Address,
-    pub power: u128,
-    pub support: bool,
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub lender: Address,
+    pub amount: i128,
+    pub remaining_owed: i128,
 }
 
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an advance is liquidated upon stream cancellation."
+)]
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PremiumAccrued {
+pub struct AdvanceLiquidated {
     #[topic]
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub lender: Address,
+    pub amount: i128,
+    pub remaining_unpaid: i128,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when a release condition is registered for a stream."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionRegistered {
+    #[topic]
+    pub stream_id: u64,
+    pub condition_id: u64,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when a release condition is attested and met."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionMet {
+    #[topic]
+    pub stream_id: u64,
+    pub condition_id: u64,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when a release condition expires without being met."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionExpired {
+    #[topic]
+    pub stream_id: u64,
+    pub condition_id: u64,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when governance approves a new stream template or version."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TemplateApproved {
+    #[topic]
+    pub template_id: u32,
+    pub version: u32,
     pub token: Address,
-    pub amount: i128,
-    pub pool_balance: i128,
+    pub duration: u64,
 }
 
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when a stream is instantiated from an approved template."
+)]
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimFiled {
+pub struct TemplateInstantiated {
     #[topic]
-    pub claim_id: u64,
-    pub stream_id: u64,
-    pub recipient: Address,
-    pub amount: i128,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimPaid {
-    #[topic]
-    pub claim_id: u64,
-    pub recipient: Address,
-    pub amount: i128,
-    pub remaining_balance: i128,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimRejected {
-    #[topic]
-    pub claim_id: u64,
-    pub reason: u32,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SenderPolicySet {
-    #[topic]
-    pub sender: Address,
+    pub template_id: u32,
     pub version: u32,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SenderPolicyRevoked {
-    #[topic]
-    pub sender: Address,
-    pub version: u32,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PolicyViolation {
-    #[topic]
-    pub sender: Address,
     pub stream_id: u64,
-    pub violation_code: u32,
+    pub sender: Address,
+    pub recipient: Address,
+    pub deposit: i128,
 }
 
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an integrator callback hook is registered."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HookRegistered {
+    #[topic]
+    pub stream_id: u64,
+    pub event_class: Symbol,
+    pub callback_contract: Address,
+    pub selector: Symbol,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an integrator callback hook is invoked successfully."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HookInvoked {
+    #[topic]
+    pub stream_id: u64,
+    pub event_class: Symbol,
+    pub callback_contract: Address,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an integrator callback hook fails or reverts."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HookFailed {
+    #[topic]
+    pub stream_id: u64,
+    pub event_class: Symbol,
+    pub callback_contract: Address,
+    pub error_code: u32,
+}

@@ -34,7 +34,7 @@ function formatDate(ts: number): string {
 }
 
 export default function TimeSeriesChart({ points, title, width = 760, height = 200 }: Props) {
-  const { accruedPath, claimedPath, availableArea, yLabels, xLabels, maxVal } =
+  const { accruedPath, claimedPath, availableArea, yLabels, xLabels } =
     useMemo(() => {
       if (points.length < 2) return { accruedPath: "", claimedPath: "", availableArea: "", yLabels: [], xLabels: [], maxVal: 1n };
 

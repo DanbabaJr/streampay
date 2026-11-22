@@ -17,6 +17,8 @@ export interface StreamPayErrorOptions {
   contract?: ContractFailure;
   rpcMessage?: string;
   transactionXdr?: string;
+  /** Hex hash of the signed envelope, when one was submitted. */
+  transactionHash?: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export class StreamPayError extends Error {
   readonly contract?: ContractFailure;
   readonly rpcMessage?: string;
   readonly transactionXdr?: string;
+  readonly transactionHash?: string;
 
   constructor(message: string, kind: FailureKind, options: StreamPayErrorOptions = {}) {
     super(message);
@@ -38,6 +41,7 @@ export class StreamPayError extends Error {
     if (options.contract !== undefined) this.contract = options.contract;
     if (options.rpcMessage !== undefined) this.rpcMessage = options.rpcMessage;
     if (options.transactionXdr !== undefined) this.transactionXdr = options.transactionXdr;
+    if (options.transactionHash !== undefined) this.transactionHash = options.transactionHash;
   }
 
   /** Builds an error from raw RPC text, extracting the typed contract code. */

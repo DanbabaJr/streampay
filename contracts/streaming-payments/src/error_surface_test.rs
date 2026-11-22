@@ -1706,280 +1706,415 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 .mock_all_auths()
                 .try_resume_stream(&f.sender, &id)))
         }
-        Branch::BatchAmendmentNotFound => {
-            let f = Fixture::setup_quiet();
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_consent_batch_amendment(&f.sender, &999)))
-        }
-        Branch::BatchAmendmentExpired => {
-            let f = Fixture::setup_quiet();
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: 1,
-                new_rate: 100,
-                new_end_time: f.env.ledger().timestamp() + DAY,
-            });
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_propose_batch_amendment(&f.sender, &items, &1, &0)))
-        }
-        Branch::BatchAmendmentThresholdNotMet => {
-            let f = Fixture::setup_quiet();
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: 1,
-                new_rate: 100,
-                new_end_time: f.env.ledger().timestamp() + DAY,
-            });
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_propose_batch_amendment(&f.sender, &items, &0, &(f.env.ledger().timestamp() + DAY))))
-        }
-        Branch::BatchAmendmentRecipientNotConsented => {
+        // ----------------------------------------------------------- receivables
+        Branch::AdvanceExceedsMaxLtv => {
             let f = Fixture::setup_quiet();
             let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            let now = f.env.ledger().timestamp();
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: id,
-                new_rate: 100,
-                new_end_time: now + 5 * DAY,
-            });
-            let batch_id = f
-                .client
-                .mock_all_auths()
-                .propose_batch_amendment(&f.sender, &items, &1, &(now + 2 * DAY));
+            let lender = soroban_sdk::Address::generate(&f.env);
             Some(rejected!(f
                 .client
                 .mock_all_auths()
-                .try_apply_batch_amendment(&f.sender, &batch_id)))
+                .try_draw_advance(&id, &lender, &DEPOSIT, &5_000)))
         }
-        Branch::BatchAmendmentTooManyAmendments => {
+        Branch::AdvanceAmountNonPositive => {
             let f = Fixture::setup_quiet();
             let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
-            let mut log = soroban_sdk::Vec::new(&f.env);
-            for _ in 0..20 {
-                log.push_back(crate::AmendmentRecord {
-                    old_rate: 10,
-                    new_rate: 20,
-                    old_end_time: 100,
-                    new_end_time: 200,
-                    effective_timestamp: 10,
-                });
-            }
-            f.env.as_contract(&f.client.address, || {
-                crate::batch_amend::put_amendment_log(&f.env, id, &log);
-            });
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            let now = f.env.ledger().timestamp();
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: id,
-                new_rate: 100,
-                new_end_time: now + 5 * DAY,
-            });
+            let lender = soroban_sdk::Address::generate(&f.env);
             Some(rejected!(f
                 .client
                 .mock_all_auths()
-                .try_propose_batch_amendment(&f.sender, &items, &1, &(now + DAY))))
+                .try_draw_advance(&id, &lender, &0, &5_000)))
         }
-        Branch::BatchAmendmentInvalidTerms => {
-            let f = Fixture::setup_quiet();
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: 1,
-                new_rate: 0,
-                new_end_time: f.env.ledger().timestamp() + DAY,
-            });
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_propose_batch_amendment(&f.sender, &items, &1, &(f.env.ledger().timestamp() + DAY))))
-        }
-        Branch::BatchAmendmentStreamPaused => {
+        Branch::AdvanceAlreadyActive => {
             let f = Fixture::setup_quiet();
             let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
-            f.client.mock_all_auths().pause_stream(&f.sender, &id);
-            let mut items = soroban_sdk::Vec::new(&f.env);
-            let now = f.env.ledger().timestamp();
-            items.push_back(crate::BatchAmendmentItem {
-                stream_id: id,
-                new_rate: 100,
-                new_end_time: now + 5 * DAY,
-            });
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_propose_batch_amendment(&f.sender, &items, &1, &(now + DAY))))
-        }
-        Branch::VotingPowerAlreadyVoted => {
-            let f = Fixture::setup_quiet();
-            f.env.as_contract(&f.client.address, || {
-                crate::voting_power::record_stream_settlement(
-                    &f.env,
-                    &f.sender,
-                    1,
-                    DEPOSIT,
-                    10 * DAY,
-                    f.env.ledger().timestamp(),
-                );
-            });
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
             f.client
                 .mock_all_auths()
-                .cast_community_vote(&f.sender, &1, &true);
+                .draw_advance(&id, &lender, &100, &5_000);
             Some(rejected!(f
                 .client
                 .mock_all_auths()
-                .try_cast_community_vote(&f.sender, &1, &false)))
+                .try_draw_advance(&id, &lender, &100, &5_000)))
         }
-        Branch::VotingPowerInsufficient => {
+        Branch::AdvanceNotFound => {
             let f = Fixture::setup_quiet();
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_cast_community_vote(&f.sender, &1, &true)))
-        }
-        Branch::VotingPowerProposalNotFound => {
-            let f = Fixture::setup_quiet();
-            f.env.as_contract(&f.client.address, || {
-                crate::voting_power::record_stream_settlement(
-                    &f.env,
-                    &f.sender,
-                    1,
-                    DEPOSIT,
-                    10 * DAY,
-                    f.env.ledger().timestamp(),
-                );
-            });
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_cast_community_vote(&f.sender, &0, &true)))
-        }
-        Branch::InsurancePoolInsolvent => {
-            let f = Fixture::setup_quiet();
-            let id = f.create_stream(DEPOSIT, 0, DAY, false);
-            f.advance_time(2 * DAY);
-            let claim_id = f
-                .client
-                .mock_all_auths()
-                .file_insurance_claim(&f.recipient, &id, &100);
-            f.advance_time(3 * DAY);
-            f.client
-                .mock_all_auths()
-                .approve_insurance_claim(&f.governor, &claim_id);
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_payout_insurance_claim(&claim_id)))
-        }
-        Branch::InsuranceClaimNotFound => {
-            let f = Fixture::setup_quiet();
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_approve_insurance_claim(&f.governor, &999)))
-        }
-        Branch::InsuranceClaimNotApproved => {
-            let f = Fixture::setup_quiet();
-            let id = f.create_stream(DEPOSIT, 0, DAY, false);
-            f.advance_time(2 * DAY);
-            let claim_id = f
-                .client
-                .mock_all_auths()
-                .file_insurance_claim(&f.recipient, &id, &100);
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_payout_insurance_claim(&claim_id)))
-        }
-        Branch::InsuranceClaimTimelockNotElapsed => {
-            let f = Fixture::setup_quiet();
-            let id = f.create_stream(DEPOSIT, 0, DAY, false);
-            f.advance_time(2 * DAY);
-            let claim_id = f
-                .client
-                .mock_all_auths()
-                .file_insurance_claim(&f.recipient, &id, &100);
-            Some(rejected!(f
-                .client
-                .mock_all_auths()
-                .try_approve_insurance_claim(&f.governor, &claim_id)))
-        }
-        Branch::InsuranceCapExceeded => {
-            let f = Fixture::setup_quiet();
-            let id = f.create_stream(DEPOSIT, 0, DAY, false);
-            f.advance_time(2 * DAY);
-            Some(rejected!(f.client.mock_all_auths().try_file_insurance_claim(
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
                 &f.recipient,
                 &id,
-                &(crate::insurance::DEFAULT_MAX_PAYOUT_PER_INCIDENT + 1)
+                &100
             )))
         }
-        Branch::InsuranceInvalidLossProof => {
+        Branch::AdvanceRepaymentNonPositive => {
             let f = Fixture::setup_quiet();
             let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
-            Some(rejected!(f
-                .client
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
+            f.client
                 .mock_all_auths()
-                .try_file_insurance_claim(&f.recipient, &id, &100)))
-        }
-        Branch::SenderPolicyViolated => {
-            let f = Fixture::setup_quiet();
-            f.client.mock_all_auths().set_sender_policy(
-                &f.sender,
-                &crate::SenderPolicy {
-                    version: 1,
-                    allowed_tokens: None,
-                    max_deposit_per_stream: Some(100),
-                    max_rate_per_second: None,
-                    max_duration_seconds: None,
-                    max_outflow_per_epoch: None,
-                    epoch_duration_seconds: 0,
-                    current_epoch_outflow: 0,
-                    epoch_start_time: 0,
-                    recipient_whitelist: None,
-                    max_per_recipient_cap: None,
-                },
-            );
-            let now = f.env.ledger().timestamp();
-            Some(rejected!(f.client.mock_all_auths().try_create_stream(
-                &f.sender,
+                .draw_advance(&id, &lender, &100, &5_000);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
                 &f.recipient,
-                &f.token,
-                &200,
-                &(now + DAY),
-                &(now + 2 * DAY),
-                &false
+                &id,
+                &0
             )))
         }
-        Branch::SenderPolicyNotFound => {
+        Branch::AdvanceRepaymentExceedsBalance => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            soroban_sdk::token::StellarAssetClient::new(&f.env, &f.token).mint(&lender, &DEPOSIT);
+            f.client
+                .mock_all_auths()
+                .draw_advance(&id, &lender, &100, &5_000);
+            Some(rejected!(f.client.mock_all_auths().try_repay_advance(
+                &f.recipient,
+                &id,
+                &100_000
+            )))
+        }
+        Branch::InvalidLtvBps => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &100, &0)))
+        }
+        Branch::StreamNotEligibleForAdvance => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+            let lender = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_draw_advance(&id, &lender, &100, &5_000)))
+        }
+        // --------------------------------------------------- conditional streams
+        Branch::ConditionNotMet => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::ConditionExpired => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &now,
+            )))
+        }
+        Branch::ConditionAlreadyRegistered => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            )))
+        }
+        Branch::ConditionNotFound => {
+            let f = Fixture::setup_quiet();
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &999,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::ConditionAlreadySatisfied => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.client.mock_all_auths().attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::InvalidConditionThreshold => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &0,
+                &(now + 5 * DAY),
+            )))
+        }
+        Branch::NotConditionPublisher => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let rogue = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1);
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &rogue,
+                &id,
+                &crate::ConditionPredicate::Boolean(true),
+            )))
+        }
+        Branch::ConditionAttestationStale => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let pub1 = soroban_sdk::Address::generate(&f.env);
+            let mut publishers = soroban_sdk::Vec::new(&f.env);
+            publishers.push_back(pub1.clone());
+            let now = f.env.ledger().timestamp();
+            f.client.mock_all_auths().register_condition(
+                &f.sender,
+                &id,
+                &crate::ConditionPredicate::TimeWindow(now, now + 10),
+                &publishers,
+                &1,
+                &(now + 5 * DAY),
+            );
+            f.advance_time(20);
+            Some(rejected!(f.client.mock_all_auths().try_attest_condition(
+                &pub1,
+                &id,
+                &crate::ConditionPredicate::TimeWindow(now, now + 10),
+            )))
+        }
+        // ------------------------------------------------------ stream templates
+        Branch::TemplateNotFound => {
             let f = Fixture::setup_quiet();
             Some(rejected!(f
                 .client
                 .mock_all_auths()
-                .try_revoke_sender_policy(&f.sender)))
+                .try_instantiate_template(
+                    &999,
+                    &1,
+                    &f.sender,
+                    &f.recipient,
+                    &DEPOSIT,
+                    &0,
+                )))
         }
-        Branch::SenderPolicyInvalidBounds => {
+        Branch::TemplateAlreadyApproved => {
             let f = Fixture::setup_quiet();
-            Some(rejected!(f.client.mock_all_auths().try_set_sender_policy(
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 100,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            f.client
+                .mock_all_auths()
+                .approve_template(&f.governor, &1, &1, &t);
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        Branch::TemplateVersionMismatch => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 2,
+                token: f.token.clone(),
+                duration: 100,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &2,
+                &t,
+            )))
+        }
+        Branch::TemplateValidationFailed => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 0,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 10_000,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        Branch::TemplateRateInvalid => {
+            let f = Fixture::setup_quiet();
+            let t = crate::StreamTemplate {
+                id: 1,
+                version: 1,
+                token: f.token.clone(),
+                duration: 10_000,
+                cancelable: true,
+                use_oracle: false,
+                min_deposit: 100,
+                max_deposit: 20_000,
+                created_at: 0,
+            };
+            Some(rejected!(f.client.mock_all_auths().try_approve_template(
+                &f.governor,
+                &1,
+                &1,
+                &t,
+            )))
+        }
+        // ------------------------------------------------------ integrator hooks
+        Branch::HookAlreadyRegistered => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let sel = soroban_sdk::Symbol::new(&f.env, "on_wd");
+            f.client.mock_all_auths().register_hook(
                 &f.sender,
-                &crate::SenderPolicy {
-                    version: 1,
-                    allowed_tokens: None,
-                    max_deposit_per_stream: Some(0),
-                    max_rate_per_second: None,
-                    max_duration_seconds: None,
-                    max_outflow_per_epoch: None,
-                    epoch_duration_seconds: 0,
-                    current_epoch_outflow: 0,
-                    epoch_start_time: 0,
-                    recipient_whitelist: None,
-                    max_per_recipient_cap: None,
-                }
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
+            );
+            Some(rejected!(f.client.mock_all_auths().try_register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
+            )))
+        }
+        Branch::HookNotFound => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            Some(rejected!(f.client.mock_all_auths().try_unregister_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+            )))
+        }
+        Branch::HookReentrancyBlocked => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            f.env.as_contract(&f.client.address, || {
+                crate::hooks::set_stream_locked(&f.env, id, true);
+            });
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::HookExecutionFailed => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let sel = soroban_sdk::Symbol::new(&f.env, "on_wd");
+            f.client.mock_all_auths().register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &sel,
+                &crate::HookFailurePolicy::Revert,
+            );
+            f.advance_time(2 * DAY);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+        }
+        Branch::InvalidHookSelector => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+            let callback = soroban_sdk::Address::generate(&f.env);
+            let empty_sel = soroban_sdk::Symbol::new(&f.env, "");
+            Some(rejected!(f.client.mock_all_auths().try_register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &callback,
+                &empty_sel,
+                &crate::HookFailurePolicy::EmitAndContinue,
             )))
         }
     }
@@ -2191,25 +2326,32 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::WithdrawBatchEmpty
             | StreamError::WithdrawBatchTooLarge
             | StreamError::WithdrawDuplicateStreamIds
-            | StreamError::BatchAmendmentNotFound
-            | StreamError::BatchAmendmentExpired
-            | StreamError::BatchAmendmentThresholdNotMet
-            | StreamError::BatchAmendmentRecipientNotConsented
-            | StreamError::BatchAmendmentTooManyAmendments
-            | StreamError::BatchAmendmentInvalidTerms
-            | StreamError::BatchAmendmentStreamPaused
-            | StreamError::VotingPowerAlreadyVoted
-            | StreamError::VotingPowerInsufficient
-            | StreamError::VotingPowerProposalNotFound
-            | StreamError::InsurancePoolInsolvent
-            | StreamError::InsuranceClaimNotFound
-            | StreamError::InsuranceClaimNotApproved
-            | StreamError::InsuranceClaimTimelockNotElapsed
-            | StreamError::InsuranceCapExceeded
-            | StreamError::InsuranceInvalidLossProof
-            | StreamError::SenderPolicyViolated
-            | StreamError::SenderPolicyNotFound
-            | StreamError::SenderPolicyInvalidBounds => StreamError::ALL.contains(&e),
+            | StreamError::AdvanceExceedsMaxLtv
+            | StreamError::AdvanceAmountNonPositive
+            | StreamError::AdvanceAlreadyActive
+            | StreamError::AdvanceNotFound
+            | StreamError::AdvanceRepaymentNonPositive
+            | StreamError::AdvanceRepaymentExceedsBalance
+            | StreamError::InvalidLtvBps
+            | StreamError::StreamNotEligibleForAdvance
+            | StreamError::ConditionNotMet
+            | StreamError::ConditionExpired
+            | StreamError::ConditionAlreadyRegistered
+            | StreamError::ConditionNotFound
+            | StreamError::ConditionAlreadySatisfied
+            | StreamError::InvalidConditionThreshold
+            | StreamError::NotConditionPublisher
+            | StreamError::ConditionAttestationStale
+            | StreamError::TemplateNotFound
+            | StreamError::TemplateAlreadyApproved
+            | StreamError::TemplateVersionMismatch
+            | StreamError::TemplateValidationFailed
+            | StreamError::TemplateRateInvalid
+            | StreamError::HookAlreadyRegistered
+            | StreamError::HookNotFound
+            | StreamError::HookReentrancyBlocked
+            | StreamError::HookExecutionFailed
+            | StreamError::InvalidHookSelector => StreamError::ALL.contains(&e),
         }
     }
 

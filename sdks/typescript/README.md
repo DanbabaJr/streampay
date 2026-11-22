@@ -102,14 +102,58 @@ const freighter: Signer = {
 The pipeline mirrors `frontend/lib/stellar.ts`: simulate first (early typed
 contract errors), assemble, sign, submit, poll, then decode the return value.
 
+## Method examples
+
+Every example under [`examples/`](./examples) is a complete, copy-pasteable
+script against testnet, written with the SDK's own generated types. Each row
+below links its runnable file, and the files are typechecked in CI
+(`npm run typecheck`), so they cannot drift from the API.
+
+| Method | Example | Returns |
+|---|---|---|
+| `createStream` | [`examples/create-stream.ts`](./examples/create-stream.ts) | `bigint` — new stream id |
+| `topUp` | [`examples/top-up.ts`](./examples/top-up.ts) | `void` — deposit grows; read it back with `getStream` |
+| `withdraw` | [`examples/withdraw.ts`](./examples/withdraw.ts) | `void` — `Stream.withdrawn` grows |
+| `withdrawMax` | [`examples/withdraw-max.ts`](./examples/withdraw-max.ts) | `bigint` — amount paid |
+| `pauseStream` / `resumeStream` | [`examples/pause-resume.ts`](./examples/pause-resume.ts) | `void` — `endTime` shifts on resume |
+| `cancelStream` | [`examples/cancel-stream.ts`](./examples/cancel-stream.ts) | `void` — pro-rata split to both sides |
+| `createStreams` / `createStreamsBatch` | [`examples/batch.ts`](./examples/batch.ts) | `bigint[]` / per-entry `{ ok }` or `{ error }` |
+| `getStream`, `available`, `recipientStreams`, `streamIds`, `streamsFor` | [`examples/reads.ts`](./examples/reads.ts) | typed `Stream`, `bigint` accrual, index pages |
+| `decodeEvent` / `decodeEvents` | [`examples/decode-events.ts`](./examples/decode-events.ts) | `StreamPayEvent[]` |
+
+Each script reads its configuration from the environment:
+
+| Variable | Used by |
+|---|---|
+| `STREAM_CONTRACT_ID` | all examples |
+| `TOKEN_CONTRACT_ID` | `create`, `top-up`, `batch` |
+| `STELLAR_SECRET` | `create`, `top-up`, `pause/resume`, `cancel`, `batch` (sender) |
+| `RECIPIENT_ADDRESS` | `create`, `batch`, `reads` |
+| `RECIPIENT_SECRET` | `withdraw`, `withdrawMax` |
+
+Mutating examples need a funded sender. Fund it with Friendbot and approve the
+contract as a spender before running (the whole funded walkthrough, including
+the demo token, is in [`docs/DEMO.md`](../../docs/DEMO.md#step-1-generate--fund-keypairs)):
+
+```bash
+curl -s "https://friendbot.stellar.org?addr=$STELLAR_PUBLIC" >/dev/null
+stellar contract invoke --id "$TOKEN_CONTRACT_ID" --source sender --network testnet \
+  -- approve --spender "$STREAM_CONTRACT_ID" --amount 10000000 --expiration_ledger +5000
+```
+
+The examples are typechecked, not executed, by CI. To paste one into a project
+that installed the SDK tarball, keep the snippets as they are — the imports are
+`@streampay/sdk` in both the README and the example files.
+
 ## Events
 
-Events from RPC (`getEvents`) are base64 `ContractEvent` XDR:
+Events from RPC are base64 `ContractEvent` XDR. `rpc.Server._getEvents`
+returns that raw shape (`event.value`); `getEvents` parses it into ScVals:
 
 ```ts
 import { decodeEvents } from "@streampay/sdk";
 
-const events = decodeEvents(rpcResponse.events.map((event) => event.valueXdr));
+const events = decodeEvents(rawGetEventsResponse.events.map((event) => event.value));
 // StreamCreatedEvent | WithdrawnEvent | … (all contract events)
 for (const event of events) {
   if (event.type === "StreamCreated") {
@@ -119,6 +163,38 @@ for (const event of events) {
 ```
 
 Malformed XDR throws; events from other contracts are not returned.
+
+### Resumable indexer subscription
+
+Configure the indexer's SSE endpoint on the client to subscribe to one stream:
+
+```ts
+const client = new StreamPayClient({
+  contractId: process.env.STREAM_CONTRACT_ID!,
+  eventFeedUrl: "https://indexer.example/events/stream",
+});
+const controller = new AbortController();
+
+for await (const event of client.subscribeEvents(1n, {
+  fromCursor: "evt-123",
+  signal: controller.signal,
+  onError: (error) => console.warn("Event feed reconnecting:", error),
+})) {
+  // `event.type` is the generated event discriminator.
+  // The feed may replay events, so deduplicate by `event.id` before applying
+  // non-idempotent state changes.
+  console.log(event.id, event.type, event.data);
+}
+
+// Stop the iterator from another task:
+controller.abort();
+```
+
+The indexer feed is at-least-once: a reconnect may replay the last event.
+`id`/`cursor` is the stable deduplication key. The subscription reconnects
+from its latest received ID with exponential backoff; unknown event names are
+skipped, matching the generated decoder's `null` result for unregistered
+events.
 
 ## Index pagination
 
@@ -152,10 +228,67 @@ try {
 The error table is generated from the canonical catalog
 (`frontend/lib/errors.ts`), not restated by this package.
 
+## Retrying submissions
+
+Mutating calls do not retry unless you opt in. Without `retry`, every failure
+surfaces exactly as before.
+
+```ts
+const client = new StreamPayClient({
+  contractId,
+  signer,
+  retry: {
+    maxAttempts: 3,     // total attempts per stage, including the first
+    baseDelayMs: 250,   // ceiling for the first wait
+    maxDelayMs: 5_000,  // hard cap for any single wait
+    jitter: "full",     // uniform in [0, ceiling]; "none" waits the full ceiling
+    onRetry: ({ stage, attempt, delayMs, error }) => log.warn({ stage, attempt, delayMs }, String(error)),
+  },
+});
+// `retry: true` uses exactly these defaults.
+```
+
+The wait after failed attempt `n` is drawn from
+`[0, min(maxDelayMs, baseDelayMs * 2^(n-1))]`. A `Retry-After` header on a
+429/503 raises that floor, still capped at `maxDelayMs`. This matches how the
+frontend's RPC budget manager (`frontend/lib/budget-manager.ts`) treats rate
+limits.
+
+**What is retried.** Only failures where the RPC clearly gave no answer:
+network errors (`ECONNRESET`, `ETIMEDOUT`, `fetch failed`, …), request
+timeouts, HTTP 408/429/500/502/503/504, and `sendTransaction` returning
+`TRY_AGAIN_LATER`. Simulation errors, contract errors, other 4xx responses,
+`sendTransaction` `ERROR`, and a transaction that failed in a ledger are
+permanent. They throw on the first attempt.
+
+**Why a retry cannot double-submit.**
+
+1. `getAccount` and `simulateTransaction` run before anything is signed, so
+   repeating them has no side effects.
+2. After signing, the envelope is fixed. A retry resends the same bytes and
+   never rebuilds, re-signs, or takes a new sequence number. The transaction
+   hash is the idempotency key, and a transaction with a given source and
+   sequence number can be included at most once.
+3. Before resending after an unanswered attempt, the client calls
+   `getTransaction(hash)`. If the network already knows the hash, it skips
+   the resend and goes straight to confirmation. If a resend is rejected
+   (for example `tx_bad_seq`) after an earlier attempt that may have landed,
+   the client checks the hash again before reporting a failure.
+4. Confirmation polling tolerates transient `getTransaction` errors until
+   `pollTimeoutMs`.
+
+**Ambiguous timeouts.** A transaction that was accepted but not confirmed
+before `pollTimeoutMs` is never resubmitted, because its outcome is unknown.
+The client throws `StreamPayError` with `kind: "inclusion"` and
+`transactionHash`. Reconcile by looking the hash up later. Rebuild and
+re-sign only once you know it did not land. The claim scheduler does the same
+(`frontend/lib/claim-runtime.ts`): it records a submitted hash and only
+re-signs after a definite rejection.
+
 ## Conformance
 
-`npm test` runs the vector suite plus codec round-trips, pagination, event, and
-error tests. `npm run conformance -- ../vectors` prints this SDK's canonical
+`npm test` runs the vector suite plus codec round-trips, pagination, event,
+retry, and error tests. `npm run conformance -- ../vectors` prints this SDK's canonical
 decode for the shared fixtures.
 
 ## Versioning and publishing

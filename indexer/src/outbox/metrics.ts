@@ -3,6 +3,20 @@ import type { OutboxStats } from "./types.js";
 export type DispatchOutcome = "delivered" | "retry" | "dead" | "stale" | "rejected_backpressure";
 
 /**
+ * Reduce a consumer/webhook URL to a low-cardinality label value (the host,
+ * lowercased) so the destination breakdown stays safe to export. Anything that
+ * is not a valid URL is bucketed as `unknown` rather than leaking a raw string.
+ */
+export function destinationHost(url: string | null | undefined): string {
+  if (!url) return "unknown";
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Prometheus text-exposition metrics for the outbox, following the hand
  * rolled exposition style of infra/indexer (no client dependency).
  * Counters accumulate in-process; depth/lag are snapshotted at scrape time
@@ -12,6 +26,7 @@ export type DispatchOutcome = "delivered" | "retry" | "dead" | "stale" | "reject
  */
 export class OutboxMetrics {
   private readonly counters: Partial<Record<DispatchOutcome, number>> = {};
+  private readonly byDestination: Map<string, Partial<Record<DispatchOutcome, number>>> = new Map();
   private reclaims = 0;
   private retracts = 0;
   private readonly depthHistory: number[] = [];
@@ -26,6 +41,20 @@ export class OutboxMetrics {
 
   observe(outcome: DispatchOutcome, n = 1): void {
     this.counters[outcome] = (this.counters[outcome] ?? 0) + n;
+  }
+
+  /**
+   * Second, additive breakdown of dispatch outcomes keyed by the destination
+   * host (the webhook/consumer endpoint). Mirrors `observe` but never replaces
+   * it: `streampay_outbox_dispatch_total` stays the unlabelled aggregate so
+   * existing dashboards/alerts are unaffected. This feeds the per-destination
+   * webhook delivery-success panel.
+   */
+  observeDelivery(destination: string | null | undefined, outcome: DispatchOutcome, n = 1): void {
+    const host = destinationHost(destination);
+    const bucket = this.byDestination.get(host) ?? {};
+    bucket[outcome] = (bucket[outcome] ?? 0) + n;
+    this.byDestination.set(host, bucket);
   }
 
   observeReclaim(n: number): void {
@@ -92,6 +121,19 @@ export class OutboxMetrics {
       "counter",
       "streampay_outbox_dispatch_total",
       (Object.keys(this.counters) as DispatchOutcome[]).map((k) => [`outcome="${k}"`, this.counters[k] ?? 0])
+    );
+    const outcomeOrder: DispatchOutcome[] = ["delivered", "retry", "dead", "stale", "rejected_backpressure"];
+    push(
+      "Outbox dispatch outcomes partitioned by destination host (webhook delivery success per endpoint).",
+      "counter",
+      "streampay_outbox_delivery_total",
+      [...this.byDestination.keys()]
+        .sort()
+        .flatMap((host) =>
+          outcomeOrder
+            .filter((o) => this.byDestination.get(host)?.[o] !== undefined)
+            .map((o) => [`destination="${host}",outcome="${o}"`, this.byDestination.get(host)![o]!] as [string, number])
+        )
     );
     push("Outbox claims reclaimed after dispatcher crash/timeout.", "counter", "streampay_outbox_reclaims_total", [
       ["", this.reclaims],
