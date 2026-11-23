@@ -92,6 +92,7 @@ mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
 #[cfg(test)]
+mod oracle_staleness_test;
 mod extensions_test;
 
 mod dispute;
