@@ -163,6 +163,39 @@ export class StreamStore extends EventEmitter {
    */
   projectEvent(event: DecodedEvent): { duplicate: boolean; projectionSkipped: boolean } {
     return this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "project"))();
+   * Replaces one stream row with a journal-derived fold (#583). The same
+   * monotonic guard as ingestion applies, so a fold of the whole journal can
+   * only move the projection forward to the state the journal implies.
+   * Returns false when the row was already ahead of the fold.
+   */
+  replaceProjection(stream: Stream): boolean {
+    const row = {
+      stream_id: stream.streamId,
+      sender: stream.sender ?? null,
+      recipient: stream.recipient ?? null,
+      token: stream.token ?? null,
+      deposit: stream.deposit ?? null,
+      withdrawn: stream.withdrawn ?? "0",
+      start_time: stream.startTime ?? null,
+      end_time: stream.endTime ?? null,
+      cancelable: stream.cancelable === null || stream.cancelable === undefined ? null : Number(stream.cancelable),
+      status: stream.status,
+      cancelled_by: stream.cancelled_by ?? null,
+      recipient_amount: stream.recipient_amount ?? null,
+      sender_amount: stream.sender_amount ?? null,
+      refund_target: stream.refund_target ?? null,
+      last_ledger: stream.lastLedger,
+      updated_at: stream.updatedAt,
+    };
+    const res = this.db.prepare(`INSERT INTO streams(stream_id,sender,recipient,token,deposit,withdrawn,start_time,end_time,cancelable,status,cancelled_by,recipient_amount,sender_amount,refund_target,last_ledger,updated_at)
+      VALUES(@stream_id,@sender,@recipient,@token,@deposit,@withdrawn,@start_time,@end_time,@cancelable,@status,@cancelled_by,@recipient_amount,@sender_amount,@refund_target,@last_ledger,@updated_at)
+      ON CONFLICT(stream_id) DO UPDATE SET sender=excluded.sender, recipient=excluded.recipient, token=excluded.token,
+      deposit=excluded.deposit, withdrawn=excluded.withdrawn, start_time=excluded.start_time, end_time=excluded.end_time,
+      cancelable=excluded.cancelable, status=excluded.status, cancelled_by=excluded.cancelled_by,
+      recipient_amount=excluded.recipient_amount, sender_amount=excluded.sender_amount, refund_target=excluded.refund_target,
+      last_ledger=excluded.last_ledger, updated_at=excluded.updated_at
+      WHERE excluded.last_ledger >= streams.last_ledger`).run(row);
+    return res.changes > 0;
   }
 
   /** The stream row an event concerns; `undefined` for stream-less events. */
