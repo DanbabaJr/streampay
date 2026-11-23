@@ -103,3 +103,8 @@ override.tf.json
 # Rendered bundles and manifest streams: reproducible from the modules, and the
 # bundle manifest hashes files that only exist after install.sh runs.
 infra/terraform/stacks/*/build/
+
+# SDK conformance artifacts and sandbox state
+sdks/conformance/out/
+sdks/conformance/.sandbox-state.json
+sdks/mobile/build/

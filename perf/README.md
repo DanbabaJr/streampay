@@ -13,6 +13,7 @@ Baselines are stored in `perf/baselines/`:
 - `perf/baselines/indexer.json`
 - `perf/baselines/rpc_reads.json`
 - `perf/baselines/frontend.json`
+- `perf/baselines/sdk.json`
 
 Every budget specifies:
 - `budget`: The hard upper threshold. Any PR whose measured value exceeds `budget * (1 + tolerance_percent/100)` fails the CI gate.
@@ -29,6 +30,7 @@ Every budget specifies:
   - RTT: $150\text{ ms}$
   - Throughput: $1{,}638.4\text{ Kbps}$
   - CPU Slowdown: $4\times$ multiplier
+- **SDK vector conformance**: Median of 3 runs of the compiled TypeScript conformance test over the checked-in vector set; it makes no network calls. The 20% tolerance covers runner variance.
 
 ---
 

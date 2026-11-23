@@ -6,6 +6,14 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
+## v1.0.5 — 2026-11-21 (session-key delegation, #660)
+
+Two additive events; no existing event changed shape (entry count 62 → 64).
+Both carry the positional topics `stream_id:u64` and `agent:Address`:
+
+- `AgentAuthorized`: added event (data `max_per_period`, `max_per_stream`, `period_duration`, `expires_at`) — emitted by `authorize_agent` when a recipient delegates withdrawal rights to a session key under explicit caps and an expiry.
+- `AgentRevoked`: added event (data `revoked_by`) — emitted by `revoke_agent` when the recipient withdraws that delegation.
+
 ## v1.0.4 — 2026-11-20 (receivables advances, release conditions, stream templates and callback hooks, #620)
 
 Eleven additive events; no existing event changed shape (entry count 51 → 62).

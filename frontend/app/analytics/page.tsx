@@ -19,6 +19,8 @@ import {
   type AnalyticsStream,
 } from "../../lib/analytics";
 import { fetchStreamsFor } from "../../lib/stellar";
+import { useT } from "../../lib/i18n/provider";
+import EmptyState from "../../components/EmptyState";
 
 // Lazy-loaded chart components.
 const TimeSeriesChart = lazy(() => import("../../components/charts/TimeSeriesChart"));
@@ -41,6 +43,7 @@ const WINDOW_DAYS: Record<Window, number> = {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
+  const t = useT();
   const [address, setAddress] = useState("");
   const [streams, setStreams] = useState<AnalyticsStream[]>([]);
   const [loading, setLoading] = useState(false);
@@ -159,8 +162,14 @@ export default function AnalyticsPage() {
       )}
 
       {/* Empty / partial states */}
-      {!loading && streams.length === 0 && address && (
-        <p style={{ color: "#6b7280" }}>No streams found for this address.</p>
+      {!loading && streams.length === 0 && (
+        <div className="card">
+          <EmptyState
+            title={t("empty.analytics.title")}
+            body={t("empty.analytics.body")}
+            action={{ href: "/", label: t("empty.analytics.action") }}
+          />
+        </div>
       )}
       {!loading && streams.length > 0 && active.length === 0 && (
         <p style={{ color: "#6b7280" }}>No active streams — showing history only.</p>

@@ -228,10 +228,67 @@ try {
 The error table is generated from the canonical catalog
 (`frontend/lib/errors.ts`), not restated by this package.
 
+## Retrying submissions
+
+Mutating calls do not retry unless you opt in. Without `retry`, every failure
+surfaces exactly as before.
+
+```ts
+const client = new StreamPayClient({
+  contractId,
+  signer,
+  retry: {
+    maxAttempts: 3,     // total attempts per stage, including the first
+    baseDelayMs: 250,   // ceiling for the first wait
+    maxDelayMs: 5_000,  // hard cap for any single wait
+    jitter: "full",     // uniform in [0, ceiling]; "none" waits the full ceiling
+    onRetry: ({ stage, attempt, delayMs, error }) => log.warn({ stage, attempt, delayMs }, String(error)),
+  },
+});
+// `retry: true` uses exactly these defaults.
+```
+
+The wait after failed attempt `n` is drawn from
+`[0, min(maxDelayMs, baseDelayMs * 2^(n-1))]`. A `Retry-After` header on a
+429/503 raises that floor, still capped at `maxDelayMs`. This matches how the
+frontend's RPC budget manager (`frontend/lib/budget-manager.ts`) treats rate
+limits.
+
+**What is retried.** Only failures where the RPC clearly gave no answer:
+network errors (`ECONNRESET`, `ETIMEDOUT`, `fetch failed`, …), request
+timeouts, HTTP 408/429/500/502/503/504, and `sendTransaction` returning
+`TRY_AGAIN_LATER`. Simulation errors, contract errors, other 4xx responses,
+`sendTransaction` `ERROR`, and a transaction that failed in a ledger are
+permanent. They throw on the first attempt.
+
+**Why a retry cannot double-submit.**
+
+1. `getAccount` and `simulateTransaction` run before anything is signed, so
+   repeating them has no side effects.
+2. After signing, the envelope is fixed. A retry resends the same bytes and
+   never rebuilds, re-signs, or takes a new sequence number. The transaction
+   hash is the idempotency key, and a transaction with a given source and
+   sequence number can be included at most once.
+3. Before resending after an unanswered attempt, the client calls
+   `getTransaction(hash)`. If the network already knows the hash, it skips
+   the resend and goes straight to confirmation. If a resend is rejected
+   (for example `tx_bad_seq`) after an earlier attempt that may have landed,
+   the client checks the hash again before reporting a failure.
+4. Confirmation polling tolerates transient `getTransaction` errors until
+   `pollTimeoutMs`.
+
+**Ambiguous timeouts.** A transaction that was accepted but not confirmed
+before `pollTimeoutMs` is never resubmitted, because its outcome is unknown.
+The client throws `StreamPayError` with `kind: "inclusion"` and
+`transactionHash`. Reconcile by looking the hash up later. Rebuild and
+re-sign only once you know it did not land. The claim scheduler does the same
+(`frontend/lib/claim-runtime.ts`): it records a submitted hash and only
+re-signs after a definite rejection.
+
 ## Conformance
 
-`npm test` runs the vector suite plus codec round-trips, pagination, event, and
-error tests. `npm run conformance -- ../vectors` prints this SDK's canonical
+`npm test` runs the vector suite plus codec round-trips, pagination, event,
+retry, and error tests. `npm run conformance -- ../vectors` prints this SDK's canonical
 decode for the shared fixtures.
 
 ## Versioning and publishing
@@ -242,3 +299,24 @@ maintainers' call; if it is, they hold the npm scope and run the release.
 Until then `npm pack` / the workspace path is the supported distribution.
 CI runs `npm pack --dry-run` only; no registry credentials are used by pull
 requests.
+
+## Telemetry (opt-in)
+
+Telemetry is **off** by default: importing the SDK records and sends nothing. A
+host opts in from its consent flow (#515):
+
+```ts
+import { enableTelemetry, disableTelemetry, flushTelemetry } from "@streampay/sdk";
+
+enableTelemetry();       // start reporting
+await flushTelemetry();  // flush queued batches (e.g. before page unload)
+disableTelemetry();      // withdraw consent and discard anything unsent
+```
+
+What is reported is a fixed allowlist: schema version, SDK name and version,
+event kind, SDK method name, outcome, a latency bucket and an error code (the
+contract error name or the failure kind). Addresses, amounts, keys, XDR, payloads
+and error messages have no field to travel in, and every emitted value is checked
+against a denylist at the emission boundary. Reporting is batched, bounded, backs
+off after a failed send, honours a kill switch, and never throws into the host
+application.
