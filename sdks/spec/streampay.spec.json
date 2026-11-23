@@ -2287,6 +2287,190 @@
       },
       "error": null,
       "mutating": true
+    },
+    {
+      "name": "commit_claim",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "name": "commitment_hash",
+          "type": "bytes32"
+        },
+        {
+          "name": "deposit",
+          "type": "i128"
+        },
+        {
+          "name": "reveal_deadline",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "reveal_claim",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "salt",
+          "type": "bytes32"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "expire_reveal",
+      "doc": "",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "commitment_hash",
+          "type": "bytes32"
+        },
+        {
+          "name": "sender",
+          "type": "address"
+        }
+      ],
+      "returns": "i128",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_claim_commitment",
+      "doc": "",
+      "args": [
+        {
+          "name": "commitment_hash",
+          "type": "bytes32"
+        }
+      ],
+      "returns": {
+        "option": "ClaimCommitment"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "authorize_agent",
+      "doc": "",
+      "args": [
+        {
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "max_per_period",
+          "type": "i128"
+        },
+        {
+          "name": "period_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "expires_at",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "withdraw_delegated",
+      "doc": "",
+      "args": [
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "revoke_agent",
+      "doc": "",
+      "args": [
+        {
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "get_session_policy",
+      "doc": "",
+      "args": [
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "option": "SessionKeyPolicy"
+      },
+      "error": null,
+      "mutating": true
     }
   ],
   "structs": [
@@ -2582,6 +2766,47 @@
       ]
     },
     {
+      "name": "ClaimCommitment",
+      "doc": "",
+      "fields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "commitment_hash",
+          "type": "bytes32",
+          "doc": ""
+        },
+        {
+          "name": "deposit",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "committed_at",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "reveal_deadline",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "revealed",
+          "type": "bool",
+          "doc": ""
+        }
+      ]
+    },
+    {
       "name": "ReceivablesConfig",
       "doc": "Governance receivables configuration stored in instance storage.",
       "fields": [
@@ -2725,6 +2950,57 @@
         {
           "name": "status",
           "type": "IntentStatus",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "SessionKeyPolicy",
+      "doc": "",
+      "fields": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "agent",
+          "type": "address",
+          "doc": ""
+        },
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "max_per_period",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "period_seconds",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "current_period_start",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "spent_current_period",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "revoked",
+          "type": "bool",
           "doc": ""
         }
       ]
