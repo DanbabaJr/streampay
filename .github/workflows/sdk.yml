@@ -9,6 +9,7 @@ on:
       - "contracts/streaming-payments/test_snapshots/**"
       - "schemas/events/registry.json"
       - "frontend/lib/errors.ts"
+      - "perf/**"
       - ".github/workflows/sdk.yml"
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - "contracts/streaming-payments/test_snapshots/**"
       - "schemas/events/registry.json"
       - "frontend/lib/errors.ts"
+      - "perf/**"
       - ".github/workflows/sdk.yml"
   workflow_dispatch:
 
@@ -106,6 +108,9 @@ jobs:
       # to its recorded canonical JSON.
       - name: Build + tests
         run: npm test
+
+      - name: Check SDK vector conformance runtime budget
+        run: node ../../perf/harness/check_budgets.mjs --sdk-conformance
 
       - name: npm pack dry run
         run: npm pack --dry-run

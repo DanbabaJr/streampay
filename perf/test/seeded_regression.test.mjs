@@ -12,6 +12,8 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 describe("Performance Budget CI Gate — Regression Defense & Noise Policy", () => {
   const rpcBaselinePath = path.join(REPO_ROOT, "perf/baselines/rpc_reads.json");
   const originalRpcBaseline = fs.readFileSync(rpcBaselinePath, "utf8");
+  const sdkBaselinePath = path.join(REPO_ROOT, "perf/baselines/sdk.json");
+  const originalSdkBaseline = fs.readFileSync(sdkBaselinePath, "utf8");
 
   it("passes cleanly when all metrics satisfy established budgets", () => {
     const cmd = `node perf/harness/check_budgets.mjs`;
@@ -43,6 +45,36 @@ describe("Performance Budget CI Gate — Regression Defense & Noise Policy", () 
     } finally {
       // Restore pristine baseline
       fs.writeFileSync(rpcBaselinePath, originalRpcBaseline);
+    }
+  });
+
+  it("fails the SDK conformance budget for a deliberately slow fixture", () => {
+    try {
+      const data = JSON.parse(originalSdkBaseline);
+      data.metrics.sdk_vector_conformance_ms.budget = 1;
+      data.metrics.sdk_vector_conformance_ms.tolerance_percent = 0;
+      fs.writeFileSync(sdkBaselinePath, JSON.stringify(data, null, 2) + "\n");
+
+      let threw = false;
+      try {
+        execSync(`node perf/harness/check_budgets.mjs --sdk-conformance`, {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            SDK_CONFORMANCE_TEST_FILE: "perf/test/fixtures/sdk-conformance-slow.test.mjs"
+          }
+        });
+      } catch (err) {
+        threw = true;
+        assert.equal(err.status, 1);
+        const stderrAndStdout = (err.stdout || "") + (err.stderr || "");
+        assert.match(stderrAndStdout, /sdk_vector_conformance_ms.*REGRESSION/);
+        assert.match(stderrAndStdout, /PERFORMANCE GATE FAILED/);
+      }
+      assert.equal(threw, true, "SDK conformance gate should fail on the slow fixture");
+    } finally {
+      fs.writeFileSync(sdkBaselinePath, originalSdkBaseline);
     }
   });
 

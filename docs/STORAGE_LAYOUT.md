@@ -192,6 +192,8 @@ git switch <the released tag or main commit>
 (cd contracts/streaming-payments && stellar contract build)
 cp target/wasm32v1-none/release/streampay_contract.wasm \
    "$REPO/test_fixtures/storage/baseline/streampay-<new version>-baseline.wasm"
+(cd "$REPO/test_fixtures/storage/baseline" && sha256sum "streampay-<new version>-baseline.wasm") \
+   > "$REPO/digests/streampay-<new version>-baseline.sha256"
 ```
 
 Update `baseline_wasm_path()` in `storage_golden/mod.rs` and the file name here.
@@ -200,6 +202,10 @@ The replay asserts the running instance really is the committed artifact
 baseline fails loudly rather than upgrading from the wrong bytes. If the new
 baseline happens to hash equal to the in-development build, the replay prints a
 `NOTE:` and only the data-survival assertions carry signal.
+
+Both the offline CI integrity check (`Storage-layout corpus is intact` in
+`.github/workflows/ci.yml`) and the testnet smoke preflight
+(`scripts/storage_golden_smoke.sh`) verify this SHA-256 digest before running.
 
 `*.wasm` is gitignored repo-wide; `!test_fixtures/**/*.wasm` re-includes the
 fixture deliberately, so this artifact is a tracked file.

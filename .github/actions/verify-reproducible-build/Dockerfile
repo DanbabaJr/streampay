@@ -8,6 +8,7 @@ FROM ubuntu:24.04
 
 ARG RUST_VERSION=1.99.1
 ARG STELLAR_CLI_VERSION=28.1.0
+ARG STELLAR_CLI_SHA256=c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CARGO_HOME=/usr/local/cargo
@@ -31,10 +32,22 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     --target wasm32v1-none \
     && chmod -R a+rwX "${CARGO_HOME}" "${RUSTUP_HOME}"
 
-# Install pinned stellar-cli binary
-RUN curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar xz \
-    && install stellar /usr/local/bin/stellar \
-    && rm -f stellar
+# Install pinned stellar-cli binary with digest verification before extraction
+RUN set -eu; \
+    tarball="stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"; \
+    url="https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/${tarball}"; \
+    curl -fsSL -o "${tarball}" "${url}"; \
+    actual="$(sha256sum "${tarball}" | awk '{print $1}')"; \
+    if [ "${actual}" != "${STELLAR_CLI_SHA256}" ]; then \
+      rm -f "${tarball}"; \
+      echo "ERROR: SHA-256 digest verification failed for stellar-cli binary!" >&2; \
+      echo "  Expected: ${STELLAR_CLI_SHA256}" >&2; \
+      echo "  Actual:   ${actual}" >&2; \
+      exit 1; \
+    fi; \
+    tar -xzf "${tarball}"; \
+    install stellar /usr/local/bin/stellar; \
+    rm -f stellar "${tarball}"
 
 WORKDIR /workspace
 
