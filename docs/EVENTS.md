@@ -13,6 +13,9 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 | `agent_revoked` | `AgentRevoked` | `stream_id: u64`, `agent: Address` | `revoked_by: Address` | `sha256:a96acdc2e00…` |
 | `batch_withdraw_summary` | `BatchWithdrawSummary` | `recipient: Address` | `settled: Vec<WithdrawOutcome>`, `total: i128`, `requested: u32`, `skipped: u32` | `sha256:59b5ba85df9…` |
 | `beneficiary_enrolled` | `BeneficiaryEnrolled` | `beneficiary: Address`, `kind: Symbol` | `public_key: BytesN<32>` | `sha256:8a457d9c30e…` |
+| `claim_committed` | `ClaimCommitted` | `stream_id: u64` | `recipient: Address`, `commitment_hash: BytesN<32>`, `reveal_deadline: u64` | `sha256:52f4e724f63…` |
+| `claim_expired` | `ClaimExpired` | `stream_id: u64` | `sender: Address`, `commitment_hash: BytesN<32>`, `deposit: i128` | `sha256:34aea123ccd…` |
+| `claim_revealed` | `ClaimRevealed` | `stream_id: u64` | `recipient: Address`, `commitment_hash: BytesN<32>`, `amount: i128` | `sha256:faf5c8cdb33…` |
 | `condition_expired` | `ConditionExpired` | `stream_id: u64` | `condition_id: u64` | `sha256:bf220e706c8…` |
 | `condition_met` | `ConditionMet` | `stream_id: u64` | `condition_id: u64` | `sha256:fd16a5a73e4…` |
 | `condition_registered` | `ConditionRegistered` | `stream_id: u64` | `condition_id: u64` | `sha256:0ac12047ea7…` |

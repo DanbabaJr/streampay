@@ -44,6 +44,24 @@
       "struct": "BeneficiaryEnrolled"
     },
     {
+      "event_key": "claim_committed",
+      "fingerprint": "sha256:52f4e724f639ea31aa0ed5b3946bf91d790bfe9c9773b813602d35b00d5b00dc",
+      "schema": "events/claim_committed.json",
+      "struct": "ClaimCommitted"
+    },
+    {
+      "event_key": "claim_expired",
+      "fingerprint": "sha256:34aea123ccd4e8bd4d2e8b2a0fb8c44db4a4ccfbc2a1f13b5da5525fb1baa0d2",
+      "schema": "events/claim_expired.json",
+      "struct": "ClaimExpired"
+    },
+    {
+      "event_key": "claim_revealed",
+      "fingerprint": "sha256:faf5c8cdb3386c933e61c990712b65cfa687892c3e5d4efef033211fb25f029d",
+      "schema": "events/claim_revealed.json",
+      "struct": "ClaimRevealed"
+    },
+    {
       "event_key": "condition_expired",
       "fingerprint": "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036",
       "schema": "events/condition_expired.json",
