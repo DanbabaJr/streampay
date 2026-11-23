@@ -46,6 +46,28 @@
       }
     },
     {
+      "file": "records/dispute_0000.bin",
+      "kind": "dispute",
+      "durability": "Persistent",
+      "key": "vec[symbol:Active,u64:1]",
+      "fields": {
+        "bond": "i128:600000000",
+        "expires_at": "u64:1701555200",
+        "raised_by": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "started_at": "u64:1700950400",
+        "stream_id": "u64:1"
+      }
+    },
+    {
+      "file": "records/dispute_count_0000.bin",
+      "kind": "dispute_count",
+      "durability": "Persistent",
+      "key": "vec[symbol:Count,u64:1]",
+      "fields": {
+        "value": "u32:1"
+      }
+    },
+    {
       "file": "records/fee_bps_0000.bin",
       "kind": "fee_bps",
       "durability": "Instance",
@@ -275,6 +297,38 @@
       }
     },
     {
+      "file": "records/sponsor_config_0000.bin",
+      "kind": "sponsor_config",
+      "durability": "Persistent",
+      "key": "vec[symbol:SponsorConfig,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM]",
+      "fields": {
+        "active": "bool:false",
+        "per_beneficiary_limit": "i128:500000000",
+        "per_period_limit": "i128:2000000000",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "window_seconds": "u64:86400"
+      }
+    },
+    {
+      "file": "records/sponsor_operator_key_0000.bin",
+      "kind": "sponsor_operator_key",
+      "durability": "Persistent",
+      "key": "vec[symbol:OperatorKey,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM]",
+      "fields": {
+        "value": "bytes:1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "file": "records/sponsor_period_0000.bin",
+      "kind": "sponsor_period",
+      "durability": "Persistent",
+      "key": "vec[symbol:SponsorPeriod,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM]",
+      "fields": {
+        "period_start": "u64:1700259200",
+        "spend": "i128:0"
+      }
+    },
+    {
       "file": "records/stream_0000.bin",
       "kind": "stream",
       "durability": "Persistent",
@@ -455,6 +509,17 @@
       }
     },
     {
+      "file": "events/dispute_raised.bin",
+      "name": "dispute_raised",
+      "topics": "vec[symbol:dispute_raised,u64:1]",
+      "data": "map{symbol:bond=i128:600000000,symbol:expires_at=u64:1701555200,symbol:recipient=address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4}",
+      "fields": {
+        "bond": "i128:600000000",
+        "expires_at": "u64:1701555200",
+        "recipient": "address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+      }
+    },
+    {
       "file": "events/fee_charged.bin",
       "name": "fee_charged",
       "topics": "vec[symbol:fee_charged,u64:3]",
@@ -560,6 +625,27 @@
         "occurrence_index": "u32:0",
         "occurrences_remaining": "u32:0",
         "stream_id": "u64:4"
+      }
+    },
+    {
+      "file": "events/sponsor_active_set.bin",
+      "name": "sponsor_active_set",
+      "topics": "vec[symbol:sponsor_active_set,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM,symbol:active]",
+      "data": "map{symbol:active=bool:false}",
+      "fields": {
+        "active": "bool:false"
+      }
+    },
+    {
+      "file": "events/sponsor_registered.bin",
+      "name": "sponsor_registered",
+      "topics": "vec[symbol:sponsor_registered,address:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM,symbol:registered]",
+      "data": "map{symbol:per_beneficiary_limit=i128:500000000,symbol:per_period_limit=i128:2000000000,symbol:token=address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL,symbol:window_seconds=u64:86400}",
+      "fields": {
+        "per_beneficiary_limit": "i128:500000000",
+        "per_period_limit": "i128:2000000000",
+        "token": "address:CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
+        "window_seconds": "u64:86400"
       }
     },
     {
