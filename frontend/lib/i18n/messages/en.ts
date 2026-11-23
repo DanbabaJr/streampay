@@ -93,6 +93,19 @@ export const en = {
   "home.walletNoAddress": "no address returned from Freighter.",
   "home.walletFailed": "Wallet connection failed: {reason}",
 
+  "empty.dashboard.title": "No streams yet",
+  "empty.dashboard.body":
+    "Your payment streams will appear here. Create your first stream above, or browse the discovery directory for inspiration.",
+  "empty.dashboard.action": "Browse the directory",
+  "empty.listings.title": "No listings found",
+  "empty.listings.body":
+    "No public streams match the current filters yet. Listings stay hidden until enough streams share the same asset and bands — tick “Show low-anonymity streams” above to inspect rare ones.",
+  "empty.listings.action": "Create a stream",
+  "empty.analytics.title": "No streams to analyse",
+  "empty.analytics.body":
+    "Enter a Stellar address above, or create your first stream to see accrual history and income forecasts.",
+  "empty.analytics.action": "Create a stream",
+
   "pay.loading.title": "Resolving Payment Link",
   "pay.loading.body": "Verifying cryptographic commitment on Stellar Soroban…",
   "pay.invalid.title": "Invalid Payment Link",
