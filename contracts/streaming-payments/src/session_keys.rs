@@ -137,7 +137,11 @@ pub fn withdraw_delegated(
     }
 
     // Advance window if fixed/rolling period has elapsed
-    if now >= policy.current_period_start.saturating_add(policy.period_seconds) {
+    if now
+        >= policy
+            .current_period_start
+            .saturating_add(policy.period_seconds)
+    {
         policy.current_period_start = now;
         policy.spent_current_period = 0;
     }

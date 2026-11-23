@@ -3,11 +3,7 @@
 
 extern crate std;
 
-use soroban_sdk::{
-    testutils::Address as _,
-    token::Client as TokenClient,
-    Address, BytesN,
-};
+use soroban_sdk::{testutils::Address as _, token::Client as TokenClient, Address, BytesN};
 
 use crate::privacy_claims::compute_commitment_hash;
 use crate::test::Fixture;
@@ -35,9 +31,13 @@ fn test_commit_and_reveal_claim_happy_path() {
     let safety_deposit = 50_000_000i128;
 
     // 1. Commit claim
-    f.client
-        .mock_all_auths()
-        .commit_claim(&id, &f.recipient, &commitment_hash, &safety_deposit, &reveal_deadline);
+    f.client.mock_all_auths().commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &safety_deposit,
+        &reveal_deadline,
+    );
 
     // Commitment is tracked
     let record = f
@@ -81,23 +81,27 @@ fn test_reveal_claim_fails_with_wrong_salt_or_amount() {
     let commitment_hash = compute_commitment_hash(&f.env, id, &f.recipient, claim_amount, &salt);
     let reveal_deadline = f.ledger_time() + DAY;
 
-    f.client
-        .mock_all_auths()
-        .commit_claim(&id, &f.recipient, &commitment_hash, &0i128, &reveal_deadline);
+    f.client.mock_all_auths().commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &0i128,
+        &reveal_deadline,
+    );
 
     // Wrong salt should fail (hash mismatch => not found)
     let wrong_salt = BytesN::from_array(&f.env, &[2u8; 32]);
-    let res = f
-        .client
-        .mock_all_auths()
-        .try_reveal_claim(&id, &f.recipient, &claim_amount, &wrong_salt);
+    let res =
+        f.client
+            .mock_all_auths()
+            .try_reveal_claim(&id, &f.recipient, &claim_amount, &wrong_salt);
     assert!(res.is_err());
 
     // Wrong amount should fail
-    let res2 = f
-        .client
-        .mock_all_auths()
-        .try_reveal_claim(&id, &f.recipient, &(claim_amount + 1), &salt);
+    let res2 =
+        f.client
+            .mock_all_auths()
+            .try_reveal_claim(&id, &f.recipient, &(claim_amount + 1), &salt);
     assert!(res2.is_err());
 }
 
@@ -112,9 +116,13 @@ fn test_reveal_claim_fails_after_deadline() {
     let commitment_hash = compute_commitment_hash(&f.env, id, &f.recipient, claim_amount, &salt);
     let reveal_deadline = f.ledger_time() + 100;
 
-    f.client
-        .mock_all_auths()
-        .commit_claim(&id, &f.recipient, &commitment_hash, &0i128, &reveal_deadline);
+    f.client.mock_all_auths().commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &0i128,
+        &reveal_deadline,
+    );
 
     // Advance past deadline
     f.advance_time(101);
@@ -138,9 +146,13 @@ fn test_expire_reveal_safety_valve() {
     let reveal_deadline = f.ledger_time() + 200;
     let deposit = 25_000_000i128;
 
-    f.client
-        .mock_all_auths()
-        .commit_claim(&id, &f.recipient, &commitment_hash, &deposit, &reveal_deadline);
+    f.client.mock_all_auths().commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &deposit,
+        &reveal_deadline,
+    );
 
     // Calling before deadline fails
     let early = f
@@ -174,14 +186,21 @@ fn test_duplicate_commitment_rejected() {
     let commitment_hash = compute_commitment_hash(&f.env, id, &f.recipient, claim_amount, &salt);
     let reveal_deadline = f.ledger_time() + 500;
 
-    f.client
-        .mock_all_auths()
-        .commit_claim(&id, &f.recipient, &commitment_hash, &0i128, &reveal_deadline);
+    f.client.mock_all_auths().commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &0i128,
+        &reveal_deadline,
+    );
 
-    let dup = f
-        .client
-        .mock_all_auths()
-        .try_commit_claim(&id, &f.recipient, &commitment_hash, &0i128, &reveal_deadline);
+    let dup = f.client.mock_all_auths().try_commit_claim(
+        &id,
+        &f.recipient,
+        &commitment_hash,
+        &0i128,
+        &reveal_deadline,
+    );
     assert!(dup.is_err());
 }
 
@@ -203,9 +222,14 @@ fn test_authorize_agent_and_delegated_withdrawal_happy_path() {
     let expires_at = f.ledger_time() + 5 * DAY;
 
     // Recipient authorizes agent
-    f.client
-        .mock_all_auths()
-        .authorize_agent(&f.recipient, &agent, &id, &max_per_period, &period_seconds, &expires_at);
+    f.client.mock_all_auths().authorize_agent(
+        &f.recipient,
+        &agent,
+        &id,
+        &max_per_period,
+        &period_seconds,
+        &expires_at,
+    );
 
     let policy = f
         .client
@@ -247,9 +271,14 @@ fn test_delegated_withdrawal_enforces_spend_cap() {
     let period_seconds = DAY;
     let expires_at = f.ledger_time() + 5 * DAY;
 
-    f.client
-        .mock_all_auths()
-        .authorize_agent(&f.recipient, &agent, &id, &max_per_period, &period_seconds, &expires_at);
+    f.client.mock_all_auths().authorize_agent(
+        &f.recipient,
+        &agent,
+        &id,
+        &max_per_period,
+        &period_seconds,
+        &expires_at,
+    );
 
     // First withdrawal uses 800M of 1000M cap
     f.client
@@ -275,9 +304,14 @@ fn test_delegated_withdrawal_period_resets_spent() {
     let period_seconds = DAY;
     let expires_at = f.ledger_time() + 5 * DAY;
 
-    f.client
-        .mock_all_auths()
-        .authorize_agent(&f.recipient, &agent, &id, &max_per_period, &period_seconds, &expires_at);
+    f.client.mock_all_auths().authorize_agent(
+        &f.recipient,
+        &agent,
+        &id,
+        &max_per_period,
+        &period_seconds,
+        &expires_at,
+    );
 
     // Exhaust cap
     f.client
@@ -309,9 +343,14 @@ fn test_revoke_agent_immediately_blocks_withdrawals() {
     let period_seconds = DAY;
     let expires_at = f.ledger_time() + 5 * DAY;
 
-    f.client
-        .mock_all_auths()
-        .authorize_agent(&f.recipient, &agent, &id, &max_per_period, &period_seconds, &expires_at);
+    f.client.mock_all_auths().authorize_agent(
+        &f.recipient,
+        &agent,
+        &id,
+        &max_per_period,
+        &period_seconds,
+        &expires_at,
+    );
 
     // Recipient revokes agent
     f.client
@@ -340,9 +379,14 @@ fn test_delegated_withdrawal_fails_after_expiry() {
     let period_seconds = DAY;
     let expires_at = f.ledger_time() + 100;
 
-    f.client
-        .mock_all_auths()
-        .authorize_agent(&f.recipient, &agent, &id, &max_per_period, &period_seconds, &expires_at);
+    f.client.mock_all_auths().authorize_agent(
+        &f.recipient,
+        &agent,
+        &id,
+        &max_per_period,
+        &period_seconds,
+        &expires_at,
+    );
 
     // Advance past expiry
     f.advance_time(101);

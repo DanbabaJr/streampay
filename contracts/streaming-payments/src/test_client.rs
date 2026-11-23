@@ -414,10 +414,7 @@ pub trait StreamingPaymentsApi {
         commitment_hash: BytesN<32>,
         sender: Address,
     ) -> Result<i128, StreamError>;
-    fn get_claim_commitment(
-        env: Env,
-        commitment_hash: BytesN<32>,
-    ) -> Option<ClaimCommitment>;
+    fn get_claim_commitment(env: Env, commitment_hash: BytesN<32>) -> Option<ClaimCommitment>;
 
     // ------------------------------------------------------ session keys (#56)
     fn authorize_agent(
@@ -441,9 +438,5 @@ pub trait StreamingPaymentsApi {
         agent: Address,
         stream_id: u64,
     ) -> Result<(), StreamError>;
-    fn get_session_policy(
-        env: Env,
-        agent: Address,
-        stream_id: u64,
-    ) -> Option<SessionKeyPolicy>;
+    fn get_session_policy(env: Env, agent: Address, stream_id: u64) -> Option<SessionKeyPolicy>;
 }

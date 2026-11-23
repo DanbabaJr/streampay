@@ -5673,7 +5673,14 @@ impl StreamingPayments {
         reveal_deadline: u64,
     ) -> Result<(), StreamError> {
         Self::require_not_frozen(&env)?;
-        privacy_claims::commit_claim(&env, stream_id, recipient, commitment_hash, deposit, reveal_deadline)
+        privacy_claims::commit_claim(
+            &env,
+            stream_id,
+            recipient,
+            commitment_hash,
+            deposit,
+            reveal_deadline,
+        )
     }
 
     pub fn reveal_claim(
@@ -5719,7 +5726,15 @@ impl StreamingPayments {
         expires_at: u64,
     ) -> Result<(), StreamError> {
         Self::require_not_frozen(&env)?;
-        session_keys::authorize_agent(&env, recipient, agent, stream_id, max_per_period, period_seconds, expires_at)
+        session_keys::authorize_agent(
+            &env,
+            recipient,
+            agent,
+            stream_id,
+            max_per_period,
+            period_seconds,
+            expires_at,
+        )
     }
 
     pub fn withdraw_delegated(
