@@ -109,7 +109,7 @@ pub mod oracle;
 mod policy;
 pub mod privacy_claims;
 #[cfg(test)]
-mod privacy_session_keys_test;
+mod privacy_claims_test;
 pub mod receivables;
 #[cfg(test)]
 mod receivables_conditions_templates_hooks_test;
@@ -118,7 +118,6 @@ mod schedule;
 mod schedule_test;
 #[cfg(test)]
 mod schema_guard_test;
-pub mod session_keys;
 pub(crate) mod sponsor;
 #[cfg(test)]
 mod sponsor_test;
@@ -138,7 +137,6 @@ pub use hooks::{HookEventClass, HookFailurePolicy, StreamHook};
 pub use oracle::{ConditionPredicate, ConditionStatus, StreamCondition};
 pub use privacy_claims::ClaimCommitment;
 pub use receivables::{Advance, ReceivablesConfig};
-pub use session_keys::SessionKeyPolicy;
 pub use templates::{StreamTemplate, TemplateLineage};
 
 use soroban_sdk::{
@@ -5919,75 +5917,4 @@ impl StreamingPayments {
         privacy_claims::get_commitment(&env, commitment_hash)
     }
 
-    // -----------------------------------------------------------------------
-    // Session Keys: Capped Delegated Withdrawals (Issue #56)
-    // -----------------------------------------------------------------------
-
-    pub fn authorize_agent(
-        env: Env,
-        recipient: Address,
-        agent: Address,
-        stream_id: u64,
-        max_per_period: i128,
-        period_seconds: u64,
-        expires_at: u64,
-    ) -> Result<(), StreamError> {
-        Self::require_not_frozen(&env)?;
-        session_keys::authorize_agent(
-            &env,
-            recipient,
-            agent,
-            stream_id,
-            max_per_period,
-            period_seconds,
-            expires_at,
-        )
-    }
-
-    pub fn withdraw_delegated(
-        env: Env,
-        agent: Address,
-        stream_id: u64,
-        amount: i128,
-    ) -> Result<(), StreamError> {
-        Self::require_not_frozen(&env)?;
-        if hooks::is_stream_locked(&env, stream_id) {
-            return Err(surface::reject(Branch::HookReentrancyBlocked));
-        }
-        if amount <= 0 {
-            return Err(surface::reject(Branch::WithdrawAmountNonPositive));
-        }
-        if oracle::is_release_gated(&env, stream_id) {
-            return Err(surface::reject(Branch::ConditionNotMet));
-        }
-        let _policy = session_keys::withdraw_delegated(&env, agent, stream_id, amount)?;
-        let mut s = stream::get_stream(&env, stream_id)?;
-        if s.status != StreamStatus::Active {
-            return Err(surface::reject(Branch::StreamNotActive));
-        }
-        let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
-        let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
-        if amount > available {
-            return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
-        }
-        Self::pay_out(&env, &mut s, amount)
-    }
-
-    pub fn revoke_agent(
-        env: Env,
-        recipient: Address,
-        agent: Address,
-        stream_id: u64,
-    ) -> Result<(), StreamError> {
-        Self::require_not_frozen(&env)?;
-        session_keys::revoke_agent(&env, recipient, agent, stream_id)
-    }
-
-    pub fn get_session_policy(
-        env: Env,
-        agent: Address,
-        stream_id: u64,
-    ) -> Option<session_keys::SessionKeyPolicy> {
-        session_keys::get_session_policy(&env, agent, stream_id)
-    }
 }

@@ -14,7 +14,7 @@ use crate::{
     Advance, BatchEntry, ClaimCommitment, ConditionPredicate, Dispute, FeeScan, GovernanceAction,
     HookEventClass, HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership,
     PendingRateChange, PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment,
-    ReceivablesConfig, ScheduledIntent, SenderHistory, SessionKeyPolicy, SponsorConfig, Stream,
+    ReceivablesConfig, ScheduledIntent, SenderHistory, SponsorConfig, Stream,
     StreamCondition, StreamError, StreamHook, StreamInput, StreamPolicy, StreamTemplate,
     TemplateLineage, TreasuryStatus, WithdrawAllResult, WithdrawEntry,
 };
@@ -437,28 +437,4 @@ pub trait StreamingPaymentsApi {
         sender: Address,
     ) -> Result<i128, StreamError>;
     fn get_claim_commitment(env: Env, commitment_hash: BytesN<32>) -> Option<ClaimCommitment>;
-
-    // ------------------------------------------------------ session keys (#56)
-    fn authorize_agent(
-        env: Env,
-        recipient: Address,
-        agent: Address,
-        stream_id: u64,
-        max_per_period: i128,
-        period_seconds: u64,
-        expires_at: u64,
-    ) -> Result<(), StreamError>;
-    fn withdraw_delegated(
-        env: Env,
-        agent: Address,
-        stream_id: u64,
-        amount: i128,
-    ) -> Result<(), StreamError>;
-    fn revoke_agent(
-        env: Env,
-        recipient: Address,
-        agent: Address,
-        stream_id: u64,
-    ) -> Result<(), StreamError>;
-    fn get_session_policy(env: Env, agent: Address, stream_id: u64) -> Option<SessionKeyPolicy>;
 }
