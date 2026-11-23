@@ -55,10 +55,18 @@ function sampleArgs(functionName: string): Record<string, TxValue> {
 }
 
 describe("canonical contract spec", () => {
-  it("is the expected 117-entrypoint surface", () => {
-    expect(SPEC_FUNCTIONS).toHaveLength(117);
-    expect(SPEC_FUNCTIONS.map((entry) => entry.name)).toContain("create_stream");
-    expect(SPEC_FUNCTIONS.map((entry) => entry.name)).toContain("governance_propose");
+  it("exposes one unique entrypoint per name, and never loses the shipped surface", () => {
+    const names = SPEC_FUNCTIONS.map((entry) => entry.name);
+    // A merge that lands a second `#[contractimpl]` leg for a name the contract
+    // already publishes reaches this file as a duplicate entry, and the builder
+    // then silently dispatches to whichever copy the map keeps last.
+    expect(new Set(names).size).toBe(names.length);
+    // Lower bound, not an exact count: the surface only ever grows (an added
+    // entrypoint must not break the frontend), while a dropped one — a revert,
+    // or a spec regenerated from a partial tree — must fail here.
+    expect(names.length).toBeGreaterThanOrEqual(117);
+    expect(names).toContain("create_stream");
+    expect(names).toContain("governance_propose");
   });
 
   it("builds a contract invocation for every entrypoint from generated values", () => {
