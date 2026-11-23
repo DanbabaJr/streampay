@@ -224,24 +224,6 @@
       "struct": "PolicyInitialized"
     },
     {
-      "event_key": "policy_violation",
-      "fingerprint": "sha256:10071886268a2746a79e1f8805dc9ddf29deab41e25f509c5f090e2f0d6160c9",
-      "schema": "events/policy_violation.json",
-      "struct": "PolicyViolation"
-    },
-    {
-      "event_key": "power_accrued",
-      "fingerprint": "sha256:232e2f47141941af6627d84d054912046c45f45ff7718f0c5de604f8ad92ea2d",
-      "schema": "events/power_accrued.json",
-      "struct": "PowerAccrued"
-    },
-    {
-      "event_key": "premium_accrued",
-      "fingerprint": "sha256:72903d27c1e52db990a59bbd91cb1bc03693d093c5d891a86a671f54513d5485",
-      "schema": "events/premium_accrued.json",
-      "struct": "PremiumAccrued"
-    },
-    {
       "event_key": "rate_change_accepted",
       "fingerprint": "sha256:66b7fcbf7e912df0adfb728f6dd025e43a3678b76885950fb68c9e7b1ea41da3",
       "schema": "events/rate_change_accepted.json",
@@ -270,18 +252,6 @@
       "fingerprint": "sha256:318937479fdb35060d6640657c70d51fcda211fc4408f5902b7eac1224f89f06",
       "schema": "events/scheduled_stream_executed.json",
       "struct": "ScheduledStreamExecuted"
-    },
-    {
-      "event_key": "sender_policy_revoked",
-      "fingerprint": "sha256:8030033801d3958a02d20bf73ec897334af25181a4c0b176f1e043e05f672d40",
-      "schema": "events/sender_policy_revoked.json",
-      "struct": "SenderPolicyRevoked"
-    },
-    {
-      "event_key": "sender_policy_set",
-      "fingerprint": "sha256:8d74d339202956d5afd9f19ed4b22769f4b89c7d25da0623d9fb3bba0e479dfa",
-      "schema": "events/sender_policy_set.json",
-      "struct": "SenderPolicySet"
     },
     {
       "event_key": "sender_transfer_expired",
@@ -408,12 +378,6 @@
       "fingerprint": "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed",
       "schema": "events/upgrade_proposed.json",
       "struct": "UpgradeProposed"
-    },
-    {
-      "event_key": "vote_cast",
-      "fingerprint": "sha256:df7a22f9ea409c602d3b89e28f5da15a3295136e9b7c9972ec532b3546b6518b",
-      "schema": "events/vote_cast.json",
-      "struct": "VoteCast"
     },
     {
       "event_key": "withdrawn",

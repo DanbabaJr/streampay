@@ -49,7 +49,6 @@
 use soroban_sdk::{contracttype, Address, Env};
 
 use crate::errors::StreamError;
-use crate::insurance;
 use crate::stream::{DataKey, MAX_PAGE_SIZE, TTL_EXTEND_LEDGERS, TTL_THRESHOLD_LEDGERS};
 use crate::surface::{self, Branch};
 
@@ -223,11 +222,10 @@ pub fn apply_fee(
     stream_id: u64,
     amount: i128,
 ) -> Result<(), StreamError> {
-    let treasury_amount = insurance::route_fee_slice(env, token, amount);
     let mut treasury = get_treasury(env, token);
     treasury.charged_total = treasury
         .charged_total
-        .checked_add(treasury_amount)
+        .checked_add(amount)
         .ok_or(StreamError::MathOverflow)?;
     put_treasury(env, token, &treasury);
 
