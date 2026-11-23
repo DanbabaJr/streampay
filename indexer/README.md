@@ -516,3 +516,33 @@ checkpoint for an in-flight move.
   as the pipeline sink); the HTTP server in `src/index.ts` still uses a
   single `StreamStore`, and there is no `/metrics` sharding endpoint or
   operator CLI for moves yet. Wiring those up is the natural follow-up.
+
+## 8. Multi-region active-active (issue #583)
+
+`src/multiregion/` runs several fully independent regions — each polls RPC,
+projects and serves reads — instead of a primary with replicas. Deployment
+manifests live in [`infra/multiregion`](../infra/multiregion/README.md).
+
+- **Watermarks and lag** (`watermarks.ts`): every region reports
+  `(watermark, health)`; `streampay_region_ledger_watermark`,
+  `streampay_region_consistency_lag_ledgers` and `streampay_region_healthy` are
+  derived from those reports. Watermarks are monotonic per region, and the lag is
+  measured against the highest watermark reported anywhere.
+- **Freshness-based reads** (`router.ts`): `FreshnessReadRouter` picks the
+  freshest healthy region (lowest lag, then priority, then id — deterministic),
+  never a region further behind than `maxLagLedgers`, and `routeFor(ledger)`
+  enforces read-your-writes. With no qualifying region it throws
+  `NoFreshRegionError` rather than serving stale state.
+- **Deterministic convergence** (`convergence.ts`): `foldStream` folds a stream's
+  journal in `(ledger, id)` order into the reference row; `compareRegions`
+  reports the streams that disagree, and `reconcileRegion` repairs them
+  idempotently. A late event dropped by the monotonic guard is still journalled,
+  so convergence is a fold, not a merge of histories.
+- **One fenced delivery leader** (`leader.ts`): `delivery_leases` holds one epoch
+  per subscription. A takeover increments the epoch and `assertLeader` /
+  `runFenced` reject the stale leader, so failover cannot double-deliver an
+  outbox intent (the intent claim token is a second guard).
+
+`src/multiregion/regions.test.ts` covers the region-loss chaos cases: divergent
+arrival orders converge, a region dying mid-ingest loses nothing committed, and
+a stalled delivery leader is fenced out with every event delivered exactly once.
