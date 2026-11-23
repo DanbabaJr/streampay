@@ -11,12 +11,7 @@ say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 # ---------------------------------------------------------------- stellar-cli
 say "Installing stellar-cli v${STELLAR_CLI_VERSION}"
-TARBALL="stellar-cli-${STELLAR_CLI_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz"
-curl -fsSL \
-  "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/${TARBALL}" \
-  | tar xz -C /tmp
-sudo install /tmp/stellar /usr/local/bin/stellar
-stellar --version
+"${REPO_ROOT}/scripts/install_stellar_cli.sh" "${STELLAR_CLI_VERSION}"
 
 # -------------------------------------------------------------------- wasm build smoke test
 # soroban-sdk 28 requires the stellar-cli build path (spec-shaking v2 handshake).

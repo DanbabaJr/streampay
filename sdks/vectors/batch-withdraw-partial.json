@@ -1,0 +1,82 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "batch-withdraw-partial",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
+  "provenance": "withdraw_many_answers_carry_the_amount_or_the_stable_error_code.1.json plus withdraw_many_settles_eligible_streams_and_reports_the_rest.1.json: stream 1 paid, stream 2 is StreamNotActive, stream 99 is StreamNotFound; non-strict mode returns per-entry rows and the BatchWithdrawSummary.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAANd2l0aGRyYXdfbWFueQAAAAAAAAMAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAEAAAAAEAAAADAAAABQAAAAAAAAABAAAABQAAAAAAAAACAAAABQAAAAAAAABjAAAAAAAAAAAAAAAAAAAAAAAAAAEURtIsAAAAQC6wA5GmPJB+OVNPETK9+2rc8EX9SLPMP0MFRBI7depnr6KWE/CorgOjNM4HINZWllWWqz2D+T3rW72JudyCkAc=",
+  "resultXdr": "AAAAEAAAAAEAAAADAAAAEQAAAAEAAAADAAAADwAAAAlzdHJlYW1faWQAAAAAAAAFAAAAAAAAAAEAAAAPAAAABmFtb3VudAAAAAAACgAAAAAAAAAAAAAAAlQL5AAAAAAPAAAABGNvZGUAAAADAAAAAAAAABEAAAABAAAAAwAAAA8AAAAJc3RyZWFtX2lkAAAAAAAABQAAAAAAAAACAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAAAAAAAAAAADwAAAARjb2RlAAAAAwAAAAUAAAARAAAAAQAAAAMAAAAPAAAACXN0cmVhbV9pZAAAAAAAAAUAAAAAAAAAYwAAAA8AAAAGYW1vdW50AAAAAAAKAAAAAAAAAAAAAAAAAAAAAAAAAA8AAAAEY29kZQAAAAMAAAAB",
+  "eventsXdr": [
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAEAAAAAAAAAAgAAAA8AAAAJd2l0aGRyYXduAAAAAAAABQAAAAAAAAABAAAAEQAAAAEAAAADAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAJUC+QAAAAADwAAAAlyZWNpcGllbnQAAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAADwAAAA93aXRoZHJhd25fdG90YWwAAAAACgAAAAAAAAAAAAAAAlQL5AA=",
+    "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAEAAAAAAAAAAgAAAA8AAAAWYmF0Y2hfd2l0aGRyYXdfc3VtbWFyeQAAAAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAABEAAAABAAAABAAAAA8AAAAJcmVxdWVzdGVkAAAAAAAAAwAAAAMAAAAPAAAAB3NldHRsZWQAAAAAEAAAAAEAAAABAAAAEQAAAAEAAAACAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAJUC+QAAAAADwAAAAlzdHJlYW1faWQAAAAAAAAFAAAAAAAAAAEAAAAPAAAAB3NraXBwZWQAAAAAAwAAAAIAAAAPAAAABXRvdGFsAAAAAAAACgAAAAAAAAAAAAAAAlQL5AA="
+  ],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "withdraw_many",
+      "args": {
+        "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        "stream_ids": [
+          "1",
+          "2",
+          "99"
+        ],
+        "strict": false
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "ok": [
+        {
+          "stream_id": "1",
+          "amount": "10000000000",
+          "code": 0
+        },
+        {
+          "stream_id": "2",
+          "amount": "0",
+          "code": 5
+        },
+        {
+          "stream_id": "99",
+          "amount": "0",
+          "code": 1
+        }
+      ]
+    },
+    "events": [
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "name": "Withdrawn",
+        "topics": {
+          "stream_id": "1"
+        },
+        "data": {
+          "amount": "10000000000",
+          "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+          "withdrawn_total": "10000000000"
+        }
+      },
+      {
+        "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        "name": "BatchWithdrawSummary",
+        "topics": {
+          "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+        },
+        "data": {
+          "requested": "3",
+          "settled": [
+            {
+              "amount": "10000000000",
+              "stream_id": "1"
+            }
+          ],
+          "skipped": "2",
+          "total": "10000000000"
+        }
+      }
+    ]
+  }
+}

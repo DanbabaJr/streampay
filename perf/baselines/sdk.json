@@ -1,0 +1,13 @@
+{
+  "commit": "perf/sdk-conformance",
+  "updated_at": "2026-11-23T00:00:00Z",
+  "metrics": {
+    "sdk_vector_conformance_ms": {
+      "budget": 8000,
+      "baseline": 5248.9,
+      "unit": "ms",
+      "tolerance_percent": 20,
+      "description": "Median wall time of 3 runs of the offline TypeScript SDK vector-conformance test"
+    }
+  }
+}

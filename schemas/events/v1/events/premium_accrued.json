@@ -1,0 +1,44 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/premium_accrued.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "pool_balance": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "amount",
+    "pool_balance"
+  ],
+  "title": "PremiumAccrued",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "premium_accrued",
+    "fingerprint": "sha256:72903d27c1e52db990a59bbd91cb1bc03693d093c5d891a86a671f54513d5485",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "token",
+        "type": "Address"
+      }
+    ]
+  }
+}

@@ -51,10 +51,7 @@ jobs:
 
       # Pin must stay in sync with ci.yml / promote.yml / devcontainer.json.
       - name: Install stellar-cli v28.1.0
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Install script dependencies
         working-directory: scripts

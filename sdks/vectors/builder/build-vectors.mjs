@@ -78,10 +78,25 @@ const SNAPSHOT_DIR = join(
 const signer = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 7));
 
 const toScVal = (type, value) => {
+  if (typeof type === "object" && type !== null) {
+    if ("option" in type) return nativeToScVal(value);
+    if ("vec" in type) {
+      return nativeToScVal(
+        value.map((item) => BigInt(item)),
+        { type: type.vec }
+      );
+    }
+  }
   if (type === "address") {
     return nativeToScVal(new Address(value), { type: "address" });
   }
   if (type === "bool") return nativeToScVal(Boolean(value));
+  if (type === "vec:u64") {
+    return nativeToScVal(value.map((item) => BigInt(item)), { type: "u64" });
+  }
+  if (type.startsWith("option:")) {
+    return nativeToScVal(value);
+  }
   return nativeToScVal(BigInt(value), { type });
 };
 
@@ -162,6 +177,9 @@ const canonicalOf = (node, type) => {
 const loadSnapshot = (snapshotFile, dir = SNAPSHOT_DIR) =>
   JSON.parse(readFileSync(join(dir, snapshotFile), "utf8"));
 
+const mapOf = (node) =>
+  Object.fromEntries(node.map.map(({ key, val }) => [key.symbol, val]));
+
 /** The `Stream` struct stored for `streamId` in a snapshot's ledger. */
 const loadStoredStream = (
   snapshotFile,
@@ -211,6 +229,83 @@ const loadEvent = (
   }
   return matches[0].event;
 };
+
+const loadContractEvents = (
+  snapshotFile,
+  eventNames,
+  { dir = SNAPSHOT_DIR, contract = CONTRACT_ID } = {}
+) =>
+  loadSnapshot(snapshotFile, dir).events
+    .map((entry) => entry.event)
+    .filter(
+      (event) =>
+        event.contract_id === contract &&
+        event.body.v0.topics[0]?.symbol &&
+        eventNames.includes(event.body.v0.topics[0].symbol)
+    );
+
+const contractEvent = (contract, topic, topicNodes, dataNodes) => ({
+  contract_id: contract,
+  type: "contract",
+  body: {
+    v0: {
+      topics: [{ symbol: topic }, ...topicNodes],
+      data: {
+        map: Object.entries(dataNodes)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([key, val]) => ({ key: { symbol: key }, val })),
+      },
+    },
+  },
+});
+
+const withdrawEntryNode = (streamId, amount, code) => ({
+  map: [
+    { key: { symbol: "stream_id" }, val: { u64: String(streamId) } },
+    { key: { symbol: "amount" }, val: { i128: String(amount) } },
+    { key: { symbol: "code" }, val: { u32: code } },
+  ],
+});
+
+const withdrawAllNode = ({
+  transfers,
+  successfulStreamIds,
+  failedStreams,
+  nextOffset,
+}) => ({
+  map: [
+    {
+      key: { symbol: "transfers" },
+      val: {
+        vec: transfers.map(({ token, amount }) => ({
+          map: [
+            { key: { symbol: "token" }, val: { address: token } },
+            { key: { symbol: "amount" }, val: { i128: String(amount) } },
+          ],
+        })),
+      },
+    },
+    {
+      key: { symbol: "successful_stream_ids" },
+      val: { vec: successfulStreamIds.map((id) => ({ u64: String(id) })) },
+    },
+    {
+      key: { symbol: "failed_streams" },
+      val: {
+        vec: failedStreams.map(({ streamId, errorCode }) => ({
+          map: [
+            { key: { symbol: "stream_id" }, val: { u64: String(streamId) } },
+            { key: { symbol: "error_code" }, val: { u32: errorCode } },
+          ],
+        })),
+      },
+    },
+    {
+      key: { symbol: "next_offset" },
+      val: nextOffset === null ? { void: true } : { u32: nextOffset },
+    },
+  ],
+});
 
 const eventToExpected = (event) => {
   const specEvent = spec.events.find(
@@ -375,6 +470,208 @@ const scenarios = [
     args: () => ({ stream_id: "1" }),
     error: "StreamNotActive",
   },
+  (() => {
+    const snapshot = "withdraw_many_footprint_harness.1.json";
+    const ids = Array.from({ length: 20 }, (_, index) => index + 1);
+    const amount = "10000000000";
+    return {
+      name: "batch-withdraw-success",
+      provenance:
+        "withdraw_many_settles_20 fully vested streams in contracts/streaming-payments/test_snapshots/test/withdraw_many_footprint_harness.1.json: one Withdrawn event per stream, then BatchWithdrawSummary; returns one WithdrawEntry per id.",
+      snapshot,
+      event: null,
+      snapshotDir: SNAPSHOT_DIR,
+      function: "withdraw_many",
+      args: () => ({
+        recipient: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        stream_ids: ids.map(String),
+        strict: false,
+      }),
+      events: () =>
+        loadContractEvents(snapshot, ["withdrawn", "batch_withdraw_summary"])
+          .filter((event) => event.body.v0.topics[0].symbol === "withdrawn" ||
+            event.body.v0.topics[0].symbol === "batch_withdraw_summary"),
+      resultScVal: () =>
+        scValXdr(
+          {
+            vec: ids.map((id) => withdrawEntryNode(id, amount, 0)),
+          },
+          StrKey
+        ),
+      result: ids.map((id) => ({
+        stream_id: String(id),
+        amount,
+        code: 0,
+      })),
+    };
+  })(),
+  (() => {
+    const snapshot = "withdraw_many_answers_carry_the_amount_or_the_stable_error_code.1.json";
+    return {
+      name: "batch-withdraw-partial",
+      provenance:
+        "withdraw_many_answers_carry_the_amount_or_the_stable_error_code.1.json plus withdraw_many_settles_eligible_streams_and_reports_the_rest.1.json: stream 1 paid, stream 2 is StreamNotActive, stream 99 is StreamNotFound; non-strict mode returns per-entry rows and the BatchWithdrawSummary.",
+      snapshot,
+      event: null,
+      snapshotDir: SNAPSHOT_DIR,
+      function: "withdraw_many",
+      args: () => ({
+        recipient: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        stream_ids: ["1", "2", "99"],
+        strict: false,
+      }),
+      events: () =>
+        loadContractEvents(snapshot, ["withdrawn", "batch_withdraw_summary"]),
+      resultScVal: () =>
+        scValXdr(
+          {
+            vec: [
+              withdrawEntryNode(1, "10000000000", 0),
+              withdrawEntryNode(2, 0, errorCode("StreamNotActive")),
+              withdrawEntryNode(99, 0, errorCode("StreamNotFound")),
+            ],
+          },
+          StrKey
+        ),
+      result: [
+        { stream_id: "1", amount: "10000000000", code: 0 },
+        { stream_id: "2", amount: "0", code: errorCode("StreamNotActive") },
+        { stream_id: "99", amount: "0", code: errorCode("StreamNotFound") },
+      ],
+    };
+  })(),
+  {
+    name: "error-batch-withdraw-empty",
+    provenance:
+      "withdraw_many_bounds_the_batch_and_rejects_duplicates_upfront.1.json/test assertion: an empty stream_ids vector reverts with WithdrawBatchEmpty before any stream is read.",
+    snapshot: null,
+    event: null,
+    function: "withdraw_many",
+    args: () => ({
+      recipient: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+      stream_ids: [],
+      strict: false,
+    }),
+    error: "WithdrawBatchEmpty",
+  },
+  {
+    name: "error-batch-withdraw-unknown-strict",
+    provenance:
+      "withdraw_many strict/unknown-stream semantics from withdraw_many_settles_eligible_streams_and_reports_the_rest.1.json: strict=true turns StreamNotFound into a top-level revert, while non-strict mode returns it as a WithdrawEntry code.",
+    snapshot: null,
+    event: null,
+    function: "withdraw_many",
+    args: () => ({
+      recipient: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+      stream_ids: ["99"],
+      strict: true,
+    }),
+    error: "StreamNotFound",
+  },
+  (() => {
+    const snapshot = "withdraw_all_aggregates_transfers_per_asset.1.json";
+    const snapshotData = loadSnapshot(snapshot);
+    const streamData = (snapshotData.ledger?.ledger_entries || [])
+      .map((item) => item.entry?.data?.contract_data)
+      .find((data) => data?.key?.vec?.[0]?.symbol === "Stream");
+    if (!streamData) throw new Error(`${snapshot}: missing Stream ledger entry`);
+    const contract = streamData.contract;
+    const stream1 = mapOf(loadStoredStream(snapshot, "1", { contract }));
+    const stream2 = mapOf(loadStoredStream(snapshot, "2", { contract }));
+    const stream3 = mapOf(loadStoredStream(snapshot, "3", { contract }));
+    const recipient = stream1.recipient.address;
+    return {
+      name: "claim-all-success",
+      provenance:
+        "withdraw_all_aggregates_transfers_per_asset.1.json and withdraw_all_aggregates_transfers_per_asset contract assertions: three active streams pay 5,000,000,000 / 10,000,000,000 / 5,000,000,000 and aggregate by asset.",
+      snapshot,
+      event: null,
+      snapshotDir: SNAPSHOT_DIR,
+      function: "withdraw_all",
+      args: () => ({ recipient, page_bounds: null }),
+      events: () => [
+        contractEvent(contract, "withdrawn", [{ u64: "1" }], {
+          recipient: { address: recipient },
+          amount: { i128: "5000000000" },
+          withdrawn_total: { i128: "5000000000" },
+        }),
+        contractEvent(contract, "withdrawn", [{ u64: "2" }], {
+          recipient: { address: recipient },
+          amount: { i128: "10000000000" },
+          withdrawn_total: { i128: "10000000000" },
+        }),
+        contractEvent(contract, "withdrawn", [{ u64: "3" }], {
+          recipient: { address: recipient },
+          amount: { i128: "5000000000" },
+          withdrawn_total: { i128: "5000000000" },
+        }),
+      ],
+      resultScVal: () =>
+        scValXdr(
+          withdrawAllNode({
+            transfers: [
+              { token: stream1.token.address, amount: "15000000000" },
+              { token: stream3.token.address, amount: "5000000000" },
+            ],
+            successfulStreamIds: ["1", "2", "3"],
+            failedStreams: [],
+            nextOffset: null,
+          }),
+          StrKey
+        ),
+      result: {
+        transfers: [
+          { token: stream1.token.address, amount: "15000000000" },
+          { token: stream3.token.address, amount: "5000000000" },
+        ],
+        successful_stream_ids: ["1", "2", "3"],
+        failed_streams: [],
+        next_offset: null,
+      },
+    };
+  })(),
+  (() => {
+    const snapshot = "withdraw_all_partial_failure_isolation.1.json";
+    const stream1 = mapOf(loadStoredStream(snapshot, "1"));
+    const contract = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4";
+    const recipient = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4";
+    return {
+      name: "claim-all-partial",
+      provenance:
+        "withdraw_all_partial_failure_isolation.1.json and contract assertions: stream 1 succeeds, unstarted/cancelled/depleted streams are returned as ClaimFailure rows, and the active amount is aggregated as one transfer.",
+      snapshot,
+      event: null,
+      snapshotDir: SNAPSHOT_DIR,
+      function: "withdraw_all",
+      args: () => ({ recipient, page_bounds: null }),
+      events: () =>
+        loadContractEvents(snapshot, ["withdrawn"]),
+      resultScVal: () =>
+        scValXdr(
+          withdrawAllNode({
+            transfers: [{ token: stream1.token.address, amount: "5000000000" }],
+            successfulStreamIds: ["1"],
+            failedStreams: [
+              { streamId: "2", errorCode: errorCode("NothingToWithdraw") },
+              { streamId: "3", errorCode: errorCode("StreamNotActive") },
+              { streamId: "4", errorCode: errorCode("StreamNotActive") },
+            ],
+            nextOffset: null,
+          }),
+          StrKey
+        ),
+      result: {
+        transfers: [{ token: stream1.token.address, amount: "5000000000" }],
+        successful_stream_ids: ["1"],
+        failed_streams: [
+          { stream_id: "2", error_code: errorCode("NothingToWithdraw") },
+          { stream_id: "3", error_code: errorCode("StreamNotActive") },
+          { stream_id: "4", error_code: errorCode("StreamNotActive") },
+        ],
+        next_offset: null,
+      },
+    };
+  })(),
   ...[
     ["get-stream-active", "create_stream_accepts_exact_capacity_boundary.1.json"],
     ["get-stream-cancelled", "cancel_before_start_refunds_everything_to_sender.1.json"],
@@ -409,9 +706,6 @@ const SCHEDULE_SNAPSHOT_DIR = join(
   "schedule_test"
 );
 const scheduleSnap = (name) => `${name}.1.json`;
-
-const mapOf = (node) =>
-  Object.fromEntries(node.map.map(({ key, val }) => [key.symbol, val]));
 
 /** The stored `Intent(1)` entry of a schedule snapshot. */
 const loadStoredIntent = (snapshotFile) => {

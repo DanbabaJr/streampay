@@ -1,0 +1,41 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/claim_rejected.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "",
+  "properties": {
+    "reason": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    }
+  },
+  "required": [
+    "reason"
+  ],
+  "title": "ClaimRejected",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "claim_rejected",
+    "fingerprint": "sha256:9e9ad4bd703bda333f8ad1f182fcf8bb002087722163eb1a76807d3f3d9dffbd",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "claim_id",
+        "type": "u64"
+      }
+    ]
+  }
+}
