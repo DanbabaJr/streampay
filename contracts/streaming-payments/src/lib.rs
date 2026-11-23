@@ -5916,5 +5916,4 @@ impl StreamingPayments {
     ) -> Option<privacy_claims::ClaimCommitment> {
         privacy_claims::get_commitment(&env, commitment_hash)
     }
-
 }

@@ -5,7 +5,7 @@
 use crate::events::OracleStaleFallback;
 use crate::test::Fixture;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger as _},
+    testutils::{Address as _, Events as _},
     Address, Event as _, Vec,
 };
 

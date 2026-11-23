@@ -14,9 +14,9 @@ use crate::{
     Advance, BatchEntry, ClaimCommitment, ConditionPredicate, Dispute, FeeScan, GovernanceAction,
     HookEventClass, HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership,
     PendingRateChange, PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment,
-    ReceivablesConfig, ScheduledIntent, SenderHistory, SponsorConfig, Stream,
-    StreamCondition, StreamError, StreamHook, StreamInput, StreamPolicy, StreamTemplate,
-    TemplateLineage, TreasuryStatus, WithdrawAllResult, WithdrawEntry,
+    ReceivablesConfig, ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamCondition,
+    StreamError, StreamHook, StreamInput, StreamPolicy, StreamTemplate, TemplateLineage,
+    TreasuryStatus, WithdrawAllResult, WithdrawEntry,
 };
 
 /// Interface of the StreamPay streaming-payments contract.

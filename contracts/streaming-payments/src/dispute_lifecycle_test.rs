@@ -52,10 +52,20 @@ fn total(f: &Fixture) -> i128 {
 
 /// Conservation invariant: value is neither created nor destroyed, and the
 /// contract holds exactly `escrow` (stream funds still owed) + `bond_held`.
-fn assert_bond_accounted(f: &Fixture, initial_total: i128, escrow: i128, bond_held: i128, ctx: &str) {
+fn assert_bond_accounted(
+    f: &Fixture,
+    initial_total: i128,
+    escrow: i128,
+    bond_held: i128,
+    ctx: &str,
+) {
     assert_eq!(total(f), initial_total, "{ctx}: total value conserved");
     let (_, _, contract) = balances(f);
-    assert_eq!(contract, escrow + bond_held, "{ctx}: contract = escrow + held bond");
+    assert_eq!(
+        contract,
+        escrow + bond_held,
+        "{ctx}: contract = escrow + held bond"
+    );
 }
 
 /// Extracts the registered contract error from a `try_*` client result.
@@ -78,13 +88,18 @@ fn dispute_lifecycle_raise_then_reject_forfeits_bond_to_sender() {
     assert_eq!(d.bond, BOND);
     assert_bond_accounted(&f, t0, DEPOSIT, BOND, "after raise");
 
-    f.client.mock_all_auths().resolve_dispute(&f.sender, &id, &false);
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
 
     let (s1, r1, _) = balances(&f);
     assert_eq!(s1 - s0, BOND, "bond forfeited to sender");
     assert_eq!(r1 - r0, 0, "recipient gets nothing back");
     assert_bond_accounted(&f, t0, DEPOSIT, 0, "after reject");
-    assert_eq!(f.client.mock_all_auths().get_stream(&id).status, StreamStatus::Active);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).status,
+        StreamStatus::Active
+    );
 }
 
 #[test]
@@ -97,15 +112,24 @@ fn dispute_lifecycle_raise_then_accept_returns_bond_to_recipient() {
     let (s0, r0, _) = balances(&f);
     assert_bond_accounted(&f, t0, DEPOSIT, BOND, "after raise");
 
-    f.client.mock_all_auths().resolve_dispute(&f.sender, &id, &true);
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &true);
 
     let accrued = DEPOSIT * 4 / 10;
     let (s1, r1, _) = balances(&f);
     assert_eq!(r1 - r0, BOND + accrued, "bond returned plus accrued funds");
-    assert_eq!(s1 - s0, DEPOSIT - accrued, "sender refunded the unaccrued remainder");
+    assert_eq!(
+        s1 - s0,
+        DEPOSIT - accrued,
+        "sender refunded the unaccrued remainder"
+    );
     // Stream escrow is fully unwound, bond fully released.
     assert_bond_accounted(&f, t0, 0, 0, "after accept");
-    assert_eq!(f.client.mock_all_auths().get_stream(&id).status, StreamStatus::Cancelled);
+    assert_eq!(
+        f.client.mock_all_auths().get_stream(&id).status,
+        StreamStatus::Cancelled
+    );
 }
 
 #[test]
@@ -120,7 +144,11 @@ fn dispute_lifecycle_raise_then_expire_splits_bond_without_loss() {
     f.client.mock_all_auths().expire_dispute(&id);
 
     let (sender_share, recipient_share) = bond_shares(BOND);
-    assert_eq!(sender_share + recipient_share, BOND, "shares sum to the bond");
+    assert_eq!(
+        sender_share + recipient_share,
+        BOND,
+        "shares sum to the bond"
+    );
     let (s1, r1, _) = balances(&f);
     assert_eq!(s1 - s0, sender_share);
     assert_eq!(r1 - r0, recipient_share);
@@ -158,7 +186,7 @@ fn dispute_lifecycle_clawback_timelock_holds_bond_until_expires_at() {
     // One second early: reverts, nothing moves, dispute stays open.
     f.advance_time(TIMEOUT - 1);
     let err = err_of(f.client.mock_all_auths().try_expire_dispute(&id));
-    assert_eq!(err,StreamError::DisputeNotExpired);
+    assert_eq!(err, StreamError::DisputeNotExpired);
     assert_eq!(balances(&f), before, "no value moved on early expire");
     assert_bond_accounted(&f, t0, DEPOSIT, BOND, "during timelock");
     assert_eq!(f.client.get_dispute(&id), d);
@@ -176,12 +204,18 @@ fn dispute_lifecycle_resolve_twice_reverts() {
     let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
     f.raise_dispute(id);
     let t0 = total(&f);
-    f.client.mock_all_auths().resolve_dispute(&f.sender, &id, &false);
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
     let after = balances(&f);
 
     for accept in [false, true] {
-        let err = err_of(f.client.mock_all_auths().try_resolve_dispute(&f.sender, &id, &accept));
-        assert_eq!(err,StreamError::DisputeNotFound);
+        let err = err_of(
+            f.client
+                .mock_all_auths()
+                .try_resolve_dispute(&f.sender, &id, &accept),
+        );
+        assert_eq!(err, StreamError::DisputeNotFound);
     }
     assert_eq!(balances(&f), after, "second resolve moves nothing");
     assert_bond_accounted(&f, t0, DEPOSIT, 0, "after double resolve");
@@ -198,8 +232,12 @@ fn dispute_lifecycle_resolve_after_expiry_reverts() {
     let after = balances(&f);
 
     for accept in [false, true] {
-        let err = err_of(f.client.mock_all_auths().try_resolve_dispute(&f.sender, &id, &accept));
-        assert_eq!(err,StreamError::DisputeNotFound);
+        let err = err_of(
+            f.client
+                .mock_all_auths()
+                .try_resolve_dispute(&f.sender, &id, &accept),
+        );
+        assert_eq!(err, StreamError::DisputeNotFound);
     }
     assert_eq!(balances(&f), after, "resolve after expiry moves nothing");
     assert_bond_accounted(&f, t0, DEPOSIT, 0, "after resolve-after-expiry");
@@ -211,13 +249,15 @@ fn dispute_lifecycle_expire_after_resolve_reverts() {
     let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
     f.raise_dispute(id);
     let t0 = total(&f);
-    f.client.mock_all_auths().resolve_dispute(&f.sender, &id, &false);
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
     let after = balances(&f);
 
     // Even well past the timelock, a resolved dispute cannot be expired.
     f.advance_time(2 * TIMEOUT);
     let err = err_of(f.client.mock_all_auths().try_expire_dispute(&id));
-    assert_eq!(err,StreamError::DisputeNotFound);
+    assert_eq!(err, StreamError::DisputeNotFound);
     assert_eq!(balances(&f), after, "expire after resolve moves nothing");
     assert_bond_accounted(&f, t0, DEPOSIT, 0, "after expire-after-resolve");
 }
@@ -233,7 +273,7 @@ fn dispute_lifecycle_expire_twice_reverts() {
     let after = balances(&f);
 
     let err = err_of(f.client.mock_all_auths().try_expire_dispute(&id));
-    assert_eq!(err,StreamError::DisputeNotFound);
+    assert_eq!(err, StreamError::DisputeNotFound);
     assert_eq!(balances(&f), after, "second expire moves nothing");
     assert_bond_accounted(&f, t0, DEPOSIT, 0, "after double expire");
 }
@@ -244,7 +284,9 @@ fn dispute_lifecycle_second_round_bond_is_accounted_independently() {
     let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
 
     f.raise_dispute(id);
-    f.client.mock_all_auths().resolve_dispute(&f.sender, &id, &false);
+    f.client
+        .mock_all_auths()
+        .resolve_dispute(&f.sender, &id, &false);
 
     // Round two escalates the bond; it is held, then split on expiry.
     let d2 = f.raise_dispute(id);

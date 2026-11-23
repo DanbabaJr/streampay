@@ -6,6 +6,23 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
+## v1.0.6 — 2026-11-23 (privacy commit-reveal claims #677, `main` repair)
+
+Three additive events; no existing event changed shape (entry count 64 → 67).
+All three carry the positional topic `stream_id:u64`:
+
+- `ClaimCommitted`: added event (data `recipient`, `commitment_hash`, `reveal_deadline`) — emitted by `commit_claim` when a recipient books a hashed claim amount behind a safety deposit.
+- `ClaimRevealed`: added event (data `recipient`, `commitment_hash`, `amount`) — emitted by `reveal_claim` when the preimage matches the commitment and the withdrawal settles.
+- `ClaimExpired`: added event (data `sender`, `commitment_hash`, `deposit`) — emitted by `expire_reveal` when the reveal deadline passes and the sender reclaims the deposit.
+
+The same repair reverts #626, whose insurance-pool / voting-power surface was
+merged without its `errors.rs` half — `main` did not compile at that merge, so
+no Wasm built from it ever emitted its events, and no release or deployment
+contains them. Six registry entries therefore disappear with the revert:
+`PolicyViolation`, `PowerAccrued`, `PremiumAccrued`, `SenderPolicyRevoked`,
+`SenderPolicySet`, `VoteCast`. No consumer could have depended on them, so no
+v1 → v2 coexistence is needed.
+
 ## v1.0.5 — 2026-11-21 (session-key delegation, #660)
 
 Two additive events; no existing event changed shape (entry count 62 → 64).

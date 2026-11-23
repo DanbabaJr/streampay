@@ -1932,7 +1932,13 @@ fn streamed_at_boundary_matrix() {
         // Max rate, duration 1: product fits u128, exact full deposit.
         ("max rate", i128::MAX, 1, 1, Ok(i128::MAX)),
         // Max rate, elapsed 2: product 2^128-2 still fits; cap at deposit.
-        ("max rate capped past window", i128::MAX, 1, 2, Ok(i128::MAX)),
+        (
+            "max rate capped past window",
+            i128::MAX,
+            1,
+            2,
+            Ok(i128::MAX),
+        ),
         // Largest fitting product is floored, not rounded up (ADR 0004).
         ("max rate floored", i128::MAX, 4, 2, Ok(i128::MAX / 2)),
         // Product exceeds u128: reverts with MathOverflow.
@@ -5409,7 +5415,9 @@ fn non_sep41_token_return_reports_transfer_failure() {
 #[test]
 fn session_keys_full_lifecycle_and_delegated_withdrawal() {
     let f = Fixture::setup();
-    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    // Fast stream (5e9/day) so accrued funds never become the binding limit while
+    // the period cap is exercised: the availability guard runs before the cap.
+    let id = f.create_stream(DEPOSIT, DAY, 2 * DAY, false);
     let agent = Address::generate(&f.env);
     let now = f.env.ledger().timestamp();
 
@@ -5442,7 +5450,8 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
     assert_eq!(cap.period_withdrawn, 0);
     assert_eq!(cap.total_withdrawn, 0);
 
-    // Advance time into stream accrual: 2 days elapsed (2/10 = 2_000_000_000 accrued)
+    // Advance time into stream accrual: the stream started one day after creation,
+    // so one of its two days has elapsed (5_000_000_000 of the deposit is accrued).
     f.advance_time(2 * DAY);
 
     // Agent executes partial delegated withdrawal of 500_000_000

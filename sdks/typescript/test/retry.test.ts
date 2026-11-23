@@ -109,7 +109,7 @@ function mockServer(script: {
 
 /** Exposes the protected pipeline with a trivial decoder. */
 class TestClient extends StreamPayClient {
-  invoke(): Promise<number> {
+  ping(): Promise<number> {
     return this.call("ping", [], true, (value) => Number(scValToNative(value)));
   }
 }
@@ -215,7 +215,7 @@ test("default client: a transient send failure surfaces immediately, untouched",
   const boom = httpError(503);
   const { server, calls } = mockServer({ send: [boom] });
   const clock = fakeClock();
-  await assert.rejects(client(server, clock).invoke(), (error) => error === boom);
+  await assert.rejects(client(server, clock).ping(), (error) => error === boom);
   assert.equal(calls.send.length, 1);
   assert.deepEqual(clock.sleeps, []);
 });
@@ -231,7 +231,7 @@ test("transient failure then success: retries with backoff and resolves", async 
     baseDelayMs: 100,
     maxDelayMs: 1000,
     onRetry: (info) => seen.push(info),
-  }).invoke();
+  }).ping();
 
   assert.equal(result, 9);
   assert.equal(calls.send.length, 3);
@@ -246,7 +246,7 @@ test("every retry resends the byte-identical signed envelope", async () => {
     send: [networkError(), networkError(), "PENDING"],
     get: [rpc.Api.GetTransactionStatus.NOT_FOUND, rpc.Api.GetTransactionStatus.NOT_FOUND, rpc.Api.GetTransactionStatus.SUCCESS],
   });
-  await client(server, fakeClock(), { maxAttempts: 3 }).invoke();
+  await client(server, fakeClock(), { maxAttempts: 3 }).ping();
   assert.equal(calls.send.length, 3);
   assert.equal(new Set(calls.send).size, 1, "no rebuild, no re-sign, no new sequence number");
 });
@@ -256,7 +256,7 @@ test("a lost response whose transaction already landed is not resent", async () 
     send: [networkError("ETIMEDOUT")],
     get: [rpc.Api.GetTransactionStatus.SUCCESS],
   });
-  const result = await client(server, fakeClock(), true).invoke();
+  const result = await client(server, fakeClock(), true).ping();
   assert.equal(result, 9);
   assert.equal(calls.send.length, 1, "idempotency check found the hash; no second send");
 });
@@ -269,7 +269,7 @@ test("a bad-seq rejection after an unanswered send resolves to our own transacti
       rpc.Api.GetTransactionStatus.SUCCESS, // the first send did land after all
     ],
   });
-  const result = await client(server, fakeClock(), true).invoke();
+  const result = await client(server, fakeClock(), true).ping();
   assert.equal(result, 9);
   assert.equal(calls.send.length, 2);
 });
@@ -277,7 +277,7 @@ test("a bad-seq rejection after an unanswered send resolves to our own transacti
 test("permanent failure surfaces immediately even with a policy", async () => {
   const { server, calls } = mockServer({ send: ["ERROR"] });
   const clock = fakeClock();
-  await assert.rejects(client(server, clock, { maxAttempts: 5 }).invoke(), (error: unknown) => {
+  await assert.rejects(client(server, clock, { maxAttempts: 5 }).ping(), (error: unknown) => {
     assert.ok(error instanceof StreamPayError);
     assert.equal(error.kind, "submission");
     return true;
@@ -287,7 +287,7 @@ test("permanent failure surfaces immediately even with a policy", async () => {
 
   const bad = httpError(400);
   const second = mockServer({ send: [bad] });
-  await assert.rejects(client(second.server, fakeClock(), { maxAttempts: 5 }).invoke(), (e) => e === bad);
+  await assert.rejects(client(second.server, fakeClock(), { maxAttempts: 5 }).ping(), (e) => e === bad);
   assert.equal(second.calls.send.length, 1);
 });
 
@@ -298,18 +298,18 @@ test("attempts are bounded and the last transient error is rethrown", async () =
     get: [rpc.Api.GetTransactionStatus.NOT_FOUND],
   });
   const clock = fakeClock();
-  await assert.rejects(client(server, clock, { maxAttempts: 3 }).invoke(), (e) => e === last);
+  await assert.rejects(client(server, clock, { maxAttempts: 3 }).ping(), (e) => e === last);
   assert.equal(calls.send.length, 3);
   assert.equal(clock.sleeps.length, 2);
 });
 
 test("TRY_AGAIN_LATER is retried, and reported as a submission error when it never clears", async () => {
   const ok = mockServer({ send: ["TRY_AGAIN_LATER", "PENDING"] });
-  assert.equal(await client(ok.server, fakeClock(), true).invoke(), 9);
+  assert.equal(await client(ok.server, fakeClock(), true).ping(), 9);
   assert.equal(ok.calls.send.length, 2);
 
   const stuck = mockServer({ send: ["TRY_AGAIN_LATER"] });
-  await assert.rejects(client(stuck.server, fakeClock(), { maxAttempts: 2 }).invoke(), (error: unknown) => {
+  await assert.rejects(client(stuck.server, fakeClock(), { maxAttempts: 2 }).ping(), (error: unknown) => {
     assert.ok(error instanceof StreamPayError);
     assert.equal(error.kind, "submission");
     assert.match(error.message, /TRY_AGAIN_LATER after 2 attempts/);
@@ -321,7 +321,7 @@ test("TRY_AGAIN_LATER is retried, and reported as a submission error when it nev
 test("ambiguous timeout: submitted but unconfirmed is never resubmitted", async () => {
   const { server, calls } = mockServer({ get: [rpc.Api.GetTransactionStatus.NOT_FOUND] });
   const clock = fakeClock();
-  await assert.rejects(client(server, clock, { maxAttempts: 5 }).invoke(), (error: unknown) => {
+  await assert.rejects(client(server, clock, { maxAttempts: 5 }).ping(), (error: unknown) => {
     assert.ok(error instanceof StreamPayError);
     assert.equal(error.kind, "inclusion");
     assert.match(error.message, /timed out after 100ms/);
@@ -336,7 +336,7 @@ test("transient status reads keep polling instead of failing the call", async ()
   const { server, calls } = mockServer({
     get: [httpError(503), networkError(), rpc.Api.GetTransactionStatus.SUCCESS],
   });
-  assert.equal(await client(server, fakeClock(), true).invoke(), 9);
+  assert.equal(await client(server, fakeClock(), true).ping(), 9);
   assert.equal(calls.send.length, 1);
   assert.equal(calls.get.length, 3);
 });
@@ -348,7 +348,7 @@ test("preflight stages retry transient failures before anything is signed", asyn
   });
   const clock = fakeClock([0]);
   const stages: string[] = [];
-  await client(server, clock, { maxDelayMs: 5000, onRetry: (i) => stages.push(i.stage) }).invoke();
+  await client(server, clock, { maxDelayMs: 5000, onRetry: (i) => stages.push(i.stage) }).ping();
   assert.equal(calls.getAccount, 2);
   assert.equal(calls.simulate, 2);
   assert.deepEqual(stages, ["account", "simulation"]);

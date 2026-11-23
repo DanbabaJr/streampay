@@ -3,7 +3,7 @@
 
 extern crate std;
 
-use soroban_sdk::{testutils::Address as _, token::Client as TokenClient, Address, BytesN};
+use soroban_sdk::{token::Client as TokenClient, BytesN};
 
 use crate::privacy_claims::compute_commitment_hash;
 use crate::test::Fixture;
