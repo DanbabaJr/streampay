@@ -19,14 +19,60 @@ export interface WebhookDispatchResult {
   durationMs: number;
 }
 
+export interface ReconcilerAlertingMetrics {
+  roundingWithinToleranceCount: number;
+  realDivergenceCount: number;
+  webhooksDispatchedCount: number;
+  webhooksFailedCount: number;
+}
+
 export class AlertingService {
   private config: AlertingConfig;
   private webhookUrl?: string;
   private httpAgent = createHttpAgent();
+  private metrics: ReconcilerAlertingMetrics = {
+    roundingWithinToleranceCount: 0,
+    realDivergenceCount: 0,
+    webhooksDispatchedCount: 0,
+    webhooksFailedCount: 0,
+  };
 
   constructor(config: AlertingConfig) {
     this.config = config;
     this.webhookUrl = config.webhookUrl;
+  }
+
+  /**
+   * Record a rounding within epsilon event in metrics without paging/webhook dispatch.
+   */
+  recordRounding(d: DivergenceRecord): void {
+    this.metrics.roundingWithinToleranceCount++;
+    this.log("INFO", `Rounding tolerance within epsilon detected for stream ${d.streamId}`, {
+      streamId: d.streamId,
+      classification: d.classification,
+      delta: d.delta,
+      toleranceEpsilon: d.toleranceEpsilon,
+      checkType: d.checkType,
+    });
+  }
+
+  /**
+   * Get current metrics snapshot.
+   */
+  getMetrics(): ReconcilerAlertingMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics counters (useful between test runs or audit cycles).
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      roundingWithinToleranceCount: 0,
+      realDivergenceCount: 0,
+      webhooksDispatchedCount: 0,
+      webhooksFailedCount: 0,
+    };
   }
 
   /**
@@ -49,9 +95,22 @@ export class AlertingService {
 
   /**
    * Dispatch a divergence alert to the webhook target.
+   * Only pages on real divergences (suppresses webhooks for rounding within epsilon).
    */
   async dispatchWebhook(d: DivergenceRecord): Promise<WebhookDispatchResult> {
     const start = Date.now();
+
+    // Guard: Suppress paging/webhook dispatch for rounding within tolerance epsilon
+    if (d.classification === "rounding_within_epsilon") {
+      this.recordRounding(d);
+      return {
+        success: true,
+        message: "Suppressed: rounding within epsilon",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    this.metrics.realDivergenceCount++;
     const payload = this.buildWebhookPayload(d);
     const payloadStr = JSON.stringify(payload);
 
@@ -59,6 +118,7 @@ export class AlertingService {
       payloadSize: payloadStr.length,
       checkType: d.checkType,
       severity: d.severity,
+      classification: d.classification,
     });
 
     if (!this.webhookUrl) {
@@ -73,6 +133,12 @@ export class AlertingService {
       });
 
       const success = response.status >= 200 && response.status < 300;
+      if (success) {
+        this.metrics.webhooksDispatchedCount++;
+      } else {
+        this.metrics.webhooksFailedCount++;
+      }
+
       this.log(success ? "INFO" : "WARN", `Webhook dispatch ${success ? "succeeded" : "failed"}`, {
         status: response.status,
         durationMs: Date.now() - start,
@@ -94,6 +160,7 @@ export class AlertingService {
         durationMs: Date.now() - start,
       };
     } catch (err: unknown) {
+      this.metrics.webhooksFailedCount++;
       const message = err instanceof Error ? err.message : String(err);
       this.log("WARN", `Webhook dispatch failed: ${message}`, {
         durationMs: Date.now() - start,
@@ -101,6 +168,85 @@ export class AlertingService {
         error: message,
       });
 
+      return { success: false, message, durationMs: Date.now() - start };
+    }
+  }
+
+  /**
+   * Dispatch a three-way diagnosis with its layer attribution and evidence.
+   */
+  async dispatchDiagnosis(
+    diagnosis: {
+      recordId?: string;
+      severity?: string;
+      detectedAt?: string;
+      checkType?: string;
+      disagreeingPairs?: string[];
+      suspectedLayer?: string;
+      owner?: string;
+      confidence?: string;
+      evidence?: unknown;
+    },
+    report: { generatedAt?: string; asOfLedger?: number | null; mode?: string; caveats?: string[] }
+  ): Promise<WebhookDispatchResult> {
+    const start = Date.now();
+    const payload = {
+      alert: {
+        type: "reconciliation_diagnosis",
+        severity: diagnosis.severity,
+        timestamp: diagnosis.detectedAt ?? report.generatedAt,
+        source: "reconciler",
+        data: {
+          recordId: diagnosis.recordId,
+          divergenceType: diagnosis.checkType,
+          disagreeingPairs: diagnosis.disagreeingPairs,
+          suspectedLayer: diagnosis.suspectedLayer,
+          owner: diagnosis.owner,
+          confidence: diagnosis.confidence,
+          asOfLedger: report.asOfLedger,
+          mode: report.mode,
+          caveats: report.caveats,
+          evidence: diagnosis.evidence,
+        },
+      },
+      metadata: {
+        version: "2.0.0",
+        environment: this.config.environment,
+        reconcilerId: this.config.reconcilerId,
+      },
+    };
+
+    if (!this.webhookUrl) {
+      this.log("WARN", "No WEBHOOK_URL configured — diagnosis not dispatched", {
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+      });
+      return { success: false, message: "No webhook URL configured", durationMs: Date.now() - start };
+    }
+
+    try {
+      const response = await this.httpAgent.post(this.webhookUrl, JSON.stringify(payload), {
+        "Content-Type": "application/json",
+        "User-Agent": `streampay-reconciler/${this.config.reconcilerId}`,
+      });
+      const success = response.status >= 200 && response.status < 300;
+      this.log(success ? "INFO" : "WARN", `Diagnosis webhook ${success ? "succeeded" : "failed"}`, {
+        status: response.status,
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+        durationMs: Date.now() - start,
+      });
+      return {
+        success,
+        status: response.status,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log("WARN", `Diagnosis webhook failed: ${message}`, {
+        recordId: diagnosis.recordId,
+        durationMs: Date.now() - start,
+      });
       return { success: false, message, durationMs: Date.now() - start };
     }
   }
@@ -118,6 +264,9 @@ export class AlertingService {
         data: {
           streamId: d.streamId,
           divergenceType: d.checkType,
+          classification: d.classification,
+          delta: d.delta,
+          toleranceEpsilon: d.toleranceEpsilon,
           horizonState: d.indexedValue,
           sorobanState: d.onChainValue,
           lagMs: d.horizonLagMs ?? d.sorobanLagMs ?? 0,

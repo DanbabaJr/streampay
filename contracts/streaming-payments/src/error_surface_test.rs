@@ -493,12 +493,7 @@ fn probe(branch: Branch) -> Option<StreamError> {
             let agent = soroban_sdk::Address::generate(&f.env);
             let now = f.env.ledger().timestamp();
             Some(rejected!(f.client.mock_all_auths().try_authorize_agent(
-                &id,
-                &agent,
-                &DEPOSIT,
-                &DEPOSIT,
-                &DAY,
-                &now,
+                &id, &agent, &DEPOSIT, &DEPOSIT, &DAY, &now,
             )))
         }
         Branch::WithdrawDelegatedAgentNotAuthorized => {

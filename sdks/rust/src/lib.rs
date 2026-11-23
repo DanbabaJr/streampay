@@ -44,6 +44,7 @@ use stellar_strkey::{ed25519, Strkey};
 use stellar_xdr::{AccountId, ContractId, Hash, PublicKey, ScAddress, ScError, ScVal, Uint256};
 
 mod generated;
+pub mod vectors;
 
 pub use generated::*;
 

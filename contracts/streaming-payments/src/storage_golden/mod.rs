@@ -320,7 +320,9 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 /// dispatch arm here fails the generator and the decode test by
 /// construction, which is the point.
 pub(crate) fn kind_for_key(env: &Env, key_sc: &xdr::ScVal) -> Option<String> {
+    use crate::dispute::DisputeKey;
     use crate::policy::PolicyDataKey;
+    use crate::sponsor::SponsorKey;
     use crate::stream::DataKey;
     if key_sc == &xdr::ScVal::LedgerKeyContractInstance {
         return Some("contract_instance".to_string());
@@ -366,6 +368,8 @@ pub(crate) fn kind_for_key(env: &Env, key_sc: &xdr::ScVal) -> Option<String> {
             DataKey::StreamTemplateLineage(_) => "stream_template_lineage",
             DataKey::StreamHook(_, _) => "stream_hook",
             DataKey::StreamReentrancyLock(_) => "stream_reentrancy_lock",
+            DataKey::AgentAuth(_, _) => "agent_auth",
+            DataKey::AgentCap(_, _) => "agent_cap",
         }));
     }
     if let Ok(pk) = PolicyDataKey::try_from_val(env, key_sc) {
@@ -377,6 +381,22 @@ pub(crate) fn kind_for_key(env: &Env, key_sc: &xdr::ScVal) -> Option<String> {
             PolicyDataKey::QueuedAsset(_) => "queued_asset",
             PolicyDataKey::StreamPolicy(_) => "stream_policy",
             PolicyDataKey::GlobalStreamPolicy => "global_stream_policy",
+        }));
+    }
+    if let Ok(dk) = DisputeKey::try_from_val(env, key_sc) {
+        return Some(sanitize(match dk {
+            DisputeKey::Active(_) => "dispute",
+            DisputeKey::Count(_) => "dispute_count",
+        }));
+    }
+    if let Ok(sk) = SponsorKey::try_from_val(env, key_sc) {
+        return Some(sanitize(match sk {
+            SponsorKey::SponsorConfig(_) => "sponsor_config",
+            SponsorKey::OperatorKey(_) => "sponsor_operator_key",
+            SponsorKey::SponsorPeriod(_) => "sponsor_period",
+            SponsorKey::BeneficiaryKey(_) => "sponsor_beneficiary_key",
+            SponsorKey::BeneficiarySpend(_, _) => "sponsor_beneficiary_spend",
+            SponsorKey::ClaimNonce(_, _, _) => "sponsor_claim_nonce",
         }));
     }
     None

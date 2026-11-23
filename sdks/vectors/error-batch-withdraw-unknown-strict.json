@@ -1,0 +1,33 @@
+{
+  "schema": "streampay-vector/v1",
+  "name": "error-batch-withdraw-unknown-strict",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
+  "provenance": "withdraw_many strict/unknown-stream semantics from withdraw_many_settles_eligible_streams_and_reports_the_rest.1.json: strict=true turns StreamNotFound into a top-level revert, while non-strict mode returns it as a WithdrawEntry code.",
+  "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAANd2l0aGRyYXdfbWFueQAAAAAAAAMAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAEAAAAAEAAAABAAAABQAAAAAAAABjAAAAAAAAAAEAAAAAAAAAAAAAAAEURtIsAAAAQASSmlDE4hIw4lAVshbgr5zuZfMGfwZWXdA3wX+dVE/CEpPzLcOA1HohYZmWFQr1wFqiVAukB8+9X3v6CGbj3wQ=",
+  "resultXdr": "AAAAAgAAAAAAAAAB",
+  "eventsXdr": [],
+  "expected": {
+    "transaction": {
+      "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+      "function": "withdraw_many",
+      "args": {
+        "recipient": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        "stream_ids": [
+          "99"
+        ],
+        "strict": true
+      },
+      "source": "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57",
+      "fee": "100000",
+      "sequence": "1",
+      "signatures": 1
+    },
+    "result": {
+      "error": {
+        "name": "StreamNotFound",
+        "code": 1
+      }
+    },
+    "events": []
+  }
+}

@@ -45,7 +45,10 @@ export const ConnectedEmpty: Story = {
   parameters: { wallet: CONNECTED },
   play: async ({ canvasElement }) => {
     const canvas = await panelsLoaded(canvasElement);
-    await expect(canvas.getByText(/no streams loaded yet/i)).toBeVisible();
+    await expect(await canvas.findByText(/no streams yet/i)).toBeVisible();
+    await expect(
+      canvas.getByRole("link", { name: "Browse the directory" })
+    ).toHaveAttribute("href", "/listings");
   },
 };
 

@@ -11,12 +11,12 @@
 use soroban_sdk::{contractclient, Address, BytesN, Env, Symbol, Vec};
 
 use crate::{
-    Advance, BatchEntry, ConditionPredicate, Dispute, FeeScan, GovernanceAction, HookEventClass,
-    HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership, PendingRateChange,
-    PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment, ReceivablesConfig,
-    ScheduledIntent, SenderHistory, SponsorConfig, Stream, StreamCondition, StreamError,
-    StreamHook, StreamInput, StreamPolicy, StreamTemplate, TemplateLineage, TreasuryStatus,
-    WithdrawAllResult, WithdrawEntry,
+    Advance, BatchEntry, ClaimCommitment, ConditionPredicate, Dispute, FeeScan, GovernanceAction,
+    HookEventClass, HookFailurePolicy, MigrationStatus, PageBounds, PendingOwnership,
+    PendingRateChange, PendingSenderTransfer, PendingUpgrade, PeriodSpend, Proposal, RateSegment,
+    ReceivablesConfig, ScheduledIntent, SenderHistory, SessionKeyPolicy, SponsorConfig, Stream,
+    StreamCondition, StreamError, StreamHook, StreamInput, StreamPolicy, StreamTemplate,
+    TemplateLineage, TreasuryStatus, WithdrawAllResult, WithdrawEntry,
 };
 
 /// Interface of the StreamPay streaming-payments contract.
@@ -97,11 +97,7 @@ pub trait StreamingPaymentsApi {
         agent: Address,
         amount: i128,
     ) -> Result<(), StreamError>;
-    fn agent_status(
-        env: Env,
-        stream_id: u64,
-        agent: Address,
-    ) -> Option<(crate::AgentConfig, crate::AgentCapState)>;
+    fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<crate::AgentStatus>;
     fn withdraw_many(
         env: Env,
         recipient: Address,
@@ -417,4 +413,52 @@ pub trait StreamingPaymentsApi {
         event_class: HookEventClass,
     ) -> Result<(), StreamError>;
     fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook>;
+
+    // ------------------------------------------------------ privacy claims (#65)
+    fn commit_claim(
+        env: Env,
+        stream_id: u64,
+        recipient: Address,
+        commitment_hash: BytesN<32>,
+        deposit: i128,
+        reveal_deadline: u64,
+    ) -> Result<(), StreamError>;
+    fn reveal_claim(
+        env: Env,
+        stream_id: u64,
+        recipient: Address,
+        amount: i128,
+        salt: BytesN<32>,
+    ) -> Result<(), StreamError>;
+    fn expire_reveal(
+        env: Env,
+        stream_id: u64,
+        commitment_hash: BytesN<32>,
+        sender: Address,
+    ) -> Result<i128, StreamError>;
+    fn get_claim_commitment(env: Env, commitment_hash: BytesN<32>) -> Option<ClaimCommitment>;
+
+    // ------------------------------------------------------ session keys (#56)
+    fn authorize_agent(
+        env: Env,
+        recipient: Address,
+        agent: Address,
+        stream_id: u64,
+        max_per_period: i128,
+        period_seconds: u64,
+        expires_at: u64,
+    ) -> Result<(), StreamError>;
+    fn withdraw_delegated(
+        env: Env,
+        agent: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<(), StreamError>;
+    fn revoke_agent(
+        env: Env,
+        recipient: Address,
+        agent: Address,
+        stream_id: u64,
+    ) -> Result<(), StreamError>;
+    fn get_session_policy(env: Env, agent: Address, stream_id: u64) -> Option<SessionKeyPolicy>;
 }

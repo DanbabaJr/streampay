@@ -595,6 +595,18 @@ pub struct AgentCapState {
     pub total_withdrawn: i128,
 }
 
+/// What `agent_status` reports: the delegation a recipient granted to an agent
+/// together with the cap ledger as it stands right now. A named struct rather
+/// than a tuple because the contract spec IR maps only named types.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStatus {
+    /// The delegation configuration (caps, period length, expiry).
+    pub config: AgentConfig,
+    /// Cap ledger projected to the current period window.
+    pub cap: AgentCapState,
+}
+
 impl Stream {
     /// Seconds in the stream's full window. Always `>= 1` for a stored stream
     /// (`create_stream` rejects `end_time <= start_time`).
@@ -2140,4 +2152,3 @@ pub fn put_agent_cap(env: &Env, stream_id: u64, agent: &Address, state: &AgentCa
         .persistent()
         .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
 }
-

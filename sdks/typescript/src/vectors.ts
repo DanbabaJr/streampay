@@ -18,6 +18,8 @@ import {
   contractErrorName,
   decodeGetStreamResult,
   decodeStreamPayEvent,
+  decodeWithdrawEntry,
+  decodeWithdrawAllResult,
   type StreamPayEvent,
 } from "./generated.js";
 
@@ -68,13 +70,38 @@ function canonicalValue(value: xdr.ScVal, type: string): Canonical {
     const inner = type.slice(4);
     const native = scValToNative(value);
     if (!Array.isArray(native)) throw new Error(`${type}: expected an array`);
-    // Re-decode each element through its ScVal counterpart is not necessary:
-    // integers are the only vector type today.
     return native.map((item) => {
+      if (inner === "WithdrawEntry") {
+        const decoded = decodeWithdrawEntry(item);
+        return {
+          stream_id: decoded.streamId.toString(),
+          amount: decoded.amount.toString(),
+          code: decoded.code,
+        };
+      }
       if (inner === "u64" || inner === "i128") return String(item);
       if (inner === "address") return asString(item, inner);
       throw new Error(`unsupported vec element type ${inner}`);
     });
+  }
+  if (type === "WithdrawAllResult") {
+    const decoded = decodeWithdrawAllResult(scValToNative(value));
+    return {
+      transfers: decoded.transfers.map((transfer) => ({
+        token: transfer.token,
+        amount: transfer.amount.toString(),
+      })),
+      successful_stream_ids: decoded.successfulStreamIds.map((id) => id.toString()),
+      failed_streams: decoded.failedStreams.map((failure) => ({
+        stream_id: failure.streamId.toString(),
+        error_code: failure.errorCode,
+      })),
+      next_offset: decoded.nextOffset,
+    };
+  }
+  if (type.startsWith("option:")) {
+    const native = scValToNative(value);
+    return native === undefined ? null : native;
   }
   const native = scValToNative(value);
   switch (type) {
@@ -117,6 +144,20 @@ function canonicalEvent(event: StreamPayEvent): Canonical {
           recipient: event.recipient,
           amount: event.amount.toString(),
           withdrawn_total: event.withdrawnTotal.toString(),
+        },
+      };
+    case "BatchWithdrawSummary":
+      return {
+        ...base,
+        topics: { recipient: event.recipient },
+        data: {
+          settled: event.settled.map((outcome) => ({
+            stream_id: outcome.streamId.toString(),
+            amount: outcome.amount.toString(),
+          })),
+          total: event.total.toString(),
+          requested: String(event.requested),
+          skipped: String(event.skipped),
         },
       };
     case "StreamCancelled":

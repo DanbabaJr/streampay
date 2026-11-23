@@ -88,6 +88,8 @@ pub enum Branch {
     AcceptGovernorNoPending,
     /// `accept_governor`: the caller is not the nominated address.
     AcceptGovernorNotNominee,
+    /// `withdraw_treasury`: amount is zero or negative.
+    WithdrawTreasuryAmountNonPositive,
     /// `withdraw_treasury`: amount exceeds fees collected minus fees already
     /// withdrawn.
     WithdrawTreasuryExceedsBalance,
@@ -567,7 +569,7 @@ impl Branch {
             | Branch::CreateDurationTooLong => &["create_stream", "create_streams"],
             Branch::CreateBatchEmpty | Branch::CreateBatchTooLarge => &["create_streams_batch"],
             Branch::WithdrawAmountNonPositive | Branch::WithdrawAmountExceedsAvailable => {
-                &["withdraw"]
+                &["withdraw", "withdraw_delegated"]
             }
             Branch::WithdrawMaxNothingToWithdraw => {
                 &["withdraw_max", "withdraw_many", "withdraw_all"]
@@ -617,6 +619,7 @@ impl Branch {
             ],
             Branch::StreamNotActive => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -675,6 +678,7 @@ impl Branch {
             }
             Branch::PayoutOverflow => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -710,6 +714,7 @@ impl Branch {
             Branch::TopUpTransferFailed => &["top_up"],
             Branch::RecipientPayoutFailed => &[
                 "withdraw",
+                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -852,6 +857,38 @@ impl Branch {
             Branch::PauseNotAuthorized => &["pause_stream", "resume_stream"],
             Branch::PauseAlreadyPaused => &["pause_stream"],
             Branch::ResumeNotPaused => &["resume_stream"],
+            Branch::BatchAmendmentNotFound
+            | Branch::BatchAmendmentExpired
+            | Branch::BatchAmendmentThresholdNotMet
+            | Branch::BatchAmendmentRecipientNotConsented
+            | Branch::BatchAmendmentTooManyAmendments
+            | Branch::BatchAmendmentInvalidTerms
+            | Branch::BatchAmendmentStreamPaused => &[
+                "propose_batch_amendment",
+                "consent_batch_amendment",
+                "apply_batch_amendment",
+            ],
+            Branch::VotingPowerAlreadyVoted
+            | Branch::VotingPowerInsufficient
+            | Branch::VotingPowerProposalNotFound => &["cast_community_vote"],
+            Branch::InsurancePoolInsolvent
+            | Branch::InsuranceClaimNotFound
+            | Branch::InsuranceClaimNotApproved
+            | Branch::InsuranceClaimTimelockNotElapsed
+            | Branch::InsuranceCapExceeded
+            | Branch::InsuranceInvalidLossProof => &[
+                "file_insurance_claim",
+                "approve_insurance_claim",
+                "reject_insurance_claim",
+                "payout_insurance_claim",
+            ],
+            Branch::SenderPolicyViolated
+            | Branch::SenderPolicyNotFound
+            | Branch::SenderPolicyInvalidBounds => &[
+                "set_sender_policy",
+                "revoke_sender_policy",
+                "create_stream",
+            ],
             Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
             Branch::RateCancelNotProposer => &["cancel_rate_change"],
             Branch::RateSegmentSumOverflow => &[
@@ -895,7 +932,7 @@ impl Branch {
             | Branch::AdvanceRepaymentExceedsBalance => &["repay_advance"],
             Branch::InvalidLtvBps => &["set_receivables_config", "draw_advance"],
             // --------------------------------------------------- conditional streams
-            Branch::ConditionNotMet => &["withdraw", "withdraw_max"],
+            Branch::ConditionNotMet => &["withdraw", "withdraw_max", "withdraw_delegated"],
             Branch::ConditionExpired => &["register_condition", "attest_condition"],
             Branch::ConditionAlreadyRegistered => &["register_condition"],
             Branch::ConditionNotFound => &["attest_condition"],

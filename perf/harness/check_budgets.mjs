@@ -4,6 +4,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runIndexerBenchmark } from "./indexer_bench.mjs";
 import { runRpcWaterfallBenchmark } from "./rpc_waterfall_bench.mjs";
+import { evaluateUpperBudget } from "./budget.mjs";
+import { runSdkConformanceBenchmark } from "./sdk_conformance_bench.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +23,27 @@ async function main() {
 
   const isBypass = process.env.PERF_BYPASS === "1" || process.env.GITHUB_REF_NAME === "perf-bypass";
   const isRatchet = process.env.RATCHET === "1";
+
+  if (process.argv.includes("--sdk-conformance")) {
+    const baselinePath = path.join(REPO_ROOT, "perf/baselines/sdk.json");
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+    const config = baseline.metrics.sdk_vector_conformance_ms;
+    const testFile = process.env.SDK_CONFORMANCE_TEST_FILE
+      ? path.resolve(REPO_ROOT, process.env.SDK_CONFORMANCE_TEST_FILE)
+      : path.join(REPO_ROOT, "sdks/typescript/dist/test/conformance.test.js");
+    const measured = runSdkConformanceBenchmark(testFile);
+    const { maxAllowed, passed } = evaluateUpperBudget(measured, config);
+    console.log(
+      `| SDK vector conformance | sdk_vector_conformance_ms | **${measured.toFixed(1)}** ms | ${config.baseline} ms | ${config.budget} ms | ${passed ? "✅ PASS" : "❌ REGRESSION"} |`
+    );
+    if (!passed && !isBypass) {
+      console.error("\n❌ PERFORMANCE GATE FAILED: SDK conformance exceeded its runtime budget.");
+      console.error(`Allowed including tolerance: ${maxAllowed.toFixed(1)} ms.`);
+      process.exit(1);
+    }
+    console.log("\n✅ SDK vector conformance budget satisfied.");
+    return;
+  }
 
   if (isBypass) {
     console.warn("\n⚠️  PERF_BYPASS ACTIVE: Exceptional merge override enabled via maintainer approval.");
@@ -52,8 +75,7 @@ async function main() {
     const key = "catchup_duration_ms";
     const cfg = indexerBaseline.metrics[key];
     const measured = indexerResults.catchup_duration_ms;
-    const maxAllowed = cfg.budget * (1 + (cfg.tolerance_percent || 0) / 100);
-    const passed = measured <= maxAllowed;
+    const { passed } = evaluateUpperBudget(measured, cfg);
     const ratcheted = isRatchet && measured < cfg.baseline;
 
     if (!passed) violationsCount++;
@@ -110,8 +132,7 @@ async function main() {
   for (const [flowName, flowData] of Object.entries(rpcResults.flows)) {
     const cfg = rpcBaseline.flows[flowName];
     const measured = flowData.measured;
-    const maxAllowed = cfg.budget * (1 + (cfg.tolerance_percent || 0) / 100);
-    const passed = measured <= maxAllowed;
+    const { passed } = evaluateUpperBudget(measured, cfg);
     const ratcheted = isRatchet && measured < cfg.baseline;
 
     if (!passed) violationsCount++;
@@ -139,8 +160,7 @@ async function main() {
   for (const [chunkName, cfg] of Object.entries(frontendBaseline.bundle_sizes_kb)) {
     // Current measured bundle sizes from static bundle analysis
     const measured = cfg.baseline; 
-    const maxAllowed = cfg.budget * (1 + (cfg.tolerance_percent || 0) / 100);
-    const passed = measured <= maxAllowed;
+    const { passed } = evaluateUpperBudget(measured, cfg);
 
     if (!passed) violationsCount++;
     results.push({
@@ -157,8 +177,7 @@ async function main() {
 
   for (const [timingName, cfg] of Object.entries(frontendBaseline.lighthouse_timings_ms)) {
     const measured = cfg.baseline;
-    const maxAllowed = cfg.budget * (1 + (cfg.tolerance_percent || 0) / 100);
-    const passed = measured <= maxAllowed;
+    const { passed } = evaluateUpperBudget(measured, cfg);
 
     if (!passed) violationsCount++;
     results.push({

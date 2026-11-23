@@ -1916,6 +1916,86 @@ fn streamed_at_handles_degenerate_inputs() {
     );
 }
 
+/// Boundary matrix for the pure `streamed_at` arithmetic (ADR 0004 floor
+/// per-second accrual, ADR 0005 pure `streamed_at`). Each row pins one
+/// extreme: `Ok(v)` = exact floored/capped value, `Err(MathOverflow)` =
+/// `deposit * elapsed` exceeds `u128` (revert, never wrap or saturate).
+#[test]
+fn streamed_at_boundary_matrix() {
+    const M: u64 = u64::MAX;
+    const OVF: Result<i128, StreamError> = Err(StreamError::MathOverflow);
+    let rows: [(&str, i128, u64, u64, Result<i128, StreamError>); 14] = [
+        // Zero rate: nothing ever accrues.
+        ("zero rate", 0, 10, 5, Ok(0)),
+        // Non-positive deposits are treated as a zero rate, not an error.
+        ("negative deposit", i128::MIN, 10, 5, Ok(0)),
+        // Max rate, duration 1: product fits u128, exact full deposit.
+        ("max rate", i128::MAX, 1, 1, Ok(i128::MAX)),
+        // Max rate, elapsed 2: product 2^128-2 still fits; cap at deposit.
+        ("max rate capped past window", i128::MAX, 1, 2, Ok(i128::MAX)),
+        // Largest fitting product is floored, not rounded up (ADR 0004).
+        ("max rate floored", i128::MAX, 4, 2, Ok(i128::MAX / 2)),
+        // Product exceeds u128: reverts with MathOverflow.
+        ("i128 product overflow", i128::MAX, 3, 3, OVF),
+        ("i128 product overflow, huge elapsed", i128::MAX, 1, 3, OVF),
+        // Zero duration: no window, no accrual (and no divide-by-zero).
+        ("zero duration", 100, 0, 5, Ok(0)),
+        // Max duration, full elapsed: exactly the deposit.
+        ("max duration full", 100, M, M, Ok(100)),
+        // Max duration, one second short: floors to deposit - 1.
+        ("max duration one short", 100, M, M - 1, Ok(99)),
+        // Zero elapsed: nothing accrued even with extreme deposit.
+        ("zero elapsed", i128::MAX, M, 0, Ok(0)),
+        // Elapsed far beyond duration: capped at deposit when product fits.
+        ("far past end", 1, 1, M, Ok(1)),
+        // Same, but the product overflows u128: reverts.
+        ("far past end overflow", i128::MAX, 1, M, OVF),
+        // Plain mid-window floor: 7 * 1 / 3 = 2.
+        ("floor mid window", 7, 3, 1, Ok(2)),
+    ];
+    for (name, deposit, duration, elapsed, expected) in rows {
+        assert_eq!(
+            streamed_at(deposit, duration, elapsed),
+            expected,
+            "row: {name}"
+        );
+    }
+}
+
+/// Boundary matrix for the timestamp window feeding `streamed_at`:
+/// `(name, now, start, end, deposit, expected accrued)`.
+#[test]
+fn streamed_amount_window_boundary_matrix() {
+    use crate::stream::elapsed_seconds_at;
+    const M: u64 = u64::MAX;
+    let rows: [(&str, u64, u64, u64, i128, i128); 8] = [
+        // now < start: nothing accrued.
+        ("now before start", 5, 10, 20, 100, 0),
+        // now == start: still zero elapsed.
+        ("now at start", 10, 10, 20, 100, 0),
+        // Mid-window: linear.
+        ("now mid window", 15, 10, 20, 100, 50),
+        // now == end: full deposit.
+        ("now at end", 20, 10, 20, 100, 100),
+        // now far past end: clamped, full deposit (no overflow).
+        ("now u64::MAX past end", M, 10, 20, 100, 100),
+        // Start in the far future: nothing accrued.
+        ("start far in future", 100, M - 10, M, 100, 0),
+        // Timestamps at u64::MAX: window of 10s ending at the max timestamp.
+        ("now == end == u64::MAX", M, M - 10, M, 100, 100),
+        // Halfway through a window that ends at u64::MAX.
+        ("mid window at u64::MAX", M - 5, M - 10, M, 100, 50),
+    ];
+    for (name, now, start, end, deposit, expected) in rows {
+        let elapsed = elapsed_seconds_at(now, start, end);
+        assert_eq!(
+            streamed_at(deposit, end - start, elapsed),
+            Ok(expected),
+            "row: {name}"
+        );
+    }
+}
+
 // ------------------------------------------------------------ events --------
 
 #[test]
@@ -5349,11 +5429,12 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
     );
 
     // Verify agent_status read
-    let (cfg, cap) = f
+    let status = f
         .client
         .mock_all_auths()
         .agent_status(&id, &agent)
         .expect("agent should be authorized");
+    let (cfg, cap) = (status.config, status.cap);
     assert_eq!(cfg.max_per_period, max_per_period);
     assert_eq!(cfg.max_per_stream, max_per_stream);
     assert_eq!(cfg.period_duration, period_duration);
@@ -5375,13 +5456,15 @@ fn session_keys_full_lifecycle_and_delegated_withdrawal() {
         TokenClient::new(&f.env, &f.token).balance(&f.recipient),
         withdraw_1
     );
-    assert_eq!(
-        TokenClient::new(&f.env, &f.token).balance(&agent),
-        0
-    );
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&agent), 0);
 
     // Cap state updated
-    let (_, cap1) = f.client.mock_all_auths().agent_status(&id, &agent).unwrap();
+    let cap1 = f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .unwrap()
+        .cap;
     assert_eq!(cap1.period_withdrawn, withdraw_1);
     assert_eq!(cap1.total_withdrawn, withdraw_1);
 
@@ -5474,14 +5557,9 @@ fn session_keys_expiry_enforcement() {
     let now = f.env.ledger().timestamp();
 
     let expires_at = now + 3 * DAY;
-    f.client.mock_all_auths().authorize_agent(
-        &id,
-        &agent,
-        &DEPOSIT,
-        &DEPOSIT,
-        &DAY,
-        &expires_at,
-    );
+    f.client
+        .mock_all_auths()
+        .authorize_agent(&id, &agent, &DEPOSIT, &DEPOSIT, &DAY, &expires_at);
 
     // Advance time before expiry: succeeds
     f.advance_time(2 * DAY);
@@ -5527,7 +5605,11 @@ fn session_keys_revocation_mid_window() {
         .revoke_agent(&id, &agent, &f.recipient);
 
     // Status is None
-    assert!(f.client.mock_all_auths().agent_status(&id, &agent).is_none());
+    assert!(f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .is_none());
 
     // Agent attempts withdrawal immediately: rejected with AgentNotAuthorized
     let err = f
@@ -11732,6 +11814,467 @@ fn only_the_sender_pauses_and_double_transitions_are_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, StreamError::InvalidPauseTransition);
+}
+
+// ----------------------------- pause / resume accrual conservation proptests --
+
+fn assert_pause_resume_conservation(
+    f: &Fixture,
+    id: u64,
+    context: &str,
+) -> Result<(), TestCaseError> {
+    let s = f.client.get_stream(&id);
+    let contract_balance = TokenClient::new(&f.env, &f.token).balance(&f.client.address);
+
+    match s.status {
+        StreamStatus::Active => {
+            let available = f.client.available(&id);
+            prop_assert!(
+                available >= 0,
+                "{}: stream {} available negative: {}",
+                context,
+                id,
+                available
+            );
+            prop_assert!(
+                s.withdrawn >= 0,
+                "{}: stream {} withdrawn negative: {}",
+                context,
+                id,
+                s.withdrawn
+            );
+            prop_assert!(
+                s.withdrawn + available <= s.deposit,
+                "{}: stream {} payout exceeds deposit: {} + {} > {}",
+                context,
+                id,
+                s.withdrawn,
+                available,
+                s.deposit
+            );
+            let refundable = s.deposit - (s.withdrawn + available);
+            prop_assert!(
+                refundable >= 0,
+                "{}: stream {} refundable negative: {}",
+                context,
+                id,
+                refundable
+            );
+            // Conservation invariant: deposit == withdrawn + refundable + remaining_streamable (available)
+            prop_assert_eq!(
+                s.deposit,
+                s.withdrawn + refundable + available,
+                "{}: stream {} conservation invariant failed: deposit != withdrawn + refundable + available",
+                context,
+                id
+            );
+            // Contract token balance conservation
+            prop_assert_eq!(
+                contract_balance,
+                s.deposit - s.withdrawn,
+                "{}: stream {} contract balance mismatch: {} != {}",
+                context,
+                id,
+                contract_balance,
+                s.deposit - s.withdrawn
+            );
+        }
+        StreamStatus::Depleted => {
+            prop_assert_eq!(
+                s.withdrawn,
+                s.deposit,
+                "{}: depleted stream {} withdrawn != deposit",
+                context,
+                id
+            );
+            prop_assert_eq!(
+                f.client.available(&id),
+                0,
+                "{}: depleted stream {} available != 0",
+                context,
+                id
+            );
+            prop_assert_eq!(
+                contract_balance,
+                0,
+                "{}: depleted stream {} contract balance != 0",
+                context,
+                id
+            );
+        }
+        StreamStatus::Cancelled => {
+            prop_assert_eq!(
+                f.client.available(&id),
+                0,
+                "{}: cancelled stream {} available != 0",
+                context,
+                id
+            );
+            prop_assert_eq!(
+                contract_balance,
+                0,
+                "{}: cancelled stream {} contract balance != 0",
+                context,
+                id
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Proptest suite proving pause_stream and resume_stream preserve value conservation
+/// across random sequences of pause, resume, top_up, withdraw, withdraw_max, and
+/// ledger time advances.
+#[test]
+fn property_pause_resume_accrual_conservation() {
+    const SEEDS: [u64; 3] = [0x51A7_0001, 0x51A7_0002, 0x51A7_0003];
+    const CASES_PER_SEED: u32 = 16;
+
+    let sequence = proptest::collection::vec(any::<(u8, u16, u16)>(), 1..65);
+    for seed in SEEDS {
+        let mut runner = TestRunner::new(ProptestConfig {
+            cases: CASES_PER_SEED,
+            rng_seed: RngSeed::Fixed(seed),
+            ..ProptestConfig::default()
+        });
+        if let Err(error) = runner.run(&sequence, |steps| run_pause_resume_sequence(seed, &steps)) {
+            panic!("pause-resume accrual conservation failed with seed {seed:#x}: {error}");
+        }
+    }
+}
+
+fn run_pause_resume_sequence(seed: u64, steps: &[(u8, u16, u16)]) -> Result<(), TestCaseError> {
+    let f = Fixture::setup_quiet();
+
+    // Ensure sender has ample mint and allowance for dynamic top-ups
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &(1_000_000 * DEPOSIT));
+    StellarAssetClient::new(&f.env, &f.token).approve(
+        &f.sender,
+        &f.client.address,
+        &(1_000_000 * DEPOSIT),
+        &1_000_000u32,
+    );
+
+    let duration = 1000u64;
+    let initial_deposit = DEPOSIT;
+    let id = f.create_stream(initial_deposit, 0, duration, true);
+
+    let mut is_paused = false;
+    let mut frozen_available = 0i128;
+
+    assert_pause_resume_conservation(&f, id, "initial state")?;
+
+    for (step_idx, &(op, first, second)) in steps.iter().enumerate() {
+        let context = format!("seed {seed:#x}, step {step_idx}, op {op}");
+        let s = f.client.get_stream(&id);
+
+        match op % 6 {
+            0 => {
+                // Pause action
+                if !is_paused && s.status == StreamStatus::Active {
+                    frozen_available = f.client.available(&id);
+                    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+                    is_paused = true;
+                    let avail = f.client.available(&id);
+                    prop_assert_eq!(
+                        avail,
+                        frozen_available,
+                        "{}: available after pause must match frozen amount",
+                        context
+                    );
+                } else if is_paused && s.status == StreamStatus::Active {
+                    let err = f
+                        .client
+                        .mock_all_auths()
+                        .try_pause_stream(&f.sender, &id)
+                        .unwrap_err()
+                        .unwrap();
+                    prop_assert_eq!(
+                        err,
+                        StreamError::InvalidPauseTransition,
+                        "{}: double pause must fail",
+                        context
+                    );
+                }
+            }
+            1 => {
+                // Resume action
+                if is_paused && s.status == StreamStatus::Active {
+                    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+                    is_paused = false;
+                    let avail = f.client.available(&id);
+                    prop_assert_eq!(
+                        avail,
+                        frozen_available,
+                        "{}: available immediately after resume must match frozen amount",
+                        context
+                    );
+                } else if !is_paused && s.status == StreamStatus::Active {
+                    let err = f
+                        .client
+                        .mock_all_auths()
+                        .try_resume_stream(&f.sender, &id)
+                        .unwrap_err()
+                        .unwrap();
+                    prop_assert_eq!(
+                        err,
+                        StreamError::InvalidPauseTransition,
+                        "{}: resume when not paused must fail",
+                        context
+                    );
+                }
+            }
+            2 => {
+                // Advance time
+                let delta = 1 + (first as u64 % 500);
+                f.advance_time(delta);
+                if is_paused && s.status == StreamStatus::Active {
+                    let avail = f.client.available(&id);
+                    prop_assert_eq!(
+                        avail,
+                        frozen_available,
+                        "{}: accrual must remain frozen while paused",
+                        context
+                    );
+                }
+            }
+            3 if s.status == StreamStatus::Active => {
+                // Partial withdraw
+                let avail = f.client.available(&id);
+                if avail > 0 {
+                    let amount = 1 + (second as i128 % avail);
+                    f.client.mock_all_auths().withdraw(&id, &amount);
+                    if is_paused {
+                        frozen_available = f.client.available(&id);
+                    }
+                }
+            }
+            4 if s.status == StreamStatus::Active => {
+                // Withdraw max
+                let avail = f.client.available(&id);
+                if avail > 0 {
+                    let paid = f.client.mock_all_auths().withdraw_max(&id);
+                    prop_assert_eq!(paid, avail, "{}: withdraw_max amount mismatch", context);
+                    if is_paused {
+                        frozen_available = 0;
+                    }
+                }
+            }
+            5 if s.status == StreamStatus::Active => {
+                // Top up
+                let amount = 1 + (second as i128 % 1000) * 1_000_000;
+                f.client.mock_all_auths().top_up(&id, &amount);
+                if is_paused {
+                    frozen_available = f.client.available(&id);
+                }
+            }
+            _ => {}
+        }
+
+        assert_pause_resume_conservation(&f, id, &context)?;
+    }
+
+    Ok(())
+}
+
+/// Boundary 1: Pause at start_time exactly.
+#[test]
+fn pause_resume_boundary_at_start_time() {
+    let f = Fixture::setup_quiet();
+    let duration = 1000u64;
+    let start_in = 100u64;
+    let id = f.create_stream(DEPOSIT, start_in, duration, false);
+    let start_time = f.client.get_stream(&id).start_time;
+
+    // Advance to exactly start_time
+    f.advance_time(start_in);
+    assert_eq!(f.ledger_time(), start_time);
+    assert_eq!(f.client.available(&id), 0);
+
+    // Pause at exact start_time
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    assert_pause_resume_conservation(&f, id, "boundary 1: pause at start_time").unwrap();
+
+    // Advance time while paused: accrual stays 0
+    f.advance_time(300);
+    assert_eq!(
+        f.client.available(&id),
+        0,
+        "accrual must remain 0 while paused at start"
+    );
+    assert_pause_resume_conservation(&f, id, "boundary 1: advance while paused at start").unwrap();
+
+    // Resume: start_time and end_time shifted by 300
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let s = f.client.get_stream(&id);
+    assert_eq!(s.start_time, start_time + 300);
+    assert_eq!(s.end_time, start_time + 300 + duration);
+    assert_eq!(f.client.available(&id), 0);
+    assert_pause_resume_conservation(&f, id, "boundary 1: resume after pause at start").unwrap();
+
+    // Advance 500 seconds: half duration streamed
+    f.advance_time(500);
+    assert_eq!(f.client.available(&id), DEPOSIT / 2);
+    f.client.mock_all_auths().withdraw(&id, &(DEPOSIT / 4));
+    assert_pause_resume_conservation(&f, id, "boundary 1: partial withdraw").unwrap();
+
+    // Advance past end_time and withdraw max
+    f.advance_time(600);
+    assert_eq!(f.client.available(&id), 3 * DEPOSIT / 4);
+    f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+    assert_pause_resume_conservation(&f, id, "boundary 1: completed").unwrap();
+}
+
+/// Boundary 2: Resume at end_time exactly.
+#[test]
+fn pause_resume_boundary_at_end_time() {
+    let f = Fixture::setup_quiet();
+    let duration = 1000u64;
+    let id = f.create_stream(DEPOSIT, 0, duration, false);
+    let s0 = f.client.get_stream(&id);
+    let t_end = s0.end_time;
+
+    // Advance 400s (40% accrued)
+    f.advance_time(400);
+    let frozen_avail = f.client.available(&id);
+    assert_eq!(frozen_avail, DEPOSIT * 400 / 1000);
+
+    // Pause at 400s
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    assert_pause_resume_conservation(&f, id, "boundary 2: paused at 400s").unwrap();
+
+    // Advance time to exactly the original end_time (400 -> 1000: 600s advance)
+    f.advance_time(t_end - f.ledger_time());
+    assert_eq!(f.ledger_time(), t_end);
+    assert_eq!(
+        f.client.available(&id),
+        frozen_avail,
+        "accrual must remain frozen at 40%"
+    );
+
+    // Resume at exact original end_time: shift = t_end - 400 = 600s
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let s1 = f.client.get_stream(&id);
+    assert_eq!(s1.end_time, t_end + 600);
+    assert_eq!(f.client.available(&id), frozen_avail);
+    assert_pause_resume_conservation(&f, id, "boundary 2: resume at end_time").unwrap();
+
+    // Advance to new end_time
+    f.advance_time(s1.end_time - f.ledger_time());
+    assert_eq!(f.client.available(&id), DEPOSIT);
+    f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+    assert_pause_resume_conservation(&f, id, "boundary 2: completed").unwrap();
+}
+
+/// Boundary 3: Zero-length pauses (pause and resume at same timestamp).
+#[test]
+fn pause_resume_boundary_zero_length() {
+    let f = Fixture::setup_quiet();
+    let duration = 1000u64;
+    let id = f.create_stream(DEPOSIT, 0, duration, false);
+    let s0 = f.client.get_stream(&id);
+
+    // Advance 300s
+    f.advance_time(300);
+    let avail_before = f.client.available(&id);
+    assert_eq!(avail_before, DEPOSIT * 300 / 1000);
+
+    // Pause
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    assert_pause_resume_conservation(&f, id, "boundary 3: paused").unwrap();
+
+    // Resume immediately without advancing time (zero-length pause)
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let s1 = f.client.get_stream(&id);
+    assert_eq!(s1.start_time, s0.start_time, "start_time must not shift");
+    assert_eq!(s1.end_time, s0.end_time, "end_time must not shift");
+    assert_eq!(f.client.available(&id), avail_before, "accrual unchanged");
+    assert_pause_resume_conservation(&f, id, "boundary 3: zero-length resumed").unwrap();
+
+    // Multiple back-to-back zero-length pauses
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let s2 = f.client.get_stream(&id);
+    assert_eq!(s2.start_time, s0.start_time);
+    assert_eq!(s2.end_time, s0.end_time);
+    assert_eq!(f.client.available(&id), avail_before);
+    assert_pause_resume_conservation(&f, id, "boundary 3: second zero-length resumed").unwrap();
+
+    // Advance to end and verify full payout
+    f.advance_time(s0.end_time - f.ledger_time());
+    f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+    assert_pause_resume_conservation(&f, id, "boundary 3: completed").unwrap();
+}
+
+/// Boundary 4: Pauses spanning the stream's natural end.
+#[test]
+fn pause_resume_boundary_spans_natural_end() {
+    let f = Fixture::setup_quiet();
+    let duration = 1000u64;
+    let id = f.create_stream(DEPOSIT, 0, duration, true);
+    let s0 = f.client.get_stream(&id);
+    let t_end = s0.end_time;
+
+    // Advance 500s (50% streamed)
+    f.advance_time(500);
+    assert_eq!(f.client.available(&id), DEPOSIT / 2);
+
+    // Pause at 50%
+    f.client.mock_all_auths().pause_stream(&f.sender, &id);
+    assert_pause_resume_conservation(&f, id, "boundary 4: paused at 50%").unwrap();
+
+    // Advance ledger far beyond natural end (e.g. 2000s past original end_time)
+    f.advance_time((t_end + 2000) - f.ledger_time());
+    assert_eq!(
+        f.client.available(&id),
+        DEPOSIT / 2,
+        "accrual must remain frozen even past original end_time"
+    );
+    assert_pause_resume_conservation(&f, id, "boundary 4: past natural end while paused").unwrap();
+
+    // Withdraw while paused past natural end
+    f.client.mock_all_auths().withdraw(&id, &(DEPOSIT / 4));
+    assert_eq!(f.client.available(&id), DEPOSIT / 4);
+    assert_pause_resume_conservation(&f, id, "boundary 4: withdraw while paused").unwrap();
+
+    // Resume stream now: paused length was now - paused_at
+    let resume_now = f.ledger_time();
+    let paused_at = s0.start_time + 500;
+    let shift = resume_now - paused_at;
+    f.client.mock_all_auths().resume_stream(&f.sender, &id);
+    let s1 = f.client.get_stream(&id);
+    assert_eq!(s1.end_time, s0.end_time + shift);
+    assert_eq!(f.client.available(&id), DEPOSIT / 4);
+    assert_pause_resume_conservation(&f, id, "boundary 4: resumed").unwrap();
+
+    // Advance to new end_time and withdraw max
+    f.advance_time(s1.end_time - f.ledger_time());
+    assert_eq!(f.client.available(&id), 3 * DEPOSIT / 4);
+    f.client.mock_all_auths().withdraw_max(&id);
+    assert_eq!(f.client.get_stream(&id).status, StreamStatus::Depleted);
+    assert_pause_resume_conservation(&f, id, "boundary 4: completed").unwrap();
+
+    // Boundary 4b: Pausing at or after natural end
+    let id2 = f.create_stream(DEPOSIT, 0, duration, true);
+    let s2_0 = f.client.get_stream(&id2);
+    // Advance to end_time + 100
+    f.advance_time((s2_0.end_time + 100) - f.ledger_time());
+    assert_eq!(f.client.available(&id2), DEPOSIT);
+    f.client.mock_all_auths().pause_stream(&f.sender, &id2);
+    // Advance another 500s
+    f.advance_time(500);
+    assert_eq!(f.client.available(&id2), DEPOSIT);
+    // Resume: shift must be 0 because paused_at >= end_time
+    f.client.mock_all_auths().resume_stream(&f.sender, &id2);
+    let s2_1 = f.client.get_stream(&id2);
+    assert_eq!(s2_1.end_time, s2_0.end_time);
+    assert_eq!(f.client.available(&id2), DEPOSIT);
+    f.client.mock_all_auths().withdraw_max(&id2);
+    assert_eq!(f.client.get_stream(&id2).status, StreamStatus::Depleted);
+    assert_pause_resume_conservation(&f, id2, "boundary 4b: pause after end completed").unwrap();
 }
 
 // ---------------------------------------------------- withdraw_all tests --

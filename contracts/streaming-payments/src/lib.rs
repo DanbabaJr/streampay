@@ -91,18 +91,29 @@ mod differential_harness;
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod extensions_test;
 
 mod dispute;
+#[cfg(test)]
+mod dispute_lifecycle_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
 mod events;
 mod governance;
+pub mod batch_amend;
+pub mod insurance;
+pub mod sender_policy;
+pub mod voting_power;
 #[cfg(test)]
 mod governance_test;
 pub mod hooks;
 pub mod oracle;
 mod policy;
+pub mod privacy_claims;
+#[cfg(test)]
+mod privacy_session_keys_test;
 pub mod receivables;
 #[cfg(test)]
 mod receivables_conditions_templates_hooks_test;
@@ -111,6 +122,7 @@ mod schedule;
 mod schedule_test;
 #[cfg(test)]
 mod schema_guard_test;
+pub mod session_keys;
 pub(crate) mod sponsor;
 #[cfg(test)]
 mod sponsor_test;
@@ -128,7 +140,9 @@ pub mod verification;
 
 pub use hooks::{HookEventClass, HookFailurePolicy, StreamHook};
 pub use oracle::{ConditionPredicate, ConditionStatus, StreamCondition};
+pub use privacy_claims::ClaimCommitment;
 pub use receivables::{Advance, ReceivablesConfig};
+pub use session_keys::SessionKeyPolicy;
 pub use templates::{StreamTemplate, TemplateLineage};
 
 use soroban_sdk::{
@@ -145,20 +159,19 @@ pub use dispute::{
 pub use errors::StreamError;
 pub use events::{
     AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, AgentAuthorized, AgentRevoked,
-    BatchWithdrawSummary, BeneficiaryEnrolled,
-    ConditionExpired, ConditionMet, ConditionRegistered, ContractFrozenStateChanged,
-    ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
-    GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
-    GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked, HookRegistered,
-    OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback, OracleTimeReported,
-    OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted, PolicyAssetQueued,
-    PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed, PolicyInitialized,
-    RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired,
-    ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
-    SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
-    StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
-    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
-    TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    BatchWithdrawSummary, BeneficiaryEnrolled, ConditionExpired, ConditionMet, ConditionRegistered,
+    ContractFrozenStateChanged, ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved,
+    FeeCharged, FeeWithdrawn, GovernanceActionExecuted, GovernanceActionProposed,
+    GovernanceActionSigned, GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked,
+    HookRegistered, OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback,
+    OracleTimeReported, OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted,
+    PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed,
+    PolicyInitialized, RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled,
+    ScheduledIntentExpired, ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed,
+    SenderTransferred, SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated,
+    StreamCancelled, StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated,
+    StreamRefundTargetChanged, StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated,
+    TemplateApproved, TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -173,16 +186,15 @@ pub use sponsor::{PeriodSpend, SponsorConfig};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{
-    streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AssetTransfer,
-    BatchEntry, ClaimFailure,
-    MigrationStatus, OwnershipRole, PageBounds, PendingOwnership, PendingRateChange,
-    PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory, SenderTransferRecord,
-    Stream, StreamStatus, StreamVersionReport, VersionedStream, WithdrawAllResult, WithdrawEntry,
-    WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH,
-    MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS,
-    MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS,
-    RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2,
-    TARGET_SCHEMA_VERSION,
+    streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AgentStatus,
+    AssetTransfer, BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds,
+    PendingOwnership, PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment,
+    SenderHistory, SenderTransferRecord, Stream, StreamStatus, StreamVersionReport,
+    VersionedStream, WithdrawAllResult, WithdrawEntry, WithdrawOutcome,
+    CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS,
+    MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH,
+    MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
+    STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
 };
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
 
@@ -549,6 +561,24 @@ impl StreamingPayments {
         let stream_policy = policy::get_stream_policy(&env, Some(token.clone()));
         let duration = end_time - start_time;
         policy::validate_stream_args(stream_policy.as_ref(), deposit_amount, duration)?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let rate_per_second = if duration > 0 {
+                deposit_amount / (duration as i128)
+            } else {
+                deposit_amount
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &sender,
+                &recipient,
+                &token,
+                deposit_amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Protocol fee, computed at the deposit boundary only. The accrual
         // math (`deposit`, `streamed_at`, cancel splits) never sees it.
@@ -1654,7 +1684,12 @@ impl StreamingPayments {
 
     /// Revokes an authorized agent on a stream.
     /// Only the stream recipient can revoke an agent.
-    pub fn revoke_agent(env: Env, stream_id: u64, agent: Address, caller: Address) -> Result<(), StreamError> {
+    pub fn revoke_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        caller: Address,
+    ) -> Result<(), StreamError> {
         caller.require_auth();
         let s = stream::get_stream(&env, stream_id)?;
         if caller != s.recipient {
@@ -1677,16 +1712,28 @@ impl StreamingPayments {
     ///
     /// Requires `agent.require_auth()`. Funds are always transferred directly to the
     /// stream's recipient (never to the agent). Caps and expiration are strictly enforced.
+    ///
+    /// The payout preamble is the same one [`Self::withdraw`] runs — maintenance
+    /// freeze, hook reentrancy lock, release gating and oracle-resolved accrual —
+    /// so a delegation can never move funds that the recipient itself could not
+    /// currently withdraw.
     pub fn withdraw_delegated(
         env: Env,
         stream_id: u64,
         agent: Address,
         amount: i128,
     ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
         agent.require_auth();
 
         if amount <= 0 {
             return Err(surface::reject(Branch::WithdrawAmountNonPositive));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
         }
 
         let mut s = stream::get_stream(&env, stream_id)?;
@@ -1702,7 +1749,8 @@ impl StreamingPayments {
             return Err(surface::reject(Branch::WithdrawDelegatedAgentExpired));
         }
 
-        let available = stream::available_amount(&env, &s)?;
+        let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
+        let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
         if amount > available {
             return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
         }
@@ -1755,11 +1803,7 @@ impl StreamingPayments {
     }
 
     /// Read-only view for checking an agent's delegation configuration and cap state.
-    pub fn agent_status(
-        env: Env,
-        stream_id: u64,
-        agent: Address,
-    ) -> Option<(AgentConfig, AgentCapState)> {
+    pub fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<AgentStatus> {
         let s = stream::get_stream(&env, stream_id).ok()?;
         let config = stream::get_agent_auth(&env, stream_id, &agent)?;
         let now = env.ledger().timestamp();
@@ -1782,7 +1826,10 @@ impl StreamingPayments {
                 .saturating_add(period_idx.saturating_mul(config.period_duration));
             cap_state.period_withdrawn = 0;
         }
-        Some((config, cap_state))
+        Some(AgentStatus {
+            config,
+            cap: cap_state,
+        })
     }
 
     #[cfg_attr(
@@ -2342,6 +2389,25 @@ impl StreamingPayments {
 
         let stream_policy = policy::get_stream_policy(&env, Some(s.token.clone()));
         policy::validate_top_up_args(stream_policy.as_ref(), new_deposit, s.duration())?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let duration = s.duration();
+            let rate_per_second = if duration > 0 {
+                new_deposit / (duration as i128)
+            } else {
+                new_deposit
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &s.sender,
+                &s.recipient,
+                &s.token,
+                amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Interaction: pull the added funds from the sender. A token-side
         // failure maps to a distinct code; the effects below never run, and
@@ -5840,5 +5906,129 @@ impl StreamingPayments {
 
     pub fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook> {
         hooks::get_hook(&env, stream_id, event_class)
+    }
+
+    // -----------------------------------------------------------------------
+    // Privacy: Commit-Reveal Claims (Issue #65)
+    // -----------------------------------------------------------------------
+
+    pub fn commit_claim(
+        env: Env,
+        stream_id: u64,
+        recipient: Address,
+        commitment_hash: BytesN<32>,
+        deposit: i128,
+        reveal_deadline: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        privacy_claims::commit_claim(
+            &env,
+            stream_id,
+            recipient,
+            commitment_hash,
+            deposit,
+            reveal_deadline,
+        )
+    }
+
+    pub fn reveal_claim(
+        env: Env,
+        stream_id: u64,
+        recipient: Address,
+        amount: i128,
+        salt: BytesN<32>,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        let _record = privacy_claims::reveal_claim(&env, stream_id, recipient, amount, salt)?;
+        Self::withdraw(env, stream_id, amount)
+    }
+
+    pub fn expire_reveal(
+        env: Env,
+        stream_id: u64,
+        commitment_hash: BytesN<32>,
+        sender: Address,
+    ) -> Result<i128, StreamError> {
+        Self::require_not_frozen(&env)?;
+        privacy_claims::expire_reveal(&env, stream_id, commitment_hash, sender)
+    }
+
+    pub fn get_claim_commitment(
+        env: Env,
+        commitment_hash: BytesN<32>,
+    ) -> Option<privacy_claims::ClaimCommitment> {
+        privacy_claims::get_commitment(&env, commitment_hash)
+    }
+
+    // -----------------------------------------------------------------------
+    // Session Keys: Capped Delegated Withdrawals (Issue #56)
+    // -----------------------------------------------------------------------
+
+    pub fn authorize_agent(
+        env: Env,
+        recipient: Address,
+        agent: Address,
+        stream_id: u64,
+        max_per_period: i128,
+        period_seconds: u64,
+        expires_at: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        session_keys::authorize_agent(
+            &env,
+            recipient,
+            agent,
+            stream_id,
+            max_per_period,
+            period_seconds,
+            expires_at,
+        )
+    }
+
+    pub fn withdraw_delegated(
+        env: Env,
+        agent: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
+        if amount <= 0 {
+            return Err(surface::reject(Branch::WithdrawAmountNonPositive));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
+        }
+        let _policy = session_keys::withdraw_delegated(&env, agent, stream_id, amount)?;
+        let mut s = stream::get_stream(&env, stream_id)?;
+        if s.status != StreamStatus::Active {
+            return Err(surface::reject(Branch::StreamNotActive));
+        }
+        let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
+        let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
+        if amount > available {
+            return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
+        }
+        Self::pay_out(&env, &mut s, amount)
+    }
+
+    pub fn revoke_agent(
+        env: Env,
+        recipient: Address,
+        agent: Address,
+        stream_id: u64,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        session_keys::revoke_agent(&env, recipient, agent, stream_id)
+    }
+
+    pub fn get_session_policy(
+        env: Env,
+        agent: Address,
+        stream_id: u64,
+    ) -> Option<session_keys::SessionKeyPolicy> {
+        session_keys::get_session_policy(&env, agent, stream_id)
     }
 }

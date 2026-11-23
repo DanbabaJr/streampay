@@ -19,7 +19,21 @@ cd sdks/rust && cargo test # conformance vectors + doctests
 
 `src/generated.rs` is generated: change `sdks/spec/streampay.spec.json` (or the
 contract, then re-derive the spec) and regenerate. `src/lib.rs` is hand-written
-and holds the transport trait and the shared error types.
+and holds the transport trait and the shared error types; `src/vectors.rs` is
+the cross-language conformance decoder.
+
+## Conformance vectors
+
+`src/vectors.rs` decodes `sdks/vectors/*.json` (envelope, result and events)
+into the canonical JSON every SDK must produce. The example prints that payload
+for the cross-SDK orchestrator:
+
+```bash
+cargo run --quiet --example conformance -- ../vectors
+```
+
+Event topic names and argument names come from the shared spec at runtime, so a
+new contract event needs no second table here.
 
 ## Use
 
