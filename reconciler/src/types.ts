@@ -1,6 +1,6 @@
 //! Shared types for the dual-read reconciliation service.
 
-export type StreamStatus = "Active" | "Cancelled" | "Depleted";
+export type StreamStatus = "Active" | "Cancelled" | "Depleted" | "Paused";
 
 export interface StreamState {
   streamId: string;

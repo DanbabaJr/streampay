@@ -9,8 +9,7 @@ license = "Apache-2.0"
 [workspace]
 
 [dependencies]
+# serde_json backs the shared conformance-vector decoder (src/vectors.rs).
+serde_json = "1"
 stellar-strkey = "1.0.0"
 stellar-xdr = { version = "30.0.0", features = ["base64"] }
-
-[dev-dependencies]
-serde_json = "1"
