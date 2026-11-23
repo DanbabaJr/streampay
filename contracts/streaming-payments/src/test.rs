@@ -5403,6 +5403,275 @@ fn non_sep41_token_return_reports_transfer_failure() {
         .unwrap();
     assert_eq!(err, StreamError::DepositTransferFailed);
 }
+
+// ---------------------------------------------------------------- session keys --
+
+#[test]
+fn session_keys_full_lifecycle_and_delegated_withdrawal() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let agent = Address::generate(&f.env);
+    let now = f.env.ledger().timestamp();
+
+    // Recipient authorizes agent: max 1000 per period (1 day), max 3000 per stream, expires in 5 days
+    let max_per_period = 1_000_000_000i128;
+    let max_per_stream = 3_000_000_000i128;
+    let period_duration = DAY;
+    let expires_at = now + 5 * DAY;
+
+    f.client.mock_all_auths().authorize_agent(
+        &id,
+        &agent,
+        &max_per_period,
+        &max_per_stream,
+        &period_duration,
+        &expires_at,
+    );
+
+    // Verify agent_status read
+    let status = f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .expect("agent should be authorized");
+    let (cfg, cap) = (status.config, status.cap);
+    assert_eq!(cfg.max_per_period, max_per_period);
+    assert_eq!(cfg.max_per_stream, max_per_stream);
+    assert_eq!(cfg.period_duration, period_duration);
+    assert_eq!(cfg.expires_at, expires_at);
+    assert_eq!(cap.period_withdrawn, 0);
+    assert_eq!(cap.total_withdrawn, 0);
+
+    // Advance time into stream accrual: 2 days elapsed (2/10 = 2_000_000_000 accrued)
+    f.advance_time(2 * DAY);
+
+    // Agent executes partial delegated withdrawal of 500_000_000
+    let withdraw_1 = 500_000_000i128;
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &withdraw_1);
+
+    // Recipient received tokens directly, agent has 0
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        withdraw_1
+    );
+    assert_eq!(TokenClient::new(&f.env, &f.token).balance(&agent), 0);
+
+    // Cap state updated
+    let cap1 = f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .unwrap()
+        .cap;
+    assert_eq!(cap1.period_withdrawn, withdraw_1);
+    assert_eq!(cap1.total_withdrawn, withdraw_1);
+
+    // Withdraw remaining cap for period: another 500_000_000 (total 1_000_000_000 in period)
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &withdraw_1);
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        max_per_period
+    );
+
+    // Exceeding period cap rejects with CapExceededPeriod
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_delegated(&id, &agent, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::CapExceededPeriod);
+}
+
+#[test]
+fn session_keys_window_replay_across_periods_and_stream_cap_boundary() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let agent = Address::generate(&f.env);
+    let now = f.env.ledger().timestamp();
+
+    // Agent authorized: 1000 per period of 1 day, 1500 total stream cap
+    let max_per_period = 1_000_000_000i128;
+    let max_per_stream = 1_500_000_000i128;
+    let period_duration = DAY;
+    let expires_at = now + 8 * DAY;
+
+    f.client.mock_all_auths().authorize_agent(
+        &id,
+        &agent,
+        &max_per_period,
+        &max_per_stream,
+        &period_duration,
+        &expires_at,
+    );
+
+    // Day 2: withdraw full period cap 1000
+    f.advance_time(2 * DAY);
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &max_per_period);
+
+    // Advance into next period window (Day 3)
+    f.advance_time(DAY);
+
+    // Next period window resets period quota: agent can withdraw again
+    // But stream cap remaining is only 500 (1500 - 1000)
+    // Trying to withdraw 600 fails stream cap
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_delegated(&id, &agent, &600_000_000)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::CapExceededStream);
+
+    // Withdrawing exactly 500 succeeds (stream cap boundary)
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &500_000_000);
+
+    assert_eq!(
+        TokenClient::new(&f.env, &f.token).balance(&f.recipient),
+        max_per_stream
+    );
+
+    // Total stream cap reached: any subsequent delegated withdrawal fails CapExceededStream
+    let err2 = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_delegated(&id, &agent, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err2, StreamError::CapExceededStream);
+}
+
+#[test]
+fn session_keys_expiry_enforcement() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let agent = Address::generate(&f.env);
+    let now = f.env.ledger().timestamp();
+
+    let expires_at = now + 3 * DAY;
+    f.client
+        .mock_all_auths()
+        .authorize_agent(&id, &agent, &DEPOSIT, &DEPOSIT, &DAY, &expires_at);
+
+    // Advance time before expiry: succeeds
+    f.advance_time(2 * DAY);
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &100);
+
+    // Advance time past expiry
+    f.advance_time(2 * DAY);
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_delegated(&id, &agent, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::AgentExpired);
+}
+
+#[test]
+fn session_keys_revocation_mid_window() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let agent = Address::generate(&f.env);
+    let now = f.env.ledger().timestamp();
+
+    f.client.mock_all_auths().authorize_agent(
+        &id,
+        &agent,
+        &DEPOSIT,
+        &DEPOSIT,
+        &DAY,
+        &(now + 5 * DAY),
+    );
+
+    f.advance_time(2 * DAY);
+    f.client
+        .mock_all_auths()
+        .withdraw_delegated(&id, &agent, &500);
+
+    // Recipient revokes agent mid-window
+    f.client
+        .mock_all_auths()
+        .revoke_agent(&id, &agent, &f.recipient);
+
+    // Status is None
+    assert!(f
+        .client
+        .mock_all_auths()
+        .agent_status(&id, &agent)
+        .is_none());
+
+    // Agent attempts withdrawal immediately: rejected with AgentNotAuthorized
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_withdraw_delegated(&id, &agent, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::AgentNotAuthorized);
+}
+
+#[test]
+fn session_keys_authorization_permissions() {
+    let f = Fixture::setup();
+    let id = f.create_stream(DEPOSIT, DAY, 10 * DAY, false);
+    let agent = Address::generate(&f.env);
+    let stranger = Address::generate(&f.env);
+    let now = f.env.ledger().timestamp();
+
+    // Revocation by stranger reverts with NotAuthorized
+    let err = f
+        .client
+        .mock_all_auths()
+        .try_revoke_agent(&id, &agent, &stranger)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, StreamError::NotAuthorized);
+
+    // Authorize validates positive caps
+    let err_period = f
+        .client
+        .mock_all_auths()
+        .try_authorize_agent(&id, &agent, &0, &DEPOSIT, &DAY, &(now + DAY))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_period, StreamError::ZeroAmount);
+
+    let err_stream = f
+        .client
+        .mock_all_auths()
+        .try_authorize_agent(&id, &agent, &DEPOSIT, &-5, &DAY, &(now + DAY))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_stream, StreamError::ZeroAmount);
+
+    let err_duration = f
+        .client
+        .mock_all_auths()
+        .try_authorize_agent(&id, &agent, &DEPOSIT, &DEPOSIT, &0, &(now + DAY))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_duration, StreamError::InvalidTimeRange);
+
+    let err_expiry = f
+        .client
+        .mock_all_auths()
+        .try_authorize_agent(&id, &agent, &DEPOSIT, &DEPOSIT, &DAY, &now)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_expiry, StreamError::StartTimeInPast);
+}
+
 // ------------------------------------------------------------- batch creation -
 
 #[test]

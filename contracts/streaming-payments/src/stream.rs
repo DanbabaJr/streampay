@@ -569,6 +569,44 @@ pub struct Stream {
     pub use_oracle: Option<bool>,
 }
 
+/// Delegation configuration for an authorized session agent on a stream.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentConfig {
+    /// Maximum amount the agent can withdraw per fixed period.
+    pub max_per_period: i128,
+    /// Maximum cumulative amount the agent can withdraw over the stream lifetime.
+    pub max_per_stream: i128,
+    /// Length of a fixed quota period in seconds (e.g. 86400 for 1 day).
+    pub period_duration: u64,
+    /// Expiry timestamp (seconds) after which delegation is invalid.
+    pub expires_at: u64,
+}
+
+/// Dynamic cap tracking ledger for an authorized session agent on a stream.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentCapState {
+    /// Current window start timestamp (aligned to fixed period boundaries).
+    pub current_period_start: u64,
+    /// Cumulative amount withdrawn by agent in current period window.
+    pub period_withdrawn: i128,
+    /// Cumulative amount withdrawn by agent across all periods for this stream.
+    pub total_withdrawn: i128,
+}
+
+/// What `agent_status` reports: the delegation a recipient granted to an agent
+/// together with the cap ledger as it stands right now. A named struct rather
+/// than a tuple because the contract spec IR maps only named types.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStatus {
+    /// The delegation configuration (caps, period length, expiry).
+    pub config: AgentConfig,
+    /// Cap ledger projected to the current period window.
+    pub cap: AgentCapState,
+}
+
 impl Stream {
     /// Seconds in the stream's full window. Always `>= 1` for a stored stream
     /// (`create_stream` rejects `end_time <= start_time`).
@@ -1115,6 +1153,16 @@ pub enum DataKey {
         doc = " Reentrancy lock flag for stream id during hook callback (temporary/persistent storage)."
     )]
     StreamReentrancyLock(u64),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Session key authorization config per (stream_id, agent): persistent storage; written by authorize_agent / revoke_agent."
+    )]
+    AgentAuth(u64, Address),
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Session key cap tracking ledger per (stream_id, agent): persistent storage; tracks period window, period withdrawn, and total withdrawn."
+    )]
+    AgentCap(u64, Address),
 }
 
 /// Freeze point of stream `id` while it is paused; `None` while it streams.
@@ -2038,4 +2086,69 @@ pub fn set_migration_cursor(env: &Env, cursor: u64) {
     env.storage()
         .instance()
         .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+}
+
+/// Stores or updates an agent's authorization config for a stream.
+pub fn put_agent_auth(env: &Env, stream_id: u64, agent: &Address, config: &AgentConfig) {
+    let key = DataKey::AgentAuth(stream_id, agent.clone());
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+}
+
+/// Retrieves an agent's authorization config for a stream, if any.
+pub fn get_agent_auth(env: &Env, stream_id: u64, agent: &Address) -> Option<AgentConfig> {
+    let key = DataKey::AgentAuth(stream_id, agent.clone());
+    let config: Option<AgentConfig> = env.storage().persistent().get(&key);
+    if config.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+    }
+    config
+}
+
+/// Revokes an agent's authorization config for a stream.
+pub fn remove_agent_auth(env: &Env, stream_id: u64, agent: &Address) {
+    let key = DataKey::AgentAuth(stream_id, agent.clone());
+    env.storage().persistent().remove(&key);
+}
+
+/// Retrieves an agent's cap ledger state, defaulting to zeros aligned to current time if absent.
+pub fn get_agent_cap(
+    env: &Env,
+    stream_id: u64,
+    agent: &Address,
+    start_time: u64,
+    period_duration: u64,
+    now: u64,
+) -> AgentCapState {
+    let key = DataKey::AgentCap(stream_id, agent.clone());
+    let storage = env.storage().persistent();
+    if let Some(state) = storage.get::<_, AgentCapState>(&key) {
+        storage.extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
+        state
+    } else {
+        let period_idx = if now >= start_time && period_duration > 0 {
+            (now - start_time) / period_duration
+        } else {
+            0
+        };
+        let period_start = start_time.saturating_add(period_idx.saturating_mul(period_duration));
+        AgentCapState {
+            current_period_start: period_start,
+            period_withdrawn: 0,
+            total_withdrawn: 0,
+        }
+    }
+}
+
+/// Persists an agent's cap ledger state and extends its TTL.
+pub fn put_agent_cap(env: &Env, stream_id: u64, agent: &Address, state: &AgentCapState) {
+    let key = DataKey::AgentCap(stream_id, agent.clone());
+    env.storage().persistent().set(&key, state);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);
 }

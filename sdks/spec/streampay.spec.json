@@ -361,6 +361,100 @@
       "mutating": true
     },
     {
+      "name": "authorize_agent",
+      "doc": "Authorizes a session agent (hot wallet / bot) to withdraw on behalf of the\nstream's recipient under strict caps and expiration.\nOnly the stream recipient can authorize an agent.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "max_per_period",
+          "type": "i128"
+        },
+        {
+          "name": "max_per_stream",
+          "type": "i128"
+        },
+        {
+          "name": "period_duration",
+          "type": "u64"
+        },
+        {
+          "name": "expires_at",
+          "type": "u64"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "revoke_agent",
+      "doc": "Revokes an authorized agent on a stream.\nOnly the stream recipient can revoke an agent.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "withdraw_delegated",
+      "doc": "Executes a delegated withdrawal by an authorized agent on behalf of the recipient.\n\nRequires `agent.require_auth()`. Funds are always transferred directly to the\nstream's recipient (never to the agent). Caps and expiration are strictly enforced.\n\nThe payout preamble is the same one [`Self::withdraw`] runs — maintenance\nfreeze, hook reentrancy lock, release gating and oracle-resolved accrual —\nso a delegation can never move funds that the recipient itself could not\ncurrently withdraw.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        }
+      ],
+      "returns": "void",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "agent_status",
+      "doc": "Read-only view for checking an agent's delegation configuration and cap state.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        },
+        {
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "returns": {
+        "option": "AgentStatus"
+      },
+      "error": null,
+      "mutating": true
+    },
+    {
       "name": "withdraw_all",
       "doc": "Claims every stream on one page of the recipient's index in one transaction,\npaying one aggregated transfer per asset instead of one per stream.\n\nThe page is `page_bounds` (default: offset 0, [`MAX_PAGE_SIZE`] streams; a\n`limit` of 0 or above the cap is clamped to it), which keeps a call under the\nledger-entry limit. `next_offset` is `Some` while the index has more streams.\n\nEach stream goes through the same checks and accrual math as `withdraw_max`.\nA stream that fails one of them before paying (not yours, not active, nothing\naccrued, overflow) is reported in `failed_streams` and skipped; the others\nstill pay. As in `withdraw_many`, a refused token transfer is the exception:\nstate and `Withdrawn` events are written before tokens move, so\n[`StreamError::RecipientPayoutFailed`] reverts the whole call.",
       "args": [
@@ -2924,6 +3018,69 @@
       ]
     },
     {
+      "name": "AgentConfig",
+      "doc": "Delegation configuration for an authorized session agent on a stream.",
+      "fields": [
+        {
+          "name": "max_per_period",
+          "type": "i128",
+          "doc": "Maximum amount the agent can withdraw per fixed period."
+        },
+        {
+          "name": "max_per_stream",
+          "type": "i128",
+          "doc": "Maximum cumulative amount the agent can withdraw over the stream lifetime."
+        },
+        {
+          "name": "period_duration",
+          "type": "u64",
+          "doc": "Length of a fixed quota period in seconds (e.g. 86400 for 1 day)."
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": "Expiry timestamp (seconds) after which delegation is invalid."
+        }
+      ]
+    },
+    {
+      "name": "AgentCapState",
+      "doc": "Dynamic cap tracking ledger for an authorized session agent on a stream.",
+      "fields": [
+        {
+          "name": "current_period_start",
+          "type": "u64",
+          "doc": "Current window start timestamp (aligned to fixed period boundaries)."
+        },
+        {
+          "name": "period_withdrawn",
+          "type": "i128",
+          "doc": "Cumulative amount withdrawn by agent in current period window."
+        },
+        {
+          "name": "total_withdrawn",
+          "type": "i128",
+          "doc": "Cumulative amount withdrawn by agent across all periods for this stream."
+        }
+      ]
+    },
+    {
+      "name": "AgentStatus",
+      "doc": "What `agent_status` reports: the delegation a recipient granted to an agent\ntogether with the cap ledger as it stands right now. A named struct rather\nthan a tuple because the contract spec IR maps only named types.",
+      "fields": [
+        {
+          "name": "config",
+          "type": "AgentConfig",
+          "doc": "The delegation configuration (caps, period length, expiry)."
+        },
+        {
+          "name": "cap",
+          "type": "AgentCapState",
+          "doc": "Cap ledger projected to the current period window."
+        }
+      ]
+    },
+    {
       "name": "StreamVersionReport",
       "doc": "Outcome of [`migrate_stream_record`]: which layout a single stream moved\nfrom and to, and whether it moved at all.",
       "fields": [
@@ -4011,6 +4168,69 @@
           "name": "withdrawn_total",
           "type": "i128",
           "doc": "Total fees withdrawn for this token after this withdrawal."
+        }
+      ]
+    },
+    {
+      "name": "AgentAuthorized",
+      "topic": "agent_authorized",
+      "doc": "Emitted when a stream recipient authorizes a session key agent with caps.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "agent",
+          "type": "address",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "max_per_period",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "max_per_stream",
+          "type": "i128",
+          "doc": ""
+        },
+        {
+          "name": "period_duration",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "expires_at",
+          "type": "u64",
+          "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "AgentRevoked",
+      "topic": "agent_revoked",
+      "doc": "Emitted when an authorized session key agent is revoked.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        },
+        {
+          "name": "agent",
+          "type": "address",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "revoked_by",
+          "type": "address",
+          "doc": ""
         }
       ]
     },
