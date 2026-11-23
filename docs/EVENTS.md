@@ -9,6 +9,8 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 | `advance_drawn` | `AdvanceDrawn` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `fee: i128`, `repayment_bps: u32` | `sha256:a1ccbf4cb81…` |
 | `advance_liquidated` | `AdvanceLiquidated` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `remaining_unpaid: i128` | `sha256:5f5906f14d6…` |
 | `advance_repaid` | `AdvanceRepaid` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `remaining_owed: i128` | `sha256:f560f54706b…` |
+| `agent_authorized` | `AgentAuthorized` | `stream_id: u64`, `agent: Address` | `max_per_period: i128`, `max_per_stream: i128`, `period_duration: u64`, `expires_at: u64` | `sha256:4dfb405cd58…` |
+| `agent_revoked` | `AgentRevoked` | `stream_id: u64`, `agent: Address` | `revoked_by: Address` | `sha256:a96acdc2e00…` |
 | `batch_withdraw_summary` | `BatchWithdrawSummary` | `recipient: Address` | `settled: Vec<WithdrawOutcome>`, `total: i128`, `requested: u32`, `skipped: u32` | `sha256:59b5ba85df9…` |
 | `beneficiary_enrolled` | `BeneficiaryEnrolled` | `beneficiary: Address`, `kind: Symbol` | `public_key: BytesN<32>` | `sha256:8a457d9c30e…` |
 | `condition_expired` | `ConditionExpired` | `stream_id: u64` | `condition_id: u64` | `sha256:bf220e706c8…` |

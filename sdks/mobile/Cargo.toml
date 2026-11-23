@@ -1,0 +1,33 @@
+[package]
+name = "streampay-mobile"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Read-only StreamPay mobile client exposed through UniFFI for Kotlin and Swift."
+license = "Apache-2.0"
+repository = "https://github.com/Neziahtech/streampay"
+publish = false
+
+# Standalone crate: sdks/mobile is not a member of the contract workspace.
+[workspace]
+
+[lib]
+name = "streampay_mobile"
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[dependencies]
+streampay-sdk = { path = "../rust" }
+stellar-xdr = { version = "30.0.0", features = ["base64"] }
+serde_json = "1"
+uniffi = { version = "0.29", features = ["cli"] }
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+name = "streampay-mobile-conformance"
+path = "src/bin/conformance.rs"

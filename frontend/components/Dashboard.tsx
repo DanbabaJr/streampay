@@ -9,7 +9,9 @@ import { describeError } from "@/lib/errors";
 import type { StreamArgs, StreamView } from "@/lib/stream-types";
 import { loadStreamIds, saveStreamId } from "@/lib/storage";
 import { useWallet } from "@/lib/wallet-context";
+import { useT } from "@/lib/i18n/provider";
 import WalletButton from "@/components/WalletButton";
+import EmptyState from "@/components/EmptyState";
 
 const StreamForm = lazy(() => import("@/components/StreamForm"));
 const StreamList = lazy(() => import("@/components/StreamList"));
@@ -22,6 +24,7 @@ const ROLES = ["recipient", "sender"] as const;
 const STREAM_READ_BATCH_SIZE = 5;
 
 export default function Dashboard() {
+  const t = useT();
   const { address, signTransaction } = useWallet();
   const [streams, setStreams] = useState<StreamView[]>([]);
   const [status, setStatus] = useState<string>("");
@@ -205,6 +208,13 @@ export default function Dashboard() {
             Discover on-chain
           </button>
         </div>
+        {streams.length === 0 ? (
+          <EmptyState
+            title={t("empty.dashboard.title")}
+            body={t("empty.dashboard.body")}
+            action={{ href: "/listings", label: t("empty.dashboard.action") }}
+          />
+        ) : (
         <Suspense fallback={<PanelLoading />}>
           <StreamList
             streams={streams}
@@ -248,6 +258,7 @@ export default function Dashboard() {
             onRefresh={(id) => refresh(id)}
           />
         </Suspense>
+        )}
       </section>
     </main>
   );

@@ -874,6 +874,26 @@ pub enum StreamError {
     HookExecutionFailed = 124,
     #[cfg_attr(not(target_family = "wasm"), doc = " Invalid hook selector.")]
     InvalidHookSelector = 125,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The agent is not authorized for delegated withdrawals on this stream."
+    )]
+    AgentNotAuthorized = 126,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The agent authorization has expired."
+    )]
+    AgentExpired = 127,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The delegated withdrawal exceeds the agent's cap for the current period."
+    )]
+    CapExceededPeriod = 128,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The delegated withdrawal exceeds the agent's total cap for this stream."
+    )]
+    CapExceededStream = 129,
 }
 
 impl StreamError {
@@ -1006,6 +1026,10 @@ impl StreamError {
         StreamError::HookReentrancyBlocked,
         StreamError::HookExecutionFailed,
         StreamError::InvalidHookSelector,
+        StreamError::AgentNotAuthorized,
+        StreamError::AgentExpired,
+        StreamError::CapExceededPeriod,
+        StreamError::CapExceededStream,
     ];
 
     /// The stable numeric value carried across the contract boundary

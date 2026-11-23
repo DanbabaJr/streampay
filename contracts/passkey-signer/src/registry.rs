@@ -31,7 +31,7 @@ pub struct Credential {
 pub enum RegistryKey {
     /// Stored credential for an owner address.
     Credential(Address),
-    /// Used challenge nonce (value is `true` when present).
+    /// Used challenge nonce (value is `true` when present); stored temporarily.
     UsedChallenge(BytesN<32>),
 }
 
@@ -72,13 +72,13 @@ pub fn remove_credential(env: &Env, owner: &Address) -> Result<(), PasskeyError>
 /// already recorded (replay prevention).
 pub fn record_challenge(env: &Env, challenge: &BytesN<32>) -> Result<(), PasskeyError> {
     let key = RegistryKey::UsedChallenge(challenge.clone());
-    if env.storage().persistent().has(&key) {
+    if env.storage().temporary().has(&key) {
         return Err(PasskeyError::ChallengeAlreadyUsed);
     }
     // Store `true`; presence is what matters.
-    env.storage().persistent().set(&key, &true);
+    env.storage().temporary().set(&key, &true);
     env.storage()
-        .persistent()
+        .temporary()
         .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND);
     Ok(())
 }
@@ -86,6 +86,6 @@ pub fn record_challenge(env: &Env, challenge: &BytesN<32>) -> Result<(), Passkey
 /// Returns `true` if the challenge has already been consumed.
 pub fn is_challenge_used(env: &Env, challenge: &BytesN<32>) -> bool {
     env.storage()
-        .persistent()
+        .temporary()
         .has(&RegistryKey::UsedChallenge(challenge.clone()))
 }

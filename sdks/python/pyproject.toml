@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "streampay-sdk"
+version = "0.3.0"
+description = "Typed, spec-generated Python client for the StreamPay streaming-payments Soroban contract."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "StreamPay contributors" }]
+keywords = ["stellar", "soroban", "streampay", "payments", "streaming"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+signer = ["stellar-sdk>=12"]
+dev = ["build>=1.2", "twine>=5"]
+
+[project.urls]
+Homepage = "https://github.com/Neziahtech/streampay"
+Documentation = "https://github.com/Neziahtech/streampay/blob/main/sdks/README.md"
+
+[project.scripts]
+streampay-conformance = "streampay.conformance:main"
+
+[tool.setuptools]
+packages = ["streampay"]

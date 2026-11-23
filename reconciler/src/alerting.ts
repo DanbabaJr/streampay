@@ -173,6 +173,85 @@ export class AlertingService {
   }
 
   /**
+   * Dispatch a three-way diagnosis with its layer attribution and evidence.
+   */
+  async dispatchDiagnosis(
+    diagnosis: {
+      recordId?: string;
+      severity?: string;
+      detectedAt?: string;
+      checkType?: string;
+      disagreeingPairs?: string[];
+      suspectedLayer?: string;
+      owner?: string;
+      confidence?: string;
+      evidence?: unknown;
+    },
+    report: { generatedAt?: string; asOfLedger?: number | null; mode?: string; caveats?: string[] }
+  ): Promise<WebhookDispatchResult> {
+    const start = Date.now();
+    const payload = {
+      alert: {
+        type: "reconciliation_diagnosis",
+        severity: diagnosis.severity,
+        timestamp: diagnosis.detectedAt ?? report.generatedAt,
+        source: "reconciler",
+        data: {
+          recordId: diagnosis.recordId,
+          divergenceType: diagnosis.checkType,
+          disagreeingPairs: diagnosis.disagreeingPairs,
+          suspectedLayer: diagnosis.suspectedLayer,
+          owner: diagnosis.owner,
+          confidence: diagnosis.confidence,
+          asOfLedger: report.asOfLedger,
+          mode: report.mode,
+          caveats: report.caveats,
+          evidence: diagnosis.evidence,
+        },
+      },
+      metadata: {
+        version: "2.0.0",
+        environment: this.config.environment,
+        reconcilerId: this.config.reconcilerId,
+      },
+    };
+
+    if (!this.webhookUrl) {
+      this.log("WARN", "No WEBHOOK_URL configured — diagnosis not dispatched", {
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+      });
+      return { success: false, message: "No webhook URL configured", durationMs: Date.now() - start };
+    }
+
+    try {
+      const response = await this.httpAgent.post(this.webhookUrl, JSON.stringify(payload), {
+        "Content-Type": "application/json",
+        "User-Agent": `streampay-reconciler/${this.config.reconcilerId}`,
+      });
+      const success = response.status >= 200 && response.status < 300;
+      this.log(success ? "INFO" : "WARN", `Diagnosis webhook ${success ? "succeeded" : "failed"}`, {
+        status: response.status,
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+        durationMs: Date.now() - start,
+      });
+      return {
+        success,
+        status: response.status,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log("WARN", `Diagnosis webhook failed: ${message}`, {
+        recordId: diagnosis.recordId,
+        durationMs: Date.now() - start,
+      });
+      return { success: false, message, durationMs: Date.now() - start };
+    }
+  }
+
+  /**
    * Build a structured webhook payload for the indexer dashboard.
    */
   private buildWebhookPayload(d: DivergenceRecord): WebhookPayload {

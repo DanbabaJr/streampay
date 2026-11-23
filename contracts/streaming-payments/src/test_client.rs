@@ -76,6 +76,28 @@ pub trait StreamingPaymentsApi {
 
     fn withdraw(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError>;
     fn withdraw_max(env: Env, stream_id: u64) -> Result<i128, StreamError>;
+    fn authorize_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        max_per_period: i128,
+        max_per_stream: i128,
+        period_duration: u64,
+        expires_at: u64,
+    ) -> Result<(), StreamError>;
+    fn revoke_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        caller: Address,
+    ) -> Result<(), StreamError>;
+    fn withdraw_delegated(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        amount: i128,
+    ) -> Result<(), StreamError>;
+    fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<crate::AgentStatus>;
     fn withdraw_many(
         env: Env,
         recipient: Address,

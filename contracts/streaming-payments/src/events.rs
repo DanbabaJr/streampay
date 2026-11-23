@@ -401,6 +401,37 @@ pub struct FeeWithdrawn {
 
 #[cfg_attr(
     not(target_family = "wasm"),
+    doc = " Emitted when a stream recipient authorizes a session key agent with caps."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentAuthorized {
+    #[topic]
+    pub stream_id: u64,
+    #[topic]
+    pub agent: Address,
+    pub max_per_period: i128,
+    pub max_per_stream: i128,
+    pub period_duration: u64,
+    pub expires_at: u64,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when an authorized session key agent is revoked."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRevoked {
+    #[topic]
+    pub stream_id: u64,
+    #[topic]
+    pub agent: Address,
+    pub revoked_by: Address,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
     doc = " Emitted when the recipient raises a dispute, freezing the stream's"
 )]
 #[cfg_attr(

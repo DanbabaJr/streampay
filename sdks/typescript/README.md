@@ -299,3 +299,24 @@ maintainers' call; if it is, they hold the npm scope and run the release.
 Until then `npm pack` / the workspace path is the supported distribution.
 CI runs `npm pack --dry-run` only; no registry credentials are used by pull
 requests.
+
+## Telemetry (opt-in)
+
+Telemetry is **off** by default: importing the SDK records and sends nothing. A
+host opts in from its consent flow (#515):
+
+```ts
+import { enableTelemetry, disableTelemetry, flushTelemetry } from "@streampay/sdk";
+
+enableTelemetry();       // start reporting
+await flushTelemetry();  // flush queued batches (e.g. before page unload)
+disableTelemetry();      // withdraw consent and discard anything unsent
+```
+
+What is reported is a fixed allowlist: schema version, SDK name and version,
+event kind, SDK method name, outcome, a latency bucket and an error code (the
+contract error name or the failure kind). Addresses, amounts, keys, XDR, payloads
+and error messages have no field to travel in, and every emitted value is checked
+against a denylist at the emission boundary. Reporting is batched, bounded, backs
+off after a failed send, honours a kill switch, and never throws into the host
+application.

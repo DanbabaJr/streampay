@@ -5,12 +5,14 @@ is derived from the contract's own sources.
 
 | Piece | Path | Status |
 |---|---|---|
-| Spec (contract IR) + schema guard | [`spec/`](./spec), [`generator/check_contract_surface.py`](./generator/check_contract_surface.py) | this change |
-| Generator driver | [`generator/generate.py`](./generator/generate.py) | this change |
-| Conformance vectors | [`vectors/`](./vectors) | this change |
-| TypeScript client | [`typescript/`](./typescript) (workspace / `npm pack` only, not on npm) | this change |
-| Rust client (read-only) | [`rust/`](./rust) | this change |
-| Python client | — | later |
+| Spec (contract IR) + schema guard | [`spec/`](./spec), [`generator/check_contract_surface.py`](./generator/check_contract_surface.py) | shipped |
+| Generator driver | [`generator/generate.py`](./generator/generate.py) | shipped |
+| Conformance vectors | [`vectors/`](./vectors) | shipped |
+| TypeScript client | [`typescript/`](./typescript) (workspace / `npm pack` only, not on npm) | shipped |
+| Rust client (read-only) | [`rust/`](./rust) (crates.io workspace only, not published) | shipped |
+| Python client | [`python/`](./python) (no third-party runtime dependency) | shipped |
+| Cross-SDK live conformance | [`conformance/`](./conformance) | shipped |
+| Mobile (UniFFI Kotlin/Swift) | [`mobile/`](./mobile) | shipped |
 
 Language packages land separately so each one is reviewed against the shared
 spec on its own. This directory holds only what every language shares.
@@ -28,10 +30,13 @@ sdks/
   vectors/*.json                  shared conformance fixtures (tx + events + result)
   vectors/builder/                deterministic fixture builder (Node, stellar-sdk)
   generator/emit_typescript.py    IR -> typescript/src/generated.ts + methods.ts
-  typescript/                     generated bindings + runtime + tests
   generator/emit_rust.py          IR -> rust/src/generated.rs (read operations only)
-  rust/                           generated read-only crate + conformance test
-  Makefile                        spec / check / vectors
+  typescript/                     generated bindings + runtime + tests
+  rust/                           generated read-only crate + conformance decoder
+  python/                         dependency-free Python client + vector decoder
+  conformance/                    orchestrator, live sandbox, lifecycle tests
+  mobile/                         UniFFI UDL, Rust core, Kotlin/Swift smoke
+  Makefile                        spec / check / vectors / rust / conformance
 ```
 
 ## The contract is the source of truth
@@ -122,6 +127,33 @@ make -C sdks vectors       # rebuild; CI fails if this changes any file
 ```
 
 See [`vectors/README.md`](./vectors/README.md) for the format.
+
+## Cross-SDK conformance
+
+Every client decodes the same `sdks/vectors/*.json` into one canonical JSON
+shape. [`conformance/orchestrator.py`](./conformance/orchestrator.py) runs the
+TypeScript, Rust and Python clients, requires each payload to match the
+recorded expectation **and** every other client, and pins any failure to
+`client`, `vector`, `ledger` and decoded contract error code:
+
+```bash
+make -C sdks conformance       # offline: build + decode + compare
+make -C sdks conformance-test  # orchestrator lifecycle tests (no Docker/network)
+make -C sdks conformance-live  # ephemeral sandbox, live on-chain bytes
+```
+
+`--live` starts a throwaway `stellar/quickstart` container on a random loopback
+port, funds one identity from `STREAMPAY_SANDBOX_SECRET`, deploys
+`STREAMPAY_WASM`, simulates the read, and feeds the real result XDR through all
+three decoders. Teardown always runs; a dirty container/identity fails the run.
+Per-client and whole-run runtime budgets are hard deadlines. Artifacts
+(`summary.json`, per-client payloads, sandbox state) are written to
+`sdks/conformance/out/` on every run and uploaded on CI failure.
+
+The mobile SDK has its own host-side runner
+(`cargo run --bin streampay-mobile-conformance -- sdks/vectors`) and a binding
+freshness gate that fails when the spec or the error catalog changes without
+regenerating the UDL.
 
 ## Versioning and publishing
 

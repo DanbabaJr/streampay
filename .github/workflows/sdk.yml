@@ -9,6 +9,7 @@ on:
       - "contracts/streaming-payments/test_snapshots/**"
       - "schemas/events/registry.json"
       - "frontend/lib/errors.ts"
+      - "perf/**"
       - ".github/workflows/sdk.yml"
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - "contracts/streaming-payments/test_snapshots/**"
       - "schemas/events/registry.json"
       - "frontend/lib/errors.ts"
+      - "perf/**"
       - ".github/workflows/sdk.yml"
   workflow_dispatch:
 
@@ -107,5 +109,93 @@ jobs:
       - name: Build + tests
         run: npm test
 
+      - name: Check SDK vector conformance runtime budget
+        run: node ../../perf/harness/check_budgets.mjs --sdk-conformance
+
       - name: npm pack dry run
         run: npm pack --dry-run
+
+  conformance:
+    name: Cross-SDK conformance — TypeScript / Rust / Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Orchestrator lifecycle tests
+        run: python3 -m unittest discover -s sdks/conformance -p "test_*.py" -v
+
+      - name: Build TypeScript client
+        working-directory: sdks/typescript
+        run: npm ci && npm run build
+
+      - name: Build Rust decoder
+        run: cargo build --manifest-path sdks/rust/Cargo.toml --example conformance
+
+      - name: Rust vector tests
+        run: cargo test --manifest-path sdks/rust/Cargo.toml
+
+      - name: Python SDK tests
+        env:
+          PYTHONPATH: sdks/python
+        run: python3 -m unittest discover -s sdks/python/tests -p "test_*.py" -v
+
+      - name: Three clients decode every vector identically
+        run: python3 sdks/conformance/orchestrator.py --out sdks/conformance/out
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-conformance
+          path: sdks/conformance/out
+          if-no-files-found: warn
+
+  mobile:
+    name: Mobile — UniFFI Kotlin / Swift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Binding freshness (UDL + 99-code catalog)
+        run: node sdks/mobile/scripts/generate-bindings.mjs --check
+
+      - name: Host tests
+        run: cargo test --manifest-path sdks/mobile/Cargo.toml
+
+      - name: Host-side vector runner
+        run: cargo run --manifest-path sdks/mobile/Cargo.toml --bin streampay-mobile-conformance -- sdks/vectors
+
+      - name: Install Kotlin compiler
+        run: |
+          curl -fsSL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip -o /tmp/kotlin.zip
+          unzip -q /tmp/kotlin.zip -d /opt
+          echo "/opt/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: Kotlin generated-binding compile smoke
+        run: sdks/mobile/scripts/smoke-kotlin.sh
+
+      - name: Swift generated-binding compile smoke
+        run: sdks/mobile/scripts/smoke-swift.sh

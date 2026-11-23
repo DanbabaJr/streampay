@@ -1,0 +1,42 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: streampay-indexer-multiregion
+  namespace: streampay
+  labels:
+    app.kubernetes.io/name: streampay-indexer
+    app.kubernetes.io/component: multiregion
+spec:
+  groups:
+    - name: streampay-indexer.multiregion
+      rules:
+        # A region that keeps falling behind the tip is converging on nothing:
+        # its reads become stale and its projections need the journal fold.
+        - alert: StreampayRegionConsistencyLagHigh
+          expr: max by (region) (streampay_region_consistency_lag_ledgers) > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Indexer region {{ $labels.region }} is {{ $value }} ledgers behind the tip"
+            runbook_url: https://github.com/ayooluwa123455/streampay/blob/main/infra/multiregion/README.md
+
+        # No healthy region: reads fail closed, so this is a page.
+        - alert: StreampayNoFreshIndexerRegion
+          expr: sum(streampay_region_healthy) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No healthy indexer region is serving reads"
+            runbook_url: https://github.com/ayooluwa123455/streampay/blob/main/infra/multiregion/README.md
+
+        # Watermarks should track each other; a skew that grows while lag is low
+        # means one region stopped ingesting without failing its probe.
+        - alert: StreampayRegionWatermarkSkew
+          expr: max(streampay_region_ledger_watermark) - min(streampay_region_ledger_watermark) > 20
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Indexer region watermarks have drifted apart by {{ $value }} ledgers"

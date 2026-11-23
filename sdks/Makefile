@@ -3,7 +3,7 @@ VECTORS_BUILDER := vectors/builder
 TS_DIR := typescript
 RUST_DIR := rust
 
-.PHONY: help spec generate check check-spec vectors test test-rust publish-dry-run clean
+.PHONY: help spec generate check check-spec vectors test test-rust publish-dry-run clean conformance conformance-test conformance-live mobile-check mobile-bindings
 
 help:
 	@echo "spec              re-derive spec/streampay.spec.json + FINGERPRINT from the contract"
@@ -13,6 +13,7 @@ help:
 	@echo "vectors           rebuild conformance vectors (deterministic)"
 	@echo "test              TypeScript SDK: typecheck, build, tests (incl. vectors)"
 	@echo "test-rust         Rust SDK: conformance vectors + doctests"
+	@echo "conformance       TypeScript + Rust + Python decode every shared vector"
 	@echo "publish-dry-run   npm pack --dry-run for the TypeScript SDK (no upload)"
 
 spec:
@@ -36,6 +37,23 @@ test:
 
 test-rust:
 	cd $(RUST_DIR) && cargo test
+
+conformance:
+	./conformance/run.sh
+
+conformance-test:
+	$(PYTHON) -m unittest discover -s conformance -p "test_*.py" -v
+
+conformance-live:
+	./conformance/run.sh --live --sandbox "$(PYTHON) conformance/sandbox.py"
+
+mobile-bindings:
+	node mobile/scripts/generate-bindings.mjs
+
+mobile-check:
+	node mobile/scripts/generate-bindings.mjs --check
+	cargo test --manifest-path mobile/Cargo.toml
+	cargo run --manifest-path mobile/Cargo.toml --bin streampay-mobile-conformance -- vectors
 
 publish-dry-run:
 	cd $(TS_DIR) && npm pack --dry-run

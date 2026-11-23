@@ -91,13 +91,21 @@ mod differential_harness;
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod extensions_test;
 
 mod dispute;
+#[cfg(test)]
+mod dispute_lifecycle_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
 mod events;
 mod governance;
+pub mod batch_amend;
+pub mod insurance;
+pub mod sender_policy;
+pub mod voting_power;
 #[cfg(test)]
 mod governance_test;
 pub mod hooks;
@@ -150,20 +158,20 @@ pub use dispute::{
 };
 pub use errors::StreamError;
 pub use events::{
-    AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, BatchWithdrawSummary, BeneficiaryEnrolled,
-    ConditionExpired, ConditionMet, ConditionRegistered, ContractFrozenStateChanged,
-    ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
-    GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
-    GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked, HookRegistered,
-    OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback, OracleTimeReported,
-    OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted, PolicyAssetQueued,
-    PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed, PolicyInitialized,
-    RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired,
-    ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
-    SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
-    StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
-    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
-    TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, AgentAuthorized, AgentRevoked,
+    BatchWithdrawSummary, BeneficiaryEnrolled, ConditionExpired, ConditionMet, ConditionRegistered,
+    ContractFrozenStateChanged, ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved,
+    FeeCharged, FeeWithdrawn, GovernanceActionExecuted, GovernanceActionProposed,
+    GovernanceActionSigned, GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked,
+    HookRegistered, OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback,
+    OracleTimeReported, OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted,
+    PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed,
+    PolicyInitialized, RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled,
+    ScheduledIntentExpired, ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed,
+    SenderTransferred, SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated,
+    StreamCancelled, StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated,
+    StreamRefundTargetChanged, StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated,
+    TemplateApproved, TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -178,15 +186,15 @@ pub use sponsor::{PeriodSpend, SponsorConfig};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{
-    streamed_amount_at_segments, streamed_at, AssetTransfer, BatchEntry, ClaimFailure,
-    MigrationStatus, OwnershipRole, PageBounds, PendingOwnership, PendingRateChange,
-    PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory, SenderTransferRecord,
-    Stream, StreamStatus, StreamVersionReport, VersionedStream, WithdrawAllResult, WithdrawEntry,
-    WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH,
-    MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS,
-    MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS,
-    RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2,
-    TARGET_SCHEMA_VERSION,
+    streamed_amount_at_segments, streamed_at, AgentCapState, AgentConfig, AgentStatus,
+    AssetTransfer, BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds,
+    PendingOwnership, PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment,
+    SenderHistory, SenderTransferRecord, Stream, StreamStatus, StreamVersionReport,
+    VersionedStream, WithdrawAllResult, WithdrawEntry, WithdrawOutcome,
+    CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS,
+    MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH,
+    MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
+    STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
 };
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
 
@@ -553,6 +561,24 @@ impl StreamingPayments {
         let stream_policy = policy::get_stream_policy(&env, Some(token.clone()));
         let duration = end_time - start_time;
         policy::validate_stream_args(stream_policy.as_ref(), deposit_amount, duration)?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let rate_per_second = if duration > 0 {
+                deposit_amount / (duration as i128)
+            } else {
+                deposit_amount
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &sender,
+                &recipient,
+                &token,
+                deposit_amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Protocol fee, computed at the deposit boundary only. The accrual
         // math (`deposit`, `streamed_at`, cancel splits) never sees it.
@@ -1603,6 +1629,209 @@ impl StreamingPayments {
         Ok(amount)
     }
 
+    /// Authorizes a session agent (hot wallet / bot) to withdraw on behalf of the
+    /// stream's recipient under strict caps and expiration.
+    /// Only the stream recipient can authorize an agent.
+    pub fn authorize_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        max_per_period: i128,
+        max_per_stream: i128,
+        period_duration: u64,
+        expires_at: u64,
+    ) -> Result<(), StreamError> {
+        let s = stream::get_stream(&env, stream_id)?;
+        s.recipient.require_auth();
+
+        if s.status != StreamStatus::Active {
+            return Err(surface::reject(Branch::StreamNotActive));
+        }
+        if max_per_period <= 0 {
+            return Err(surface::reject(Branch::AuthorizeAgentMaxPeriodNonPositive));
+        }
+        if max_per_stream <= 0 {
+            return Err(surface::reject(Branch::AuthorizeAgentMaxStreamNonPositive));
+        }
+        if period_duration == 0 {
+            return Err(surface::reject(Branch::AuthorizeAgentPeriodDurationZero));
+        }
+        let now = env.ledger().timestamp();
+        if expires_at <= now {
+            return Err(surface::reject(Branch::AuthorizeAgentExpiryInPast));
+        }
+
+        let config = AgentConfig {
+            max_per_period,
+            max_per_stream,
+            period_duration,
+            expires_at,
+        };
+        stream::put_agent_auth(&env, stream_id, &agent, &config);
+
+        AgentAuthorized {
+            stream_id,
+            agent,
+            max_per_period,
+            max_per_stream,
+            period_duration,
+            expires_at,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Revokes an authorized agent on a stream.
+    /// Only the stream recipient can revoke an agent.
+    pub fn revoke_agent(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        caller: Address,
+    ) -> Result<(), StreamError> {
+        caller.require_auth();
+        let s = stream::get_stream(&env, stream_id)?;
+        if caller != s.recipient {
+            return Err(surface::reject(Branch::RevokeAgentNotRecipient));
+        }
+
+        stream::remove_agent_auth(&env, stream_id, &agent);
+
+        AgentRevoked {
+            stream_id,
+            agent,
+            revoked_by: caller,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Executes a delegated withdrawal by an authorized agent on behalf of the recipient.
+    ///
+    /// Requires `agent.require_auth()`. Funds are always transferred directly to the
+    /// stream's recipient (never to the agent). Caps and expiration are strictly enforced.
+    ///
+    /// The payout preamble is the same one [`Self::withdraw`] runs — maintenance
+    /// freeze, hook reentrancy lock, release gating and oracle-resolved accrual —
+    /// so a delegation can never move funds that the recipient itself could not
+    /// currently withdraw.
+    pub fn withdraw_delegated(
+        env: Env,
+        stream_id: u64,
+        agent: Address,
+        amount: i128,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
+        agent.require_auth();
+
+        if amount <= 0 {
+            return Err(surface::reject(Branch::WithdrawAmountNonPositive));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
+        }
+
+        let mut s = stream::get_stream(&env, stream_id)?;
+        if s.status != StreamStatus::Active {
+            return Err(surface::reject(Branch::StreamNotActive));
+        }
+
+        let config = stream::get_agent_auth(&env, stream_id, &agent)
+            .ok_or_else(|| surface::reject(Branch::WithdrawDelegatedAgentNotAuthorized))?;
+
+        let now = env.ledger().timestamp();
+        if now >= config.expires_at {
+            return Err(surface::reject(Branch::WithdrawDelegatedAgentExpired));
+        }
+
+        let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
+        let available = stream::available_amount_with_plan(&env, &s, resolved.timestamp)?;
+        if amount > available {
+            return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
+        }
+
+        let mut cap_state = stream::get_agent_cap(
+            &env,
+            stream_id,
+            &agent,
+            s.start_time,
+            config.period_duration,
+            now,
+        );
+
+        // Advance period window if current time is past current period end
+        let period_end = cap_state
+            .current_period_start
+            .saturating_add(config.period_duration);
+        if now >= period_end {
+            let elapsed_since_start = now.saturating_sub(s.start_time);
+            let period_idx = elapsed_since_start / config.period_duration;
+            cap_state.current_period_start = s
+                .start_time
+                .saturating_add(period_idx.saturating_mul(config.period_duration));
+            cap_state.period_withdrawn = 0;
+        }
+
+        let new_period_withdrawn = cap_state
+            .period_withdrawn
+            .checked_add(amount)
+            .ok_or(StreamError::MathOverflow)?;
+        if new_period_withdrawn > config.max_per_period {
+            return Err(surface::reject(Branch::WithdrawDelegatedCapExceededPeriod));
+        }
+
+        let new_total_withdrawn = cap_state
+            .total_withdrawn
+            .checked_add(amount)
+            .ok_or(StreamError::MathOverflow)?;
+        if new_total_withdrawn > config.max_per_stream {
+            return Err(surface::reject(Branch::WithdrawDelegatedCapExceededStream));
+        }
+
+        // Update cap state
+        cap_state.period_withdrawn = new_period_withdrawn;
+        cap_state.total_withdrawn = new_total_withdrawn;
+        stream::put_agent_cap(&env, stream_id, &agent, &cap_state);
+
+        // Execute payout to stream recipient
+        Self::pay_out(&env, &mut s, amount)
+    }
+
+    /// Read-only view for checking an agent's delegation configuration and cap state.
+    pub fn agent_status(env: Env, stream_id: u64, agent: Address) -> Option<AgentStatus> {
+        let s = stream::get_stream(&env, stream_id).ok()?;
+        let config = stream::get_agent_auth(&env, stream_id, &agent)?;
+        let now = env.ledger().timestamp();
+        let mut cap_state = stream::get_agent_cap(
+            &env,
+            stream_id,
+            &agent,
+            s.start_time,
+            config.period_duration,
+            now,
+        );
+        let period_end = cap_state
+            .current_period_start
+            .saturating_add(config.period_duration);
+        if now >= period_end {
+            let elapsed_since_start = now.saturating_sub(s.start_time);
+            let period_idx = elapsed_since_start / config.period_duration;
+            cap_state.current_period_start = s
+                .start_time
+                .saturating_add(period_idx.saturating_mul(config.period_duration));
+            cap_state.period_withdrawn = 0;
+        }
+        Some(AgentStatus {
+            config,
+            cap: cap_state,
+        })
+    }
+
     #[cfg_attr(
         not(target_family = "wasm"),
         doc = " Claims every stream on one page of the recipient's index in one transaction,"
@@ -2160,6 +2389,25 @@ impl StreamingPayments {
 
         let stream_policy = policy::get_stream_policy(&env, Some(s.token.clone()));
         policy::validate_top_up_args(stream_policy.as_ref(), new_deposit, s.duration())?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let duration = s.duration();
+            let rate_per_second = if duration > 0 {
+                new_deposit / (duration as i128)
+            } else {
+                new_deposit
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &s.sender,
+                &s.recipient,
+                &s.token,
+                amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Interaction: pull the added funds from the sender. A token-side
         // failure maps to a distinct code; the effects below never run, and
