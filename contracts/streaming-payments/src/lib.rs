@@ -91,13 +91,21 @@ mod differential_harness;
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod extensions_test;
 
 mod dispute;
+#[cfg(test)]
+mod dispute_lifecycle_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
 mod events;
 mod governance;
+pub mod batch_amend;
+pub mod insurance;
+pub mod sender_policy;
+pub mod voting_power;
 #[cfg(test)]
 mod governance_test;
 pub mod hooks;
@@ -547,6 +555,24 @@ impl StreamingPayments {
         let stream_policy = policy::get_stream_policy(&env, Some(token.clone()));
         let duration = end_time - start_time;
         policy::validate_stream_args(stream_policy.as_ref(), deposit_amount, duration)?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let rate_per_second = if duration > 0 {
+                deposit_amount / (duration as i128)
+            } else {
+                deposit_amount
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &sender,
+                &recipient,
+                &token,
+                deposit_amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Protocol fee, computed at the deposit boundary only. The accrual
         // math (`deposit`, `streamed_at`, cancel splits) never sees it.
@@ -2154,6 +2180,25 @@ impl StreamingPayments {
 
         let stream_policy = policy::get_stream_policy(&env, Some(s.token.clone()));
         policy::validate_top_up_args(stream_policy.as_ref(), new_deposit, s.duration())?;
+
+        // Enforce smart-wallet sender spending policy (Issue #573)
+        if sender_policy::has_any_policies(&env) {
+            let duration = s.duration();
+            let rate_per_second = if duration > 0 {
+                new_deposit / (duration as i128)
+            } else {
+                new_deposit
+            };
+            sender_policy::validate_and_record_spend(
+                &env,
+                &s.sender,
+                &s.recipient,
+                &s.token,
+                amount,
+                rate_per_second,
+                duration,
+            )?;
+        }
 
         // Interaction: pull the added funds from the sender. A token-side
         // failure maps to a distinct code; the effects below never run, and

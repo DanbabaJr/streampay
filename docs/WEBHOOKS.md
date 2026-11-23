@@ -55,12 +55,24 @@ $$\text{Signature} = \text{HMAC-SHA256}_{\text{secret}}\big(\text{timestamp} \ma
 Where:
 - `secret`: Endpoint secret (prefixed with `whsec_`).
 - `timestamp`: Integer unix seconds matching `t=` in the header.
-- `raw_body`: Exact, unparsed UTF-8 request body bytes.
+- `raw_body`: The exact bytes sent in the HTTP POST body. The dispatcher canonicalizes
+  the event envelope before it sends the body, so receivers must use the received raw
+  bytes without re-parsing and re-serializing JSON.
+- `prefix`: No `sha256=` prefix is used. `v1` values are lowercase hexadecimal SHA-256
+  HMAC digests (64 hex characters).
+- `secret`: The complete stored secret string, used exactly as-is with UTF-8 encoding.
+  Do not strip the optional `whsec_` prefix.
 
 ### 2.2 Replay Protection
 Receivers must verify that:
 $$|\text{current\_time} - \text{timestamp}| \le 300 \text{ seconds (5 minutes)}$$
 Requests with timestamps outside this tolerance window must be rejected to prevent replay attacks.
+The value comes from the default argument `toleranceSec = 300` in
+[`verifySignatureHeader`](../indexer/src/webhooks/hmac.ts), and is 300 seconds (5 minutes).
+Reject stale or future-out-of-window deliveries: log the reason, return an HTTP 4xx
+(normally `400` or `401`), and do not enqueue or process the event. A stale delivery
+may safely remain in the sender's retry/DLQ lifecycle; signature failures and replay
+failures are receiver-side and should not be retried indefinitely.
 
 ### 2.3 Zero-Downtime Secret Rotation
 When a secret is rotated in the dashboard or API, StreamPay provides an overlap window by sending dual signatures:
@@ -73,38 +85,71 @@ The receiving service can verify against either its old or new secret, allowing 
 
 ## 3. Signature Verification Examples
 
+The exact HTTP headers are `Streampay-Signature`, `Streampay-Event`, and
+`Streampay-Delivery`. Signature verification uses only `Streampay-Signature`;
+the latter two headers identify the event and delivery.
+
+For an endpoint configuration and delivery UI, see
+[Webhook Settings](../frontend/app/settings/webhooks/page.tsx).
+
+The following examples verify the pinned fixture in
+[`test_fixtures/webhook-signature.json`](../test_fixtures/webhook-signature.json).
+The fixture timestamp is `1700000000`, and the test secret is
+`whsec_fixture_secret`. The fixture was generated with
+[`generateSignatureHeader`](../indexer/src/webhooks/hmac.ts), not by hand-computing
+the signature. Run `npm run fixture:webhook:generate` in `indexer/` to regenerate it.
+
 ### TypeScript / Node.js
+
+This implementation is also available as the tested
+[`verifyStreampayWebhook`](../indexer/src/webhooks/verify-example.ts) reference module.
+Its raw-body parameter is deliberately `Uint8Array`; re-parsing JSON and serializing
+it again can change whitespace or key order and invalidate the signature.
+
 ```typescript
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export function verifyStreampayWebhook(
   header: string,
-  rawBody: string,
+  rawBody: Uint8Array,
   secret: string,
+  nowSec = Math.floor(Date.now() / 1000),
   toleranceSec = 300
 ): boolean {
-  const parts = header.split(",");
+  if (!header) return false;
+
   let timestamp: number | null = null;
   const signatures: string[] = [];
 
-  for (const part of parts) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === "t") timestamp = Number(v.join("="));
-    if (k === "v1") signatures.push(v.join("="));
+  for (const part of header.split(",")) {
+    const [key, ...rest] = part.trim().split("=");
+    const value = rest.join("=");
+    if (key === "t") timestamp = Number(value);
+    else if (key === "v1" && value) signatures.push(value.trim());
   }
 
-  if (!timestamp || signatures.length === 0) return false;
-  if (Math.abs(Date.now() / 1000 - timestamp) > toleranceSec) return false;
+  if (
+    timestamp === null ||
+    !Number.isSafeInteger(timestamp) ||
+    signatures.length === 0 ||
+    Math.abs(nowSec - timestamp) > toleranceSec
+  ) {
+    return false;
+  }
 
+  // The signing payload is: timestamp + "." + exact raw request body bytes.
   const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`, "utf-8")
-    .digest("hex");
-  const expectedBuf = Buffer.from(expected, "hex");
+    .update(`${timestamp}.`, "utf-8")
+    .update(rawBody)
+    .digest();
 
   return signatures.some((sig) => {
     try {
-      const sigBuf = Buffer.from(sig, "hex");
-      return sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf);
+      if (!/^[0-9a-fA-F]{64}$/.test(sig)) return false;
+      const provided = Buffer.from(sig, "hex");
+      // Length guard is required before timingSafeEqual.
+      return provided.length === expected.length &&
+        timingSafeEqual(provided, expected);
     } catch {
       return false;
     }
@@ -112,83 +157,106 @@ export function verifyStreampayWebhook(
 }
 ```
 
-### Rust
-```rust
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-use subtle::ConstantTimeEq;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-type HmacSha256 = Hmac<Sha256>;
-
-pub fn verify_streampay_webhook(
-    header: &str,
-    raw_body: &[u8],
-    secret: &str,
-    tolerance_secs: u64,
-) -> bool {
-    let mut timestamp = None;
-    let mut signatures = Vec::new();
-
-    for part in header.split(',') {
-        let mut kv = part.splitn(2, '=');
-        match (kv.next().map(str::trim), kv.next().map(str::trim)) {
-            (Some("t"), Some(t)) => timestamp = t.parse::<u64>().ok(),
-            (Some("v1"), Some(sig)) => signatures.push(sig),
-            _ => {}
-        }
-    }
-
-    let t = match timestamp {
-        Some(t) => t,
-        None => return false,
-    };
-
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    if now.abs_diff(t) > tolerance_secs {
-        return false;
-    }
-
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take any size");
-    mac.update(format!("{t}.").as_bytes());
-    mac.update(raw_body);
-    let expected_hex = hex::encode(mac.finalize().into_bytes());
-
-    signatures.iter().any(|sig| sig.as_bytes().ct_eq(expected_hex.as_bytes()).into())
-}
-```
-
 ### Python
+
+The stdlib implementation below reads the raw POST body bytes unchanged:
+
 ```python
 import hmac
 import hashlib
 import time
 
-def verify_streampay_webhook(header: str, raw_body: bytes, secret: str, tolerance_sec: int = 300) -> bool:
-    parts = header.split(",")
+def verify_streampay_webhook(
+    header: str,
+    raw_body: bytes,
+    secret: str,
+    now_sec: int | None = None,
+    tolerance_sec: int = 300,
+) -> bool:
+    if not header:
+        return False
+
     timestamp = None
     signatures = []
 
-    for part in parts:
+    for part in header.split(","):
         k, _, v = part.partition("=")
         k = k.strip()
         v = v.strip()
         if k == "t":
-            timestamp = int(v)
-        elif k == "v1":
+            try:
+                timestamp = int(v)
+            except ValueError:
+                return False
+        elif k == "v1" and v:
             signatures.append(v)
 
     if timestamp is None or not signatures:
         return False
 
-    if abs(time.time() - timestamp) > tolerance_sec:
+    if now_sec is None:
+        now_sec = int(time.time())
+    if abs(now_sec - timestamp) > tolerance_sec:
         return False
 
     message = f"{timestamp}.".encode("utf-8") + raw_body
     expected = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
-    return any(hmac.compare_digest(expected, sig) for sig in signatures)
+    for signature in signatures:
+        if len(signature) != len(expected):
+            continue
+        if hmac.compare_digest(expected, signature.lower()):
+            return True
+    return False
 ```
+
+To verify a captured delivery against the pinned fixture:
+
+```bash
+python3 scripts/verify_webhook_fixture.py
+```
+
+### curl + openssl debugging recipe
+
+This is a debugging recipe, not production verification. It is not constant-time.
+Capture the exact body and header from a delivery, then recompute with the test or
+endpoint secret:
+
+```bash
+SECRET='whsec_fixture_secret'
+TIMESTAMP='1700000000'
+
+# Save the exact captured POST body without JSON formatting changes.
+curl --fail-with-body \
+  --data-binary @captured-body.json \
+  https://example.invalid/debug-receiver
+
+# Read raw_body from the fixture or replace this with the captured file's bytes.
+RAW_BODY='{"event_id":"evt_fixture_535","event_type":"stream_created","payload":{"deposit":"1000000000","recipient":"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5","sender":"GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7"},"stream_id":"42","timestamp":1700000000}'
+HEADER='t=1700000000,v1=2cfc46ae1f21bf23ea1af74430abfce8c57d46ad54c05570a75034f5c848f16c'
+
+EXPECTED=$(printf '%s' "${TIMESTAMP}.${RAW_BODY}" |
+  openssl dgst -sha256 -hmac "$SECRET" |
+  sed 's/^.*= //')
+PROVIDED=$(printf '%s' "$HEADER" |
+  sed -n 's/^.*v1=\([0-9a-fA-F][0-9a-fA-F]*\).*$/\1/p')
+
+printf 'expected=%s\nprovided=%s\n' "$EXPECTED" "$PROVIDED"
+test "$EXPECTED" = "$PROVIDED" && echo 'match'
+```
+
+Use only as a debugging aid. Production verification must parse `Streampay-Signature`,
+check the replay window first, compare each `v1` value with a constant-time primitive,
+and verify the raw request body bytes.
+
+Failure cases:
+
+- Wrong secret: signature mismatch; reject with `401` or `400`.
+- Tampered body or re-serialized JSON: signing payload differs; reject.
+- Expired timestamp or timestamp more than 300 seconds in the future: replay check fails;
+  reject stale/future deliveries and log the timestamp drift.
+- Missing or malformed `Streampay-Signature`: reject before signature comparison.
+- A `v1` value that is not 64 hexadecimal characters: reject or skip it.
 
 ---
 

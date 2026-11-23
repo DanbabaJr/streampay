@@ -817,6 +817,38 @@ impl Branch {
             Branch::PauseNotAuthorized => &["pause_stream", "resume_stream"],
             Branch::PauseAlreadyPaused => &["pause_stream"],
             Branch::ResumeNotPaused => &["resume_stream"],
+            Branch::BatchAmendmentNotFound
+            | Branch::BatchAmendmentExpired
+            | Branch::BatchAmendmentThresholdNotMet
+            | Branch::BatchAmendmentRecipientNotConsented
+            | Branch::BatchAmendmentTooManyAmendments
+            | Branch::BatchAmendmentInvalidTerms
+            | Branch::BatchAmendmentStreamPaused => &[
+                "propose_batch_amendment",
+                "consent_batch_amendment",
+                "apply_batch_amendment",
+            ],
+            Branch::VotingPowerAlreadyVoted
+            | Branch::VotingPowerInsufficient
+            | Branch::VotingPowerProposalNotFound => &["cast_community_vote"],
+            Branch::InsurancePoolInsolvent
+            | Branch::InsuranceClaimNotFound
+            | Branch::InsuranceClaimNotApproved
+            | Branch::InsuranceClaimTimelockNotElapsed
+            | Branch::InsuranceCapExceeded
+            | Branch::InsuranceInvalidLossProof => &[
+                "file_insurance_claim",
+                "approve_insurance_claim",
+                "reject_insurance_claim",
+                "payout_insurance_claim",
+            ],
+            Branch::SenderPolicyViolated
+            | Branch::SenderPolicyNotFound
+            | Branch::SenderPolicyInvalidBounds => &[
+                "set_sender_policy",
+                "revoke_sender_policy",
+                "create_stream",
+            ],
             Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
             Branch::RateCancelNotProposer => &["cancel_rate_change"],
             Branch::RateSegmentSumOverflow => &[

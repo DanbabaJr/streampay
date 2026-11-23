@@ -615,6 +615,7 @@ fn json_schema_for(
             json!({"type": "integer", "minimum": 0, "maximum": 4294967295_u64, "x-soroban-type": "u32"})
         }
         "u64" => json!({"type": "integer", "minimum": 0, "x-soroban-type": "u64"}),
+        "u128" => json!({"type": "integer", "minimum": 0, "x-soroban-type": "u128"}),
         "i64" => json!({"type": "integer", "x-soroban-type": "i64"}),
         "i128" => json!({"type": "integer", "x-soroban-type": "i128"}),
         "Address" => json!({

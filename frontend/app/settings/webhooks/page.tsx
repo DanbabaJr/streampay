@@ -232,6 +232,14 @@ export default function WebhooksSettingsPage() {
             <p className="text-sm text-neutral-400 mt-1">
               Deterministic events with HMAC-SHA256 signatures, replay protection, 5-attempt retry backoff, and DLQ observability.
             </p>
+            <a
+              href="https://github.com/Neziahtech/streampay/blob/main/docs/WEBHOOKS.md"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-indigo-300 hover:text-indigo-200 underline mt-2 inline-block"
+            >
+              Read the webhook signature and verification guide
+            </a>
           </div>
           <button
             type="button"

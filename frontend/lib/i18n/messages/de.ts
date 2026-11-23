@@ -85,6 +85,19 @@ export const de: Record<MessageKey, string> = {
   "home.walletNoAddress": "Freighter hat keine Adresse zurückgegeben.",
   "home.walletFailed": "Wallet-Verbindung fehlgeschlagen: {reason}",
 
+  "empty.dashboard.title": "Noch keine Streams",
+  "empty.dashboard.body":
+    "Deine Zahlungs-Streams erscheinen hier. Erstelle oben deinen ersten Stream oder stöbere im Verzeichnis.",
+  "empty.dashboard.action": "Verzeichnis durchsuchen",
+  "empty.listings.title": "Keine Listings gefunden",
+  "empty.listings.body":
+    "Noch keine öffentlichen Streams passen zu den aktuellen Filtern. Listings bleiben verborgen, bis genügend Streams dieselben Bänder teilen — aktiviere oben „Streams mit geringer Anonymität anzeigen“ für seltene Fälle.",
+  "empty.listings.action": "Stream erstellen",
+  "empty.analytics.title": "Keine Streams zur Analyse",
+  "empty.analytics.body":
+    "Gib oben eine Stellar-Adresse ein oder erstelle deinen ersten Stream, um Akkumulationsverlauf und Ertragsprognosen zu sehen.",
+  "empty.analytics.action": "Stream erstellen",
+
   "pay.loading.title": "Zahlungslink wird geprüft",
   "pay.loading.body":
     "Kryptografische Bindung auf Stellar Soroban wird verifiziert …",
