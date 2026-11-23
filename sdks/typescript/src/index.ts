@@ -25,3 +25,25 @@ export { collectPages } from "./pagination.js";
 export type { IndexRole } from "./pagination.js";
 export { subscribeEvents } from "./subscription.js";
 export type { StreamFeedEvent, SubscribeEventsOptions } from "./subscription.js";
+export {
+  FreighterWalletAdapter,
+  StandardWalletAdapter,
+  WalletCapabilityError,
+  WalletRegistry,
+  signerFromWalletRegistry,
+} from "./wallet-standard.js";
+export type {
+  FreighterApi,
+  SelectedWallet,
+  StandardStellarWallet,
+  WalletAccount,
+  WalletCapabilities,
+  WalletConnectOptions,
+  WalletDescriptor,
+  WalletFeature,
+  WalletSelection,
+  WalletSignAndSubmitResult,
+  WalletStandardAdapter,
+  WalletStandardRegistrySource,
+  WalletTransactionOptions,
+} from "./wallet-standard.js";
