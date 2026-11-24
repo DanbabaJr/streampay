@@ -76,7 +76,7 @@ function canonicalValue(value: xdr.ScVal, type: string): Canonical {
         return {
           stream_id: decoded.streamId.toString(),
           amount: decoded.amount.toString(),
-          code: decoded.code,
+          code: String(decoded.code),
         };
       }
       if (inner === "u64" || inner === "i128") return String(item);
@@ -94,9 +94,9 @@ function canonicalValue(value: xdr.ScVal, type: string): Canonical {
       successful_stream_ids: decoded.successfulStreamIds.map((id) => id.toString()),
       failed_streams: decoded.failedStreams.map((failure) => ({
         stream_id: failure.streamId.toString(),
-        error_code: failure.errorCode,
+        error_code: String(failure.errorCode),
       })),
-      next_offset: decoded.nextOffset,
+      next_offset: decoded.nextOffset === null ? null : String(decoded.nextOffset),
     };
   }
   if (type.startsWith("option:")) {

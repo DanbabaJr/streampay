@@ -501,7 +501,7 @@ const scenarios = [
       result: ids.map((id) => ({
         stream_id: String(id),
         amount,
-        code: 0,
+        code: "0",
       })),
     };
   })(),
@@ -534,9 +534,9 @@ const scenarios = [
           StrKey
         ),
       result: [
-        { stream_id: "1", amount: "10000000000", code: 0 },
-        { stream_id: "2", amount: "0", code: errorCode("StreamNotActive") },
-        { stream_id: "99", amount: "0", code: errorCode("StreamNotFound") },
+        { stream_id: "1", amount: "10000000000", code: "0" },
+        { stream_id: "2", amount: "0", code: String(errorCode("StreamNotActive")) },
+        { stream_id: "99", amount: "0", code: String(errorCode("StreamNotFound")) },
       ],
     };
   })(),
@@ -664,9 +664,9 @@ const scenarios = [
         transfers: [{ token: stream1.token.address, amount: "5000000000" }],
         successful_stream_ids: ["1"],
         failed_streams: [
-          { stream_id: "2", error_code: errorCode("NothingToWithdraw") },
-          { stream_id: "3", error_code: errorCode("StreamNotActive") },
-          { stream_id: "4", error_code: errorCode("StreamNotActive") },
+          { stream_id: "2", error_code: String(errorCode("NothingToWithdraw")) },
+          { stream_id: "3", error_code: String(errorCode("StreamNotActive")) },
+          { stream_id: "4", error_code: String(errorCode("StreamNotActive")) },
         ],
         next_offset: null,
       },

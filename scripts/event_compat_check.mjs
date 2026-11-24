@@ -14,6 +14,14 @@
 // fails. A base with no registry at all (the PR that introduces it) exits 0
 // with a note — there is nothing to be compatible with yet.
 //
+// A deletion is survivable only when nothing published can be holding it: the
+// shape must be absent from every release tag's registry AND the removal must
+// carry a grant in `schemas/events/removals.json`, which the removing PR adds
+// (an unused grant is itself a failure, so a grant can never be left behind for
+// a later PR to reuse). That is what lets a revert of never-released work go
+// through CI without switching the gate off. A shape that did ship has no hatch:
+// it needs the governed v1 + v2 migration.
+//
 // Usage:
 //   node scripts/event_compat_check.mjs --base <git-ref>
 //       compares <ref>:schemas/events/registry.json against the working tree.
@@ -31,11 +39,28 @@ import path from "node:path";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REGISTRY_PATH = "schemas/events/registry.json";
 export const CHANGELOG_PATH = "schemas/events/CHANGELOG.md";
+export const REMOVALS_PATH = "schemas/events/removals.json";
 
 function fieldMap(fields) {
   const map = new Map();
   for (const f of fields ?? []) map.set(f.name, f.type);
   return map;
+}
+
+/** Every deletable unit of a registry document, as `event:` / `definition:` tokens. */
+export function shapeTokens(doc) {
+  const tokens = new Set();
+  for (const [name, event] of Object.entries(doc?.events ?? {})) {
+    tokens.add(`event:${name}`);
+    for (const t of event.topics ?? []) tokens.add(`event:${name}#topic:${t.name}`);
+    for (const f of event.data ?? []) tokens.add(`event:${name}#data:${f.name}`);
+  }
+  for (const [name, def] of Object.entries(doc?.definitions ?? {})) {
+    tokens.add(`definition:${name}`);
+    for (const f of def.fields ?? []) tokens.add(`definition:${name}#field:${f.name}`);
+    for (const v of def.variants ?? []) tokens.add(`definition:${name}#variant:${v}`);
+  }
+  return tokens;
 }
 
 /**
@@ -44,13 +69,96 @@ function fieldMap(fields) {
  * @param {object} base previous registry (merge base)
  * @param {object} head candidate registry (PR head)
  * @param {string} changelog contents of schemas/events/CHANGELOG.md at head
+ * @param {{authorizedRemovals?: Array<{shape: string, reason: string, pr?: string}>,
+ *          released?: {available: boolean, tags?: string[],
+ *                      shapes?: Map<string, Set<string>>}} [options]
+ *        `authorizedRemovals` is the parsed removals.json, `released.shapes`
+ *        maps each deletable shape token to the release tags whose registry
+ *        contained it. Both default to the strictest state: no grants, and no
+ *        proof that anything is unreleased.
  * @returns {{errors: string[], warnings: string[], additions: number}}
  */
-export function checkRegistries(base, head, changelog) {
+export function checkRegistries(base, head, changelog, options = {}) {
   const errors = [];
   const warnings = [];
   let additions = 0;
   const log = changelog ?? "";
+  const released = options.released ?? { available: false };
+
+  // A shape token names one deletable unit of the public interface:
+  //   event:VoteCast            event:VoteCast#data:recipient
+  //   definition:StreamPolicy   definition:StreamPolicy#field:min_rate
+  //   definition:Role#variant:Sender
+  const SHAPE = /^(event|definition):[^#]+(#(data|topic|field|variant):[^#]+)?$/;
+  const grants = new Map();
+  for (const entry of options.authorizedRemovals ?? []) {
+    if (!SHAPE.test(entry?.shape ?? "")) {
+      errors.push(
+        `INVALID ${REMOVALS_PATH} ENTRY: ${JSON.stringify(entry)} — \`shape\` must look like ` +
+          `"event:VoteCast" or "definition:StreamPolicy#field:min_rate"`
+      );
+      continue;
+    }
+    if (!String(entry.reason ?? "").trim()) {
+      errors.push(
+        `INVALID ${REMOVALS_PATH} ENTRY ${entry.shape}: a non-empty reason is required — ` +
+          "the grant is an audit record, not a switch"
+      );
+      continue;
+    }
+    grants.set(entry.shape, entry);
+  }
+
+  /**
+   * A deletion is a hard break unless the exact shape is provably absent from
+   * every release tag AND granted by this change in removals.json. Returns the
+   * error text, or null when the deletion is authorized.
+   */
+  function deletion(token, description) {
+    const shippedIn = [...(released.shapes?.get(token) ?? [])].sort();
+    if (shippedIn.length > 0) {
+      return `${description} — released in ${shippedIn.join(", ")}, so a published consumer can be ` +
+        "decoding it; deletions of shipped shapes are breaking (see the v1 + v2 migration in schemas/events/README.md)";
+    }
+    const grant = grants.get(token);
+    if (!grant) {
+      return `${description} — event shapes are a public interface; deletions are breaking ` +
+        `(if this shape never reached a release tag, grant the deletion in ${REMOVALS_PATH})`;
+    }
+    if (!released.available) {
+      errors.push(
+        `REMOVAL GRANT ${token} cannot be honored: no release tags are readable in this clone, so ` +
+          "the gate cannot prove the shape was never released. CI needs a full-history checkout " +
+          "(actions/checkout with fetch-depth: 0)."
+      );
+      return null;
+    }
+    const where = grant.pr ? `${grant.reason} (${grant.pr})` : grant.reason;
+    warnings.push(`AUTHORIZED REMOVAL ${token} — absent from every release tag; ${where}`);
+    return null;
+  }
+
+  /**
+   * A grant that authorizes nothing this change deletes is either a mistake or
+   * an attempt to park permission for a later PR, so the shape surviving in both
+   * registries fails. A grant for a shape the base no longer has is the normal
+   * state after the deletion it authorized merged, so it only warns.
+   */
+  function checkGrantsUsed(baseShapes, headShapes) {
+    for (const token of grants.keys()) {
+      if (!baseShapes.has(token)) {
+        warnings.push(
+          `STALE REMOVAL GRANT ${token} — not in the base registry, so this change needs it for nothing; ` +
+            `drop it from ${REMOVALS_PATH} once the deletion it was written for has landed`
+        );
+      } else if (headShapes.has(token)) {
+        errors.push(
+          `UNUSED REMOVAL GRANT ${token} — the shape is still in the registry; a grant has to be added by ` +
+            `the PR that performs the deletion, otherwise the next PR could reuse it (${REMOVALS_PATH})`
+        );
+      }
+    }
+  }
 
   if ((head.registry_version ?? 0) < (base.registry_version ?? 0)) {
     errors.push(
@@ -64,9 +172,8 @@ export function checkRegistries(base, head, changelog) {
   for (const [name, prev] of Object.entries(baseEvents)) {
     const next = headEvents[name];
     if (!next) {
-      errors.push(
-        `REMOVED event ${name} (key "${prev.event_key}") — event shapes are a public interface; deletions are breaking`
-      );
+      const error = deletion(`event:${name}`, `REMOVED event ${name} (key "${prev.event_key}")`);
+      if (error) errors.push(error);
       continue;
     }
     if (prev.event_key !== next.event_key) {
@@ -80,7 +187,11 @@ export function checkRegistries(base, head, changelog) {
     baseTopics.forEach((t, i) => {
       const n = headTopics[i];
       if (!n) {
-        errors.push(`REMOVED topic field ${name}.${t.name} (position ${i})`);
+        const error = deletion(
+          `event:${name}#topic:${t.name}`,
+          `REMOVED topic field ${name}.${t.name} (position ${i})`
+        );
+        if (error) errors.push(error);
       } else if (n.name !== t.name) {
         errors.push(
           `EVENT ${name}: topic at position ${i} changed name "${t.name}" -> "${n.name}"`
@@ -105,9 +216,11 @@ export function checkRegistries(base, head, changelog) {
     const nextData = fieldMap(next.data);
     for (const [field, type] of prevData) {
       if (!nextData.has(field)) {
-        errors.push(
+        const error = deletion(
+          `event:${name}#data:${field}`,
           `REMOVED data field ${name}.${field}: ${type} — consumers decode it by name`
         );
+        if (error) errors.push(error);
       } else if (nextData.get(field) !== type) {
         errors.push(
           `TYPE CHANGE ${name}.${field}: ${type} -> ${nextData.get(field)}`
@@ -146,7 +259,11 @@ export function checkRegistries(base, head, changelog) {
   for (const [name, prev] of Object.entries(baseDefs)) {
     const next = headDefs[name];
     if (!next) {
-      errors.push(`REMOVED definition ${name} — events reference it field-for-field`);
+      const error = deletion(
+        `definition:${name}`,
+        `REMOVED definition ${name} — events reference it field-for-field`
+      );
+      if (error) errors.push(error);
       continue;
     }
     const prevKind = prev.kind ?? "struct";
@@ -161,9 +278,11 @@ export function checkRegistries(base, head, changelog) {
       const nextVariants = new Set(next.variants ?? []);
       for (const variant of prevVariants) {
         if (!nextVariants.has(variant)) {
-          errors.push(
+          const error = deletion(
+            `definition:${name}#variant:${variant}`,
             `REMOVED variant ${name}.${variant} — events encode it as a symbol, so consumers break`
           );
+          if (error) errors.push(error);
         }
       }
       for (const variant of nextVariants) {
@@ -183,7 +302,11 @@ export function checkRegistries(base, head, changelog) {
     const nextFields = fieldMap(next.fields);
     for (const [field, type] of prevFields) {
       if (!nextFields.has(field)) {
-        errors.push(`REMOVED field ${name}.${field}: ${type} (referenced by events)`);
+        const error = deletion(
+          `definition:${name}#field:${field}`,
+          `REMOVED field ${name}.${field}: ${type} (referenced by events)`
+        );
+        if (error) errors.push(error);
       } else if (nextFields.get(field) !== type) {
         errors.push(`TYPE CHANGE ${name}.${field}: ${type} -> ${nextFields.get(field)}`);
       }
@@ -206,6 +329,8 @@ export function checkRegistries(base, head, changelog) {
     }
   }
 
+  checkGrantsUsed(shapeTokens(base), shapeTokens(head));
+
   return { errors, warnings, additions };
 }
 
@@ -220,6 +345,72 @@ function parseArgs(argv) {
   return args;
 }
 
+function git(args) {
+  return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" });
+}
+
+function gitHas(spec) {
+  try {
+    // `git cat-file -e` so the checks do not depend on git's phrasing for a
+    // missing path (it differs between "no such path" and "no such object").
+    execFileSync("git", ["cat-file", "-e", spec], { cwd: REPO_ROOT, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Map every shape token to the release tags whose registry carried it. A
+ * shallow clone cannot answer this, so it reports itself unavailable and the
+ * checker refuses to honor any grant instead of assuming nothing shipped.
+ */
+function releasedShapes() {
+  const shapes = new Map();
+  if (git(["rev-parse", "--is-shallow-repository"]).trim() === "true") {
+    return { available: false, tags: [], shapes };
+  }
+  const tags = git(["tag", "--list"]).trim().split("\n").filter(Boolean);
+  const readable = [];
+  for (const tag of tags) {
+    if (!gitHas(`${tag}:${REGISTRY_PATH}`)) continue;
+    let doc;
+    try {
+      doc = JSON.parse(git(["show", `${tag}:${REGISTRY_PATH}`]));
+    } catch (error) {
+      console.error(`${REMOVALS_PATH}: ${tag}:${REGISTRY_PATH} is not readable JSON: ${error.message}`);
+      process.exit(1);
+    }
+    readable.push(tag);
+    for (const token of shapeTokens(doc)) {
+      if (!shapes.has(token)) shapes.set(token, []);
+      shapes.get(token).push(tag);
+    }
+  }
+  return { available: true, tags: readable, shapes };
+}
+
+function loadRemovals() {
+  let raw;
+  try {
+    raw = readFileSync(path.join(REPO_ROOT, REMOVALS_PATH), "utf8");
+  } catch {
+    return [];
+  }
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch (error) {
+    console.error(`${REMOVALS_PATH} is not valid JSON: ${error.message}`);
+    process.exit(1);
+  }
+  if (!Array.isArray(doc?.removals)) {
+    console.error(`${REMOVALS_PATH} must be an object with a "removals" array`);
+    process.exit(1);
+  }
+  return doc.removals;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   let baseText;
@@ -232,16 +423,6 @@ function main() {
       console.error("usage: event_compat_check.mjs --base <git-ref> [--changelog <path>]");
       process.exit(2);
     }
-    // `git cat-file -e` so the checks do not depend on git's phrasing for a
-    // missing path (it differs between "no such path" and "no such object").
-    const gitHas = (spec) => {
-      try {
-        execFileSync("git", ["cat-file", "-e", spec], { cwd: REPO_ROOT, stdio: "ignore" });
-        return true;
-      } catch {
-        return false;
-      }
-    };
     if (!gitHas(`${args.base}^{commit}`)) {
       console.error(
         `event-registry compatibility: ${args.base} is not a commit available in this clone. ` +
@@ -261,11 +442,7 @@ function main() {
       );
       process.exit(0);
     }
-    baseText = execFileSync(
-      "git",
-      ["show", `${args.base}:${REGISTRY_PATH}`],
-      { cwd: REPO_ROOT, encoding: "utf8" }
-    );
+    baseText = git(["show", `${args.base}:${REGISTRY_PATH}`]);
     source = `${args.base}:${REGISTRY_PATH}`;
   }
 
@@ -279,13 +456,25 @@ function main() {
     console.log(`(no ${changelogPath} in the working tree)`);
   }
 
+  const authorizedRemovals = loadRemovals();
+  // Only consulted when a grant exists: the common PR changes nothing and the
+  // release-tag scan is a no-op for it.
+  const released = authorizedRemovals.length > 0 ? releasedShapes() : { available: false, shapes: new Map() };
+
   const { errors, warnings, additions } = checkRegistries(
     JSON.parse(baseText),
     JSON.parse(headText),
-    changelog
+    changelog,
+    { authorizedRemovals, released }
   );
 
   console.log(`event-registry compatibility: ${source} -> ${REGISTRY_PATH} (working tree)`);
+  if (authorizedRemovals.length > 0) {
+    console.log(
+      `deletion grants: ${authorizedRemovals.length} in ${REMOVALS_PATH}; released shapes checked ` +
+        `against ${released.available ? (released.tags.join(", ") || "no tag with a registry") : "UNAVAILABLE (shallow clone)"}`
+    );
+  }
   if (warnings.length > 0) {
     console.log(`\ncompatible additions (${warnings.length}):`);
     for (const w of warnings) console.log(`  warn  ${w}`);
@@ -294,8 +483,10 @@ function main() {
     console.error(`\nincompatible changes (${errors.length}):`);
     for (const e of errors) console.error(`  FAIL  ${e}`);
     console.error(
-      "\nEvent shapes are additive-only. If this change is intentional, follow\n" +
-        "the migration procedure in schemas/events/README.md (v1 + v2 coexistence).\n" +
+      "\nEvent shapes are additive-only. To delete one, it must never have reached\n" +
+        "a release tag and the PR that deletes it must add a reasoned grant to\n" +
+        `${REMOVALS_PATH}; a shape that did ship needs the migration procedure in\n` +
+        "schemas/events/README.md (v1 + v2 coexistence).\n" +
         "For additions, record them in schemas/events/CHANGELOG.md."
     );
     process.exit(1);

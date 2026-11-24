@@ -20,9 +20,9 @@ dictionary StreamView {
   string withdrawn;
   u64 start_time;
   u64 end_time;
-  bool cancelable;
+  boolean cancelable;
   StreamStatus status;
-  bool? use_oracle;
+  boolean? use_oracle;
 };
 
 [Error]
@@ -152,6 +152,10 @@ enum StreamPayError {
   "HookReentrancyBlocked",
   "HookExecutionFailed",
   "InvalidHookSelector",
+  "AgentNotAuthorized",
+  "AgentExpired",
+  "CapExceededPeriod",
+  "CapExceededStream",
   "Transport",
   "Decode",
   "Unknown",

@@ -163,6 +163,9 @@ export class StreamStore extends EventEmitter {
    */
   projectEvent(event: DecodedEvent): { duplicate: boolean; projectionSkipped: boolean } {
     return this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "project"))();
+  }
+
+  /**
    * Replaces one stream row with a journal-derived fold (#583). The same
    * monotonic guard as ingestion applies, so a fold of the whole journal can
    * only move the projection forward to the state the journal implies.

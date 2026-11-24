@@ -22,6 +22,6 @@ test("mock-wallet vector suite round-trips the shared transaction envelopes", as
       networkPassphrase: Networks.TESTNET,
     });
     const parsed = TransactionBuilder.fromXDR(signed.signedTxXdr, Networks.TESTNET);
-    assert.ok(parsed.toEnvelope().v1().signatures().length > 0, `${file} did not get signed`);
+    assert.ok(parsed.signatures.length > 0, `${file} did not get signed`);
   }
 });

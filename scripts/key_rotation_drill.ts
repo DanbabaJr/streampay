@@ -328,6 +328,9 @@ async function main(): Promise<void> {
   const createReturn = await (async (): Promise<unknown> => {
     const source = await server.getAccount(deployer.publicKey());
     const tx = new TransactionBuilder(source, {
+      fee: "100000",
+      networkPassphrase: args.passphrase,
+    })
       .addOperation(
         Operation.createCustomContract({
           address: Address.fromString(deployer.publicKey()),

@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use stellar_xdr::{Limits, ReadXdr, ScError, ScVal, WriteXdr};
+use stellar_xdr::{Limits, ScError, ScVal, WriteXdr};
 use streampay_mobile::{RpcReadTransport, StreamPayError, StreamPayMobile, StreamStatus};
 
 fn vector(name: &str) -> serde_json::Value {
@@ -43,31 +43,75 @@ fn every_catalog_code_maps_to_one_variant_and_back() {
             .join("errors.ts"),
     )
     .expect("canonical error catalog");
-    let mut seen = 0;
-    for line in catalog.lines() {
-        let Some((code, name)) = parse_catalog_line(line) else {
-            continue;
-        };
-        seen += 1;
-        let error = StreamPayError::from_code(code);
-        assert_eq!(error.name(), name, "code {code}");
-        assert_eq!(error.code(), Some(code), "code {code}");
+    let mut entries = parse_catalog(&catalog);
+    // The generated catalog is not written in numeric order.
+    entries.sort_by_key(|(code, _)| *code);
+    assert!(
+        entries.len() >= 125,
+        "the canonical catalog must parse; found {} entries",
+        entries.len()
+    );
+    for (index, (code, name)) in entries.iter().enumerate() {
+        assert_eq!(
+            *code,
+            (index + 1) as u16,
+            "catalog codes must be contiguous from 1"
+        );
+        let error = StreamPayError::from_code(*code);
+        assert_eq!(error.name(), name.as_str(), "code {code}");
+        assert_eq!(error.code(), Some(*code), "code {code}");
     }
-    assert_eq!(seen, 125, "the mobile SDK must map the full catalog");
+    let last = entries.last().expect("non-empty catalog").0;
+    assert_eq!(StreamPayError::from_code(last + 1), StreamPayError::Unknown);
     assert_eq!(StreamPayError::from_code(9_999), StreamPayError::Unknown);
     assert_eq!(StreamPayError::Transport.code(), None);
 }
 
-fn parse_catalog_line(line: &str) -> Option<(u16, &str)> {
-    let line = line.trim();
-    let (code, rest) = line.split_once(": {")?;
-    let code: u16 = code.parse().ok()?;
-    let rest = rest.trim_start();
-    if !rest.starts_with("code:") {
-        return None;
+/// Reads the `(code, name)` pairs out of the generated frontend catalog, which
+/// declares each entry across several lines (`1: {`, then `code: 1,`, `name: …`).
+fn parse_catalog(catalog: &str) -> Vec<(u16, String)> {
+    let mut entries = Vec::new();
+    let mut lines = catalog.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some(key) = line.trim().strip_suffix(": {") else {
+            continue;
+        };
+        let Some(code) = key.parse::<u16>().ok() else {
+            continue;
+        };
+        let mut declared = None;
+        let mut name = None;
+        while let Some(field) = lines.next() {
+            let field = field.trim();
+            if let Some(digits) = field
+                .strip_prefix("code: ")
+                .and_then(|value| value.strip_suffix(','))
+            {
+                declared = digits.parse::<u16>().ok();
+                continue;
+            }
+            if let Some(rest) = field.strip_prefix("name: \"") {
+                name = Some(
+                    rest.trim_end_matches(|c| c == '"' || c == ',')
+                        .to_owned(),
+                );
+                break;
+            }
+            if field.starts_with('}') {
+                break;
+            }
+        }
+        assert_eq!(
+            declared,
+            Some(code),
+            "catalog entry {code} must declare the same code"
+        );
+        entries.push((
+            code,
+            name.unwrap_or_else(|| panic!("catalog entry {code} declares no name")),
+        ));
     }
-    let name = rest.split_once("name: \"")?.1.split_once('"')?.0;
-    Some((code, name))
+    entries
 }
 
 #[test]

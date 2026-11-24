@@ -1,34 +1,37 @@
 {
   "$defs": {},
-  "$id": "https://streampay.dev/schemas/events/v1/events/claim_paid.json",
+  "$id": "https://streampay.dev/schemas/events/v1/events/claim_committed.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "",
   "properties": {
-    "amount": {
-      "type": "integer",
-      "x-soroban-type": "i128"
+    "commitment_hash": {
+      "contentEncoding": "base64",
+      "description": "32-byte hash, base64-encoded on the registry surface.",
+      "type": "string",
+      "x-soroban-type": "BytesN<32>"
     },
     "recipient": {
       "description": "Stellar account or contract address (StrKey).",
       "type": "string",
       "x-soroban-type": "Address"
     },
-    "remaining_balance": {
+    "reveal_deadline": {
+      "minimum": 0,
       "type": "integer",
-      "x-soroban-type": "i128"
+      "x-soroban-type": "u64"
     }
   },
   "required": [
     "recipient",
-    "amount",
-    "remaining_balance"
+    "commitment_hash",
+    "reveal_deadline"
   ],
-  "title": "ClaimPaid",
+  "title": "ClaimCommitted",
   "type": "object",
   "x-streampay": {
-    "event_key": "claim_paid",
-    "fingerprint": "sha256:946cca73f9740203f4348ee5127467ec30bc69e832680a890863483a710509e9",
+    "event_key": "claim_committed",
+    "fingerprint": "sha256:52f4e724f639ea31aa0ed5b3946bf91d790bfe9c9773b813602d35b00d5b00dc",
     "registry_version": 1,
     "topicSchema": {
       "items": [
@@ -42,7 +45,7 @@
     },
     "topics": [
       {
-        "name": "claim_id",
+        "name": "stream_id",
         "type": "u64"
       }
     ]

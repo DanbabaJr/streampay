@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Networks, TransactionBuilder } from "@stellar/stellar-sdk";
-import { WalletCapabilityError, WalletRegistry, type WalletStandardAdapter } from "../src/wallet-standard.js";
+import { WalletCapabilityError, WalletRegistry } from "../src/wallet-standard.js";
 import type { WalletStandardAdapter as AdapterContract } from "../src/wallet-standard.js";
 import { MockWalletAdapter } from "./mock-wallet.js";
 import type { VectorFile } from "../src/vectors.js";
@@ -13,9 +13,7 @@ import type { VectorFile } from "../src/vectors.js";
 const adapterCoverage: Required<Pick<AdapterContract,
   "discover" | "connect" | "signTransaction" | "signAndSubmit" | "disconnect"
 >> = new MockWalletAdapter();
-void adapterCoverage satisfies Pick<WalletStandardAdapter,
-  "discover" | "connect" | "signTransaction" | "signAndSubmit" | "disconnect"
->;
+void adapterCoverage;
 
 const vectorsDir = fileURLToPath(new URL("../../../vectors/", import.meta.url));
 const vectorFiles = readdirSync(vectorsDir).filter((name) => name.endsWith(".json"));
@@ -32,7 +30,7 @@ test("mock wallet signs every shared conformance vector without exposing its key
       networkPassphrase: Networks.TESTNET,
     });
     const tx = TransactionBuilder.fromXDR(signed.signedTxXdr, Networks.TESTNET);
-    assert.ok(tx.toEnvelope().v1().signatures().length > 0, `${file} was not signed`);
+    assert.ok(tx.signatures.length > 0, `${file} was not signed`);
   }
 });
 

@@ -50,31 +50,35 @@ impl Spec {
             .as_array()
             .ok_or_else(|| "spec has no events array".to_string())?
             .iter()
-            .map(|event| SpecEvent {
-                name: string_field(event, "name")?,
-                topic: string_field(event, "topic")?,
-                topic_fields: event["topicFields"]
-                    .as_array()
-                    .ok_or_else(|| "event has no topicFields".to_string())?
-                    .iter()
-                    .map(|field| string_field(field, "name"))
-                    .collect::<Result<Vec<_>, _>>()?,
+            .map(|event| -> Result<SpecEvent, String> {
+                Ok(SpecEvent {
+                    name: string_field(event, "name")?,
+                    topic: string_field(event, "topic")?,
+                    topic_fields: event["topicFields"]
+                        .as_array()
+                        .ok_or_else(|| "event has no topicFields".to_string())?
+                        .iter()
+                        .map(|field| string_field(field, "name"))
+                        .collect::<Result<Vec<_>, _>>()?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let functions = value["functions"]
             .as_array()
             .ok_or_else(|| "spec has no functions array".to_string())?
             .iter()
-            .map(|function| SpecFunction {
-                name: string_field(function, "name")?,
-                arg_names: function["args"]
-                    .as_array()
-                    .ok_or_else(|| "function has no args".to_string())?
-                    .iter()
-                    .map(|arg| string_field(arg, "name"))
-                    .collect::<Result<Vec<_>, _>>()?,
+            .map(|function| -> Result<SpecFunction, String> {
+                Ok(SpecFunction {
+                    name: string_field(function, "name")?,
+                    arg_names: function["args"]
+                        .as_array()
+                        .ok_or_else(|| "function has no args".to_string())?
+                        .iter()
+                        .map(|arg| string_field(arg, "name"))
+                        .collect::<Result<Vec<_>, _>>()?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { events, functions })
     }
 

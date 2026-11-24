@@ -245,9 +245,11 @@
     "workflow-integrity.yml": {
       "integrity": [
         "Self-test: the checker can still fail",
+        "Self-test: the source scanner can still fail",
         "Workflows parse and every step is well-formed",
         "Every required CI gate is still wired",
         "No text file is committed as UTF-16 or with a BOM",
+        "Every tracked source file is still a parseable program",
         "Explain a workflow-integrity failure"
       ]
     }

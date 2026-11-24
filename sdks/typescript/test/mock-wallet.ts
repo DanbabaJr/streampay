@@ -1,7 +1,8 @@
-import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
 import type {
   WalletAccount,
   WalletCapabilities,
+  WalletConnectOptions,
   WalletDescriptor,
   WalletStandardAdapter,
   WalletTransactionOptions,
@@ -13,7 +14,7 @@ export class MockWalletAdapter implements WalletStandardAdapter {
   readonly name = "Mock Stellar Wallet";
   readonly capabilities: WalletCapabilities = {
     features: ["signTransaction", "signAndSubmit"],
-    networks: "*",
+    networks: [Networks.TESTNET],
   };
   readonly keypair: Keypair;
   private account: WalletAccount | undefined;
@@ -26,7 +27,7 @@ export class MockWalletAdapter implements WalletStandardAdapter {
     return [{ id: this.id, name: this.name, capabilities: this.capabilities }];
   }
 
-  async connect(_walletId: string): Promise<WalletAccount> {
+  async connect(_walletId: string, _options: WalletConnectOptions): Promise<WalletAccount> {
     const address = this.keypair.publicKey();
     this.account = { address, publicKey: address };
     return this.account;

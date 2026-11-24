@@ -206,12 +206,11 @@ export class StandardWalletAdapter implements WalletStandardAdapter {
     const wallet = this.requireActiveWallet();
     const feature = wallet.features["stellar:signTransaction"];
     if (!feature) throw new WalletCapabilityError(`${wallet.name} supports no signTransaction feature.`);
+    const address = options.address ?? this.activeAccount?.address;
     return feature.signTransaction({
       envelopeXdr,
       networkPassphrase: options.networkPassphrase,
-      ...(options.address ?? this.activeAccount?.address
-        ? { address: options.address ?? this.activeAccount?.address }
-        : {}),
+      ...(address ? { address } : {}),
     });
   }
 
@@ -219,12 +218,11 @@ export class StandardWalletAdapter implements WalletStandardAdapter {
     const wallet = this.requireActiveWallet();
     const feature = wallet.features["stellar:signAndSubmit"];
     if (!feature) throw new WalletCapabilityError(`${wallet.name} does not support sign-and-submit.`);
+    const address = options.address ?? this.activeAccount?.address;
     return feature.signAndSubmit({
       envelopeXdr,
       networkPassphrase: options.networkPassphrase,
-      ...(options.address ?? this.activeAccount?.address
-        ? { address: options.address ?? this.activeAccount?.address }
-        : {}),
+      ...(address ? { address } : {}),
     });
   }
 
@@ -303,9 +301,10 @@ export class FreighterWalletAdapter implements WalletStandardAdapter {
   }
 
   async signTransaction(envelopeXdr: string, options: WalletTransactionOptions) {
+    const address = options.address ?? this.address;
     return this.api.signTransaction(envelopeXdr, {
       networkPassphrase: options.networkPassphrase,
-      ...(options.address ?? this.address ? { address: options.address ?? this.address } : {}),
+      ...(address ? { address } : {}),
     });
   }
 
@@ -313,9 +312,10 @@ export class FreighterWalletAdapter implements WalletStandardAdapter {
     if (!this.api.signAndSubmitTransaction) {
       throw new WalletCapabilityError("Freighter does not support sign-and-submit in this integration.");
     }
+    const address = options.address ?? this.address;
     return this.api.signAndSubmitTransaction(envelopeXdr, {
       networkPassphrase: options.networkPassphrase,
-      ...(options.address ?? this.address ? { address: options.address ?? this.address } : {}),
+      ...(address ? { address } : {}),
     });
   }
 

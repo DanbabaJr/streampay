@@ -334,6 +334,30 @@ const ERROR_METADATA = {
     retryable: false,
     reproduction: 'let f = Fixture::setup_quiet();\nlet pub1 = Address::generate(&f.env);\nlet unauthorized = Address::generate(&f.env);\nlet mut pubs = soroban_sdk::Vec::new(&f.env);\npubs.push_back(pub1);\nf.client.mock_all_auths().set_oracle_config(&f.governor, &pubs, &1, &3600);\nlet now = f.env.ledger().timestamp();\nrejected!(f.client.mock_all_auths().try_submit_oracle_time(&unauthorized, &now));',
   },
+  126: {
+    remediation: 'This delegated-agent code is retired on-chain. Authorized withdrawals use the stream sender\'s own key; see the session-key design notes.',
+    toastClass: 'warning',
+    retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
+  },
+  127: {
+    remediation: 'This delegated-agent code is retired on-chain. No entrypoint reports an expired agent authorization.',
+    toastClass: 'warning',
+    retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
+  },
+  128: {
+    remediation: 'This delegated-agent code is retired on-chain. Per-period agent caps are no longer enforced by any entrypoint.',
+    toastClass: 'warning',
+    retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
+  },
+  129: {
+    remediation: 'This delegated-agent code is retired on-chain. Per-stream agent caps are no longer enforced by any entrypoint.',
+    toastClass: 'warning',
+    retryable: false,
+    reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
+  },
 }
 
 
@@ -441,6 +465,16 @@ const MATRIX_TEST =
 
 const REPRO_METADATA = makeReproMetadata(MATRIX_TEST);
 
+// Retirement lives in the contract registry, not here, so a code retired in
+// `surface.rs` can never be documented as "Active (Enforced)".
+const retiredBlock = /pub const RETIRED_CODES[^=]*=\s*&\[([\s\S]*?)\];/.exec(surfaceContent);
+if (retiredBlock === null) {
+  throw new Error('surface.rs no longer declares RETIRED_CODES as a slice; update this generator');
+}
+const RETIRED_NAMES = new Set(
+  [...retiredBlock[1].matchAll(/StreamError::([A-Za-z0-9_]+)/g)].map((match) => match[1])
+);
+
 function probeFor(variantName, includeBraced = false) {
   const branches =
     (includeBraced ? branchesByErrorWithBraces : branchesByError).get(variantName) || [];
@@ -531,7 +565,7 @@ for (const item of variants) {
     throw new Error(`missing reproduction metadata for error #${item.code} (${item.name})`);
   }
 
-  const isRetired = item.code === 2 || item.code === 3;
+  const isRetired = RETIRED_NAMES.has(item.name);
   const status = isRetired ? 'Retired (Unreachable)' : 'Active (Enforced)';
   const probe = probeFor(item.name, isReproCode);
 
@@ -677,7 +711,7 @@ Authoritative registry of all **${variants.length}** append-only on-chain error 
 
 for (const item of variants) {
   const meta = metadataFor(item.code);
-  const isRetired = item.code === 2 || item.code === 3;
+  const isRetired = RETIRED_NAMES.has(item.name);
   const statusBadge = isRetired ? 'Retired' : 'Active';
   const retryBadge = meta.retryable ? 'Yes' : 'No';
 

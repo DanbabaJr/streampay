@@ -39,7 +39,7 @@ def stream_scval() -> ScVal:
         ("start_time", u64_to_scval(0)),
         ("end_time", u64_to_scval(86_400)),
         ("cancelable", ScVal("bool", True)),
-        ("status", ScVal("u32", 0)),
+        ("status", ScVal("vec", [ScVal("symbol", "Active")])),
     ]
     return ScVal("map", [(symbol_to_scval(name), value) for name, value in fields])
 

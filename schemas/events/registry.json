@@ -560,60 +560,6 @@
         }
       ]
     },
-    "AgentAuthorized": {
-      "canonical": "streampay-event/v1|AgentAuthorized|key=agent_authorized|topics=[stream_id:u64,agent:Address],data=[expires_at:u64,max_per_period:i128,max_per_stream:i128,period_duration:u64]",
-      "data": [
-        {
-          "name": "max_per_period",
-          "type": "i128"
-        },
-        {
-          "name": "max_per_stream",
-          "type": "i128"
-        },
-        {
-          "name": "period_duration",
-          "type": "u64"
-        },
-        {
-          "name": "expires_at",
-          "type": "u64"
-        }
-      ],
-      "event_key": "agent_authorized",
-      "fingerprint": "sha256:4dfb405cd582dffeed64b66ee9297ba4aa37f608760db13c5e1ecb8ca4a65f8e",
-      "topics": [
-        {
-          "name": "stream_id",
-          "type": "u64"
-        },
-        {
-          "name": "agent",
-          "type": "Address"
-        }
-      ]
-    },
-    "AgentRevoked": {
-      "canonical": "streampay-event/v1|AgentRevoked|key=agent_revoked|topics=[stream_id:u64,agent:Address],data=[revoked_by:Address]",
-      "data": [
-        {
-          "name": "revoked_by",
-          "type": "Address"
-        }
-      ],
-      "event_key": "agent_revoked",
-      "fingerprint": "sha256:a96acdc2e00253728af03989e1d61ce1f94a32b973a4a4bc9bd3cdaf824c78bf",
-      "topics": [
-        {
-          "name": "stream_id",
-          "type": "u64"
-        },
-        {
-          "name": "agent",
-          "type": "Address"
-        }
-      ]
-    },
     "BatchWithdrawSummary": {
       "canonical": "streampay-event/v1|BatchWithdrawSummary|key=batch_withdraw_summary|topics=[recipient:Address],data=[requested:u32,settled:Vec<WithdrawOutcome{amount:i128,stream_id:u64}>,skipped:u32,total:i128]",
       "data": [
@@ -1286,69 +1232,6 @@
       "fingerprint": "sha256:332dec01d9e44b08a077228239c6b3fdcc435b4c59862a9efd6d4001a7cbd44b",
       "topics": []
     },
-    "PolicyViolation": {
-      "canonical": "streampay-event/v1|PolicyViolation|key=policy_violation|topics=[sender:Address],data=[stream_id:u64,violation_code:u32]",
-      "data": [
-        {
-          "name": "stream_id",
-          "type": "u64"
-        },
-        {
-          "name": "violation_code",
-          "type": "u32"
-        }
-      ],
-      "event_key": "policy_violation",
-      "fingerprint": "sha256:10071886268a2746a79e1f8805dc9ddf29deab41e25f509c5f090e2f0d6160c9",
-      "topics": [
-        {
-          "name": "sender",
-          "type": "Address"
-        }
-      ]
-    },
-    "PowerAccrued": {
-      "canonical": "streampay-event/v1|PowerAccrued|key=power_accrued|topics=[participant:Address],data=[power:u128,stream_id:u64]",
-      "data": [
-        {
-          "name": "stream_id",
-          "type": "u64"
-        },
-        {
-          "name": "power",
-          "type": "u128"
-        }
-      ],
-      "event_key": "power_accrued",
-      "fingerprint": "sha256:232e2f47141941af6627d84d054912046c45f45ff7718f0c5de604f8ad92ea2d",
-      "topics": [
-        {
-          "name": "participant",
-          "type": "Address"
-        }
-      ]
-    },
-    "PremiumAccrued": {
-      "canonical": "streampay-event/v1|PremiumAccrued|key=premium_accrued|topics=[token:Address],data=[amount:i128,pool_balance:i128]",
-      "data": [
-        {
-          "name": "amount",
-          "type": "i128"
-        },
-        {
-          "name": "pool_balance",
-          "type": "i128"
-        }
-      ],
-      "event_key": "premium_accrued",
-      "fingerprint": "sha256:72903d27c1e52db990a59bbd91cb1bc03693d093c5d891a86a671f54513d5485",
-      "topics": [
-        {
-          "name": "token",
-          "type": "Address"
-        }
-      ]
-    },
     "RateChangeAccepted": {
       "canonical": "streampay-event/v1|RateChangeAccepted|key=rate_change_accepted|topics=[stream_id:u64],data=[accepted_by:Address,adjustment:i128,deposit:i128,effective_from:u64,new_amount_per_second:i128,owed_at_change:i128,reserved_at_new_rate:i128]",
       "data": [
@@ -1491,40 +1374,6 @@
         {
           "name": "intent_id",
           "type": "u64"
-        }
-      ]
-    },
-    "SenderPolicyRevoked": {
-      "canonical": "streampay-event/v1|SenderPolicyRevoked|key=sender_policy_revoked|topics=[sender:Address],data=[version:u32]",
-      "data": [
-        {
-          "name": "version",
-          "type": "u32"
-        }
-      ],
-      "event_key": "sender_policy_revoked",
-      "fingerprint": "sha256:8030033801d3958a02d20bf73ec897334af25181a4c0b176f1e043e05f672d40",
-      "topics": [
-        {
-          "name": "sender",
-          "type": "Address"
-        }
-      ]
-    },
-    "SenderPolicySet": {
-      "canonical": "streampay-event/v1|SenderPolicySet|key=sender_policy_set|topics=[sender:Address],data=[version:u32]",
-      "data": [
-        {
-          "name": "version",
-          "type": "u32"
-        }
-      ],
-      "event_key": "sender_policy_set",
-      "fingerprint": "sha256:8d74d339202956d5afd9f19ed4b22769f4b89c7d25da0623d9fb3bba0e479dfa",
-      "topics": [
-        {
-          "name": "sender",
-          "type": "Address"
         }
       ]
     },
@@ -2096,31 +1945,6 @@
         }
       ]
     },
-    "VoteCast": {
-      "canonical": "streampay-event/v1|VoteCast|key=vote_cast|topics=[proposal_id:u64],data=[power:u128,support:bool,voter:Address]",
-      "data": [
-        {
-          "name": "voter",
-          "type": "Address"
-        },
-        {
-          "name": "power",
-          "type": "u128"
-        },
-        {
-          "name": "support",
-          "type": "bool"
-        }
-      ],
-      "event_key": "vote_cast",
-      "fingerprint": "sha256:df7a22f9ea409c602d3b89e28f5da15a3295136e9b7c9972ec532b3546b6518b",
-      "topics": [
-        {
-          "name": "proposal_id",
-          "type": "u64"
-        }
-      ]
-    },
     "Withdrawn": {
       "canonical": "streampay-event/v1|Withdrawn|key=withdrawn|topics=[stream_id:u64],data=[amount:i128,recipient:Address,withdrawn_total:i128]",
       "data": [
@@ -2151,8 +1975,6 @@
     "AdvanceDrawn": "sha256:a1ccbf4cb818c7c6a04304662172d25e779228a24b7ff9a6eddbd5320a703b30",
     "AdvanceLiquidated": "sha256:5f5906f14d6b57f9283743db06e8790626acdf3f0d6c400870ff8e7c29482c97",
     "AdvanceRepaid": "sha256:f560f54706bffd81f57564572c58de696f7a49630eabe708651fddf1b2b24e49",
-    "AgentAuthorized": "sha256:4dfb405cd582dffeed64b66ee9297ba4aa37f608760db13c5e1ecb8ca4a65f8e",
-    "AgentRevoked": "sha256:a96acdc2e00253728af03989e1d61ce1f94a32b973a4a4bc9bd3cdaf824c78bf",
     "BatchWithdrawSummary": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
     "BeneficiaryEnrolled": "sha256:8a457d9c30ee67b51c5709af2eb838deacb19d55dc53a93055734d920e77e7d7",
     "ConditionExpired": "sha256:bf220e706c8ce581efbbe736ec16c394efbc07a20c00f49e71c078bff7604036",
@@ -2185,16 +2007,11 @@
     "PolicyHandoffCancelled": "sha256:fd8cfe1334f22571cb7e11fc9b80c3c1e7ef39e6f4bbd46c3a66fc621363f221",
     "PolicyHandoffProposed": "sha256:79bdf5f57bbb23c39096223624e7f61a65da6e8073bbc5ebb4b4294ecee9e75c",
     "PolicyInitialized": "sha256:332dec01d9e44b08a077228239c6b3fdcc435b4c59862a9efd6d4001a7cbd44b",
-    "PolicyViolation": "sha256:10071886268a2746a79e1f8805dc9ddf29deab41e25f509c5f090e2f0d6160c9",
-    "PowerAccrued": "sha256:232e2f47141941af6627d84d054912046c45f45ff7718f0c5de604f8ad92ea2d",
-    "PremiumAccrued": "sha256:72903d27c1e52db990a59bbd91cb1bc03693d093c5d891a86a671f54513d5485",
     "RateChangeAccepted": "sha256:66b7fcbf7e912df0adfb728f6dd025e43a3678b76885950fb68c9e7b1ea41da3",
     "RateChangeProposed": "sha256:9e2dec2cd991106085acabb92aaec4edf32ca518a688d2090ded15d91c7f70c0",
     "ScheduledIntentCancelled": "sha256:fe727619a69c546daa9f512a6cbe4162453a8404bd8dba614384557f162e5f0e",
     "ScheduledIntentExpired": "sha256:708a995061ac8713d9a6fc7ea04f7c39eee313276cc42fb0cd9268f3210500ee",
     "ScheduledStreamExecuted": "sha256:318937479fdb35060d6640657c70d51fcda211fc4408f5902b7eac1224f89f06",
-    "SenderPolicyRevoked": "sha256:8030033801d3958a02d20bf73ec897334af25181a4c0b176f1e043e05f672d40",
-    "SenderPolicySet": "sha256:8d74d339202956d5afd9f19ed4b22769f4b89c7d25da0623d9fb3bba0e479dfa",
     "SenderTransferExpired": "sha256:52f1ec5001642966297a3a1d96e94c2a155edfeccf6622164a0834724863ba60",
     "SenderTransferProposed": "sha256:7012eae001bbc92c7ecce6275cab31714970ba85e5ab1bde135e93dff4ec0f92",
     "SenderTransferred": "sha256:db820aba8791ee0f230ae1ae551812251458457ad061bd13b996b21a2c18cf0d",
@@ -2216,7 +2033,6 @@
     "TemplateInstantiated": "sha256:63f92af80b873f8cd742077a72498031574d7aa73521cd714154b8a3e3b588af",
     "UpgradeCancelled": "sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523",
     "UpgradeProposed": "sha256:ab70c35bf98b5e08a1067687e23f361f518f99754db27f14f84208d543cce5ed",
-    "VoteCast": "sha256:df7a22f9ea409c602d3b89e28f5da15a3295136e9b7c9972ec532b3546b6518b",
     "Withdrawn": "sha256:f236ec39ef8dd77ec1e7b30edbfc08ea71734a2ddc55d234bc8e434f8dcf3277"
   },
   "generated_by": "cargo test -p streampay-contract --lib --locked event_registry::generate -- --ignored",

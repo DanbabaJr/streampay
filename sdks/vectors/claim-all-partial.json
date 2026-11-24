@@ -35,15 +35,15 @@
         "failed_streams": [
           {
             "stream_id": "2",
-            "error_code": 13
+            "error_code": "13"
           },
           {
             "stream_id": "3",
-            "error_code": 5
+            "error_code": "5"
           },
           {
             "stream_id": "4",
-            "error_code": 5
+            "error_code": "5"
           }
         ],
         "next_offset": null

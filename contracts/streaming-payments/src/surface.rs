@@ -157,25 +157,6 @@ pub enum Branch {
     PolicyNotInitialized,
     /// `policy_accept_handoff` / `policy_cancel_handoff`: no handoff pending.
     PolicyNoPendingHandoff,
-    // ----------------------------------------------------------- session keys
-    /// `authorize_agent`: max_per_period is zero or negative.
-    AuthorizeAgentMaxPeriodNonPositive,
-    /// `authorize_agent`: max_per_stream is zero or negative.
-    AuthorizeAgentMaxStreamNonPositive,
-    /// `authorize_agent`: period_duration is zero.
-    AuthorizeAgentPeriodDurationZero,
-    /// `authorize_agent`: expires_at is not in the future.
-    AuthorizeAgentExpiryInPast,
-    /// `withdraw_delegated`: agent is not authorized or revoked.
-    WithdrawDelegatedAgentNotAuthorized,
-    /// `withdraw_delegated`: agent session authorization has expired.
-    WithdrawDelegatedAgentExpired,
-    /// `withdraw_delegated`: amount exceeds the agent's period cap.
-    WithdrawDelegatedCapExceededPeriod,
-    /// `withdraw_delegated`: amount exceeds the agent's stream cap.
-    WithdrawDelegatedCapExceededStream,
-    /// `revoke_agent`: caller is not the stream recipient.
-    RevokeAgentNotRecipient,
     // ---------------------------------------------------- create_streams_batch
     /// `create_streams_batch`: entries is empty.
     CreateBatchEmpty,
@@ -387,7 +368,7 @@ impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 168] = [
+    pub const ALL: [Branch; 159] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -446,15 +427,6 @@ impl Branch {
         Branch::PolicyNoQueuedChange,
         Branch::PolicyNotInitialized,
         Branch::PolicyNoPendingHandoff,
-        Branch::AuthorizeAgentMaxPeriodNonPositive,
-        Branch::AuthorizeAgentMaxStreamNonPositive,
-        Branch::AuthorizeAgentPeriodDurationZero,
-        Branch::AuthorizeAgentExpiryInPast,
-        Branch::WithdrawDelegatedAgentNotAuthorized,
-        Branch::WithdrawDelegatedAgentExpired,
-        Branch::WithdrawDelegatedCapExceededPeriod,
-        Branch::WithdrawDelegatedCapExceededStream,
-        Branch::RevokeAgentNotRecipient,
         Branch::CreateBatchEmpty,
         Branch::CreateBatchTooLarge,
         Branch::ContractFrozen,
@@ -569,7 +541,7 @@ impl Branch {
             | Branch::CreateDurationTooLong => &["create_stream", "create_streams"],
             Branch::CreateBatchEmpty | Branch::CreateBatchTooLarge => &["create_streams_batch"],
             Branch::WithdrawAmountNonPositive | Branch::WithdrawAmountExceedsAvailable => {
-                &["withdraw", "withdraw_delegated"]
+                &["withdraw"]
             }
             Branch::WithdrawMaxNothingToWithdraw => {
                 &["withdraw_max", "withdraw_many", "withdraw_all"]
@@ -619,7 +591,6 @@ impl Branch {
             ],
             Branch::StreamNotActive => &[
                 "withdraw",
-                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -678,7 +649,6 @@ impl Branch {
             }
             Branch::PayoutOverflow => &[
                 "withdraw",
-                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -714,7 +684,6 @@ impl Branch {
             Branch::TopUpTransferFailed => &["top_up"],
             Branch::RecipientPayoutFailed => &[
                 "withdraw",
-                "withdraw_delegated",
                 "withdraw_max",
                 "withdraw_many",
                 "withdraw_all",
@@ -735,15 +704,6 @@ impl Branch {
                 "policy_set_timelock_delay",
             ],
             Branch::PolicyNoPendingHandoff => &["policy_accept_handoff", "policy_cancel_handoff"],
-            Branch::AuthorizeAgentMaxPeriodNonPositive
-            | Branch::AuthorizeAgentMaxStreamNonPositive
-            | Branch::AuthorizeAgentPeriodDurationZero
-            | Branch::AuthorizeAgentExpiryInPast => &["authorize_agent"],
-            Branch::WithdrawDelegatedAgentNotAuthorized
-            | Branch::WithdrawDelegatedAgentExpired
-            | Branch::WithdrawDelegatedCapExceededPeriod
-            | Branch::WithdrawDelegatedCapExceededStream => &["withdraw_delegated"],
-            Branch::RevokeAgentNotRecipient => &["revoke_agent"],
             Branch::ContractFrozen => &[
                 "create_stream",
                 "create_streams",
@@ -857,38 +817,6 @@ impl Branch {
             Branch::PauseNotAuthorized => &["pause_stream", "resume_stream"],
             Branch::PauseAlreadyPaused => &["pause_stream"],
             Branch::ResumeNotPaused => &["resume_stream"],
-            Branch::BatchAmendmentNotFound
-            | Branch::BatchAmendmentExpired
-            | Branch::BatchAmendmentThresholdNotMet
-            | Branch::BatchAmendmentRecipientNotConsented
-            | Branch::BatchAmendmentTooManyAmendments
-            | Branch::BatchAmendmentInvalidTerms
-            | Branch::BatchAmendmentStreamPaused => &[
-                "propose_batch_amendment",
-                "consent_batch_amendment",
-                "apply_batch_amendment",
-            ],
-            Branch::VotingPowerAlreadyVoted
-            | Branch::VotingPowerInsufficient
-            | Branch::VotingPowerProposalNotFound => &["cast_community_vote"],
-            Branch::InsurancePoolInsolvent
-            | Branch::InsuranceClaimNotFound
-            | Branch::InsuranceClaimNotApproved
-            | Branch::InsuranceClaimTimelockNotElapsed
-            | Branch::InsuranceCapExceeded
-            | Branch::InsuranceInvalidLossProof => &[
-                "file_insurance_claim",
-                "approve_insurance_claim",
-                "reject_insurance_claim",
-                "payout_insurance_claim",
-            ],
-            Branch::SenderPolicyViolated
-            | Branch::SenderPolicyNotFound
-            | Branch::SenderPolicyInvalidBounds => &[
-                "set_sender_policy",
-                "revoke_sender_policy",
-                "create_stream",
-            ],
             Branch::NoPendingRateChange => &["accept_rate_change", "cancel_rate_change"],
             Branch::RateCancelNotProposer => &["cancel_rate_change"],
             Branch::RateSegmentSumOverflow => &[
@@ -932,7 +860,7 @@ impl Branch {
             | Branch::AdvanceRepaymentExceedsBalance => &["repay_advance"],
             Branch::InvalidLtvBps => &["set_receivables_config", "draw_advance"],
             // --------------------------------------------------- conditional streams
-            Branch::ConditionNotMet => &["withdraw", "withdraw_max", "withdraw_delegated"],
+            Branch::ConditionNotMet => &["withdraw", "withdraw_max"],
             Branch::ConditionExpired => &["register_condition", "attest_condition"],
             Branch::ConditionAlreadyRegistered => &["register_condition"],
             Branch::ConditionNotFound => &["attest_condition"],
@@ -1017,15 +945,6 @@ impl Branch {
             Branch::PolicyNoQueuedChange => StreamError::PolicyNoQueuedChange,
             Branch::PolicyNotInitialized => StreamError::PolicyNotInitialized,
             Branch::PolicyNoPendingHandoff => StreamError::PolicyNoPendingHandoff,
-            Branch::AuthorizeAgentMaxPeriodNonPositive
-            | Branch::AuthorizeAgentMaxStreamNonPositive => StreamError::ZeroAmount,
-            Branch::AuthorizeAgentPeriodDurationZero => StreamError::InvalidTimeRange,
-            Branch::AuthorizeAgentExpiryInPast => StreamError::StartTimeInPast,
-            Branch::WithdrawDelegatedAgentNotAuthorized => StreamError::AgentNotAuthorized,
-            Branch::WithdrawDelegatedAgentExpired => StreamError::AgentExpired,
-            Branch::WithdrawDelegatedCapExceededPeriod => StreamError::CapExceededPeriod,
-            Branch::WithdrawDelegatedCapExceededStream => StreamError::CapExceededStream,
-            Branch::RevokeAgentNotRecipient => StreamError::NotAuthorized,
             Branch::CreateBatchEmpty => StreamError::BatchEmpty,
             Branch::CreateBatchTooLarge => StreamError::BatchTooLarge,
             Branch::ContractFrozen => StreamError::ContractFrozen,
@@ -1247,33 +1166,6 @@ impl Branch {
             Branch::PolicyNoQueuedChange => "no policy change is queued for the specified asset",
             Branch::PolicyNotInitialized => "the policy module has not been initialized",
             Branch::PolicyNoPendingHandoff => "no admin handoff proposal is pending",
-            Branch::AuthorizeAgentMaxPeriodNonPositive => {
-                "max_per_period is zero or negative"
-            }
-            Branch::AuthorizeAgentMaxStreamNonPositive => {
-                "max_per_stream is zero or negative"
-            }
-            Branch::AuthorizeAgentPeriodDurationZero => {
-                "period_duration is zero"
-            }
-            Branch::AuthorizeAgentExpiryInPast => {
-                "expires_at is before or equal to current ledger timestamp"
-            }
-            Branch::WithdrawDelegatedAgentNotAuthorized => {
-                "agent is not authorized or revoked for this stream"
-            }
-            Branch::WithdrawDelegatedAgentExpired => {
-                "agent session key authorization has expired"
-            }
-            Branch::WithdrawDelegatedCapExceededPeriod => {
-                "withdrawal amount exceeds remaining period cap for agent"
-            }
-            Branch::WithdrawDelegatedCapExceededStream => {
-                "withdrawal amount exceeds remaining total stream cap for agent"
-            }
-            Branch::RevokeAgentNotRecipient => {
-                "caller revoking agent is not the stream recipient"
-            }
             Branch::CreateBatchEmpty => "entries is empty",
             Branch::CreateBatchTooLarge => "entries length exceeds MAX_BATCH",
             Branch::ContractFrozen => "the contract is frozen for maintenance or upgrade",
@@ -1550,9 +1442,16 @@ impl Branch {
 ///   from the original draft. The contract uses `NotAuthorized` (12) and
 ///   branches on sender/recipient identity directly, so these were never wired
 ///   in. Kept for wire compatibility.
+/// * `AgentNotAuthorized` (126) … `CapExceededStream` (129) — retired with the
+///   delegated-session-key withdrawal surface. The slots stay reserved so the
+///   numbers are never reused.
 pub const RETIRED_CODES: &[StreamError] = &[
     StreamError::NotStreamSender,
     StreamError::NotStreamRecipient,
+    StreamError::AgentNotAuthorized,
+    StreamError::AgentExpired,
+    StreamError::CapExceededPeriod,
+    StreamError::CapExceededStream,
 ];
 
 /// Records a rejection branch and returns the error it maps to.

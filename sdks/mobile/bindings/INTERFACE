@@ -2,7 +2,7 @@
 schema=streampay-mobile-bindings/v1
 specFingerprint=b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276
 contractVersion=0.3.0
-errors=125
-errorCatalogSha256=d4c262c5a528e618500b73b80a0a56d1acb96aa21d536d9ad9fc76b48bce48e6
+errors=129
+errorCatalogSha256=f3143e9e80f24be28baeb8530c4054c1908f5ab02d870817d85102aa27c7bae0
 methods=get_stream,available,recipient_streams,sender_streams,decode_get_stream
 transports=RpcReadTransport

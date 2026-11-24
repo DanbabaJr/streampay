@@ -1,40 +1,36 @@
 {
   "$defs": {},
-  "$id": "https://streampay.dev/schemas/events/v1/events/batch_amendment_proposed.json",
+  "$id": "https://streampay.dev/schemas/events/v1/events/claim_expired.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "",
   "properties": {
-    "expires_at": {
-      "minimum": 0,
+    "commitment_hash": {
+      "contentEncoding": "base64",
+      "description": "32-byte hash, base64-encoded on the registry surface.",
+      "type": "string",
+      "x-soroban-type": "BytesN<32>"
+    },
+    "deposit": {
       "type": "integer",
-      "x-soroban-type": "u64"
+      "x-soroban-type": "i128"
     },
     "sender": {
       "description": "Stellar account or contract address (StrKey).",
       "type": "string",
       "x-soroban-type": "Address"
-    },
-    "stream_ids": {
-      "items": {
-        "minimum": 0,
-        "type": "integer",
-        "x-soroban-type": "u64"
-      },
-      "type": "array",
-      "x-soroban-type": "Vec<u64>"
     }
   },
   "required": [
     "sender",
-    "stream_ids",
-    "expires_at"
+    "commitment_hash",
+    "deposit"
   ],
-  "title": "BatchAmendmentProposed",
+  "title": "ClaimExpired",
   "type": "object",
   "x-streampay": {
-    "event_key": "batch_amendment_proposed",
-    "fingerprint": "sha256:7c7b94e9404deca9c36bb504141d5970828d9aaaa2fd40db5403471765d18e77",
+    "event_key": "claim_expired",
+    "fingerprint": "sha256:34aea123ccd4e8bd4d2e8b2a0fb8c44db4a4ccfbc2a1f13b5da5525fb1baa0d2",
     "registry_version": 1,
     "topicSchema": {
       "items": [
@@ -48,7 +44,7 @@
     },
     "topics": [
       {
-        "name": "batch_id",
+        "name": "stream_id",
         "type": "u64"
       }
     ]

@@ -196,7 +196,10 @@ test("every contract error code has an exact SDK mapping", () => {
 });
 
 test("retired contract codes are explicitly represented", () => {
-  assert.deepEqual([...RETIRED_CONTRACT_ERROR_CODES].sort((a, b) => a - b), [2, 3]);
+  assert.deepEqual(
+    [...RETIRED_CONTRACT_ERROR_CODES].sort((a, b) => a - b),
+    [2, 3, 126, 127, 128, 129]
+  );
   assert.deepEqual(contractErrorMapping(2), {
     code: 2,
     name: "NotStreamSender",
@@ -205,6 +208,11 @@ test("retired contract codes are explicitly represented", () => {
   assert.deepEqual(contractErrorMapping(3), {
     code: 3,
     name: "NotStreamRecipient",
+    retired: true,
+  });
+  assert.deepEqual(contractErrorMapping(126), {
+    code: 126,
+    name: "AgentNotAuthorized",
     retired: true,
   });
   assert.deepEqual(contractErrorMapping(125), {

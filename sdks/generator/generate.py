@@ -17,6 +17,10 @@ Targets
   change adds its package plus its emitter and is covered by the same
   ``--check`` gate.
 
+  Files listed in ``FINGERPRINT_CARRIERS`` are not emitted, only stamped: their
+  spec-digest literals are rewritten here so a hand-written package cannot keep
+  a stale fingerprint.
+
 The output is deterministic, so ``--check`` is a valid CI gate: regeneration
 must be a no-op.
 
@@ -41,6 +45,32 @@ from check_contract_surface import fingerprint  # noqa: E402
 ROOT = HERE.parents[1]
 SPEC_PATH = ROOT / "sdks" / "spec" / "streampay.spec.json"
 CATALOG_PATH = ROOT / "frontend" / "lib" / "errors.ts"
+
+# Hand-written packages that embed the spec digest without being emitted from
+# scratch. Without this they keep the fingerprint of whatever spec was current
+# when a human last edited them, and their conformance report then disagrees
+# with the Rust and TypeScript SDKs about which spec the vectors describe.
+FINGERPRINT_CARRIERS = (ROOT / "sdks" / "python" / "streampay" / "_generated.py",)
+
+
+def carriers(digest: str) -> dict[Path, str]:
+    """The carrier files with their spec-digest stamp rewritten to ``digest``."""
+    stamped: dict[Path, str] = {}
+    for path in FINGERPRINT_CARRIERS:
+        text, hits = re.subn(
+            r'^SPEC_FINGERPRINT = "[0-9a-f]{64}"',
+            f'SPEC_FINGERPRINT = "{digest}"',
+            path.read_text(encoding="utf-8"),
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if hits != 1:
+            raise ValueError(
+                f"{path} no longer declares SPEC_FINGERPRINT as a 64-hex constant — "
+                "update it or remove the file from FINGERPRINT_CARRIERS"
+            )
+        stamped[path] = text
+    return stamped
 
 
 def load_spec() -> dict:
@@ -86,6 +116,7 @@ def outputs() -> dict[Path, str]:
     targets: dict[Path, str] = {}
     for module in emitters():
         targets.update(module.outputs(spec, digest, errors))
+    targets.update(carriers(digest))
     return targets
 
 

@@ -393,68 +393,68 @@ It also checks that every `[Cn]` cited in the text has a row, and that every row
 | C3 |   Basis-point denominator is 10,000   | `contracts/streaming-payments/src/treasury.rs:56` | `BPS_DENOMINATOR: u32 = 10_000` |
 | C4 |   Accrual arithmetic is checked and reports overflow rather than wrapping   | `contracts/streaming-payments/src/stream.rs:1214` | `.checked_mul(elapsed as u128)` |
 | C5 |   Stream layout: sender, recipient, token, deposit, withdrawn, window, cancelable, status   | `contracts/streaming-payments/src/stream.rs:540` | `pub withdrawn: i128,` |
-| C6 |   Single creation runs `validate_stream_creation`   | `contracts/streaming-payments/src/lib.rs:543` | `Self::validate_stream_creation(now, deposit_amount, start_time, end_time)?;` |
-| C7 |   Creation rejects non-positive deposit, empty window, over-long window, and over-capacity deposit   | `contracts/streaming-payments/src/lib.rs:825` | `stream::validate_capacity(deposit_amount, duration)` |
+| C6 |   Single creation runs `validate_stream_creation`   | `contracts/streaming-payments/src/lib.rs:545` | `Self::validate_stream_creation(now, deposit_amount, start_time, end_time)?;` |
+| C7 |   Creation rejects non-positive deposit, empty window, over-long window, and over-capacity deposit   | `contracts/streaming-payments/src/lib.rs:827` | `stream::validate_capacity(deposit_amount, duration)` |
 | C8 |   Capacity check: reject iff `deposit > u128::MAX / duration`   | `contracts/streaming-payments/src/stream.rs:1194` | `let cap = u128::MAX / (duration.max(1) as u128);` |
 | C9 |   Scheduling validates positive deposit, duration bound and capacity   | `contracts/streaming-payments/src/schedule.rs:284` | `stream::validate_capacity(deposit, duration)?;` |
 | C10 |   Each occurrence shifts the window by `interval * index`   | `contracts/streaming-payments/src/schedule.rs:178` | `let shift = self.interval.saturating_mul(index as u64);` |
 | C11 |   The last shifted window end is checked to fit in u64   | `contracts/streaming-payments/src/schedule.rs:319` | `.checked_add(last_shift)` |
-| C12 |   Scheduled execution creates the stream internally (no protocol fee) and pays the keeper   | `contracts/streaming-payments/src/lib.rs:3883` | `let stream_id = Self::persist_new_stream(` |
-| C13 |   Top-up is the only post-creation writer of `deposit`   | `contracts/streaming-payments/src/lib.rs:2172` | `s.deposit = new_deposit;` |
-| C14 |   Top-up requires a positive amount   | `contracts/streaming-payments/src/lib.rs:2130` | `return Err(surface::reject(Branch::TopUpAmountNonPositive));` |
-| C15 |   Top-up re-validates capacity for the new deposit   | `contracts/streaming-payments/src/lib.rs:2151` | `stream::validate_capacity(new_deposit, s.duration())?;` |
-| C16 |   Migration re-stores each stream unchanged   | `contracts/streaming-payments/src/lib.rs:5011` | `stream::put_stream(&env, &s);` |
-| C17 |   The withdrawal path requires Active status   | `contracts/streaming-payments/src/lib.rs:1736` | `if s.status != StreamStatus::Active {` |
-| C18 |   A payout that makes withdrawn equal deposit marks the stream Depleted   | `contracts/streaming-payments/src/lib.rs:1809` | `s.status = StreamStatus::Depleted;` |
+| C12 |   Scheduled execution creates the stream internally (no protocol fee) and pays the keeper   | `contracts/streaming-payments/src/lib.rs:3885` | `let stream_id = Self::persist_new_stream(` |
+| C13 |   Top-up is the only post-creation writer of `deposit`   | `contracts/streaming-payments/src/lib.rs:2174` | `s.deposit = new_deposit;` |
+| C14 |   Top-up requires a positive amount   | `contracts/streaming-payments/src/lib.rs:2132` | `return Err(surface::reject(Branch::TopUpAmountNonPositive));` |
+| C15 |   Top-up re-validates capacity for the new deposit   | `contracts/streaming-payments/src/lib.rs:2153` | `stream::validate_capacity(new_deposit, s.duration())?;` |
+| C16 |   Migration re-stores each stream unchanged   | `contracts/streaming-payments/src/lib.rs:5013` | `stream::put_stream(&env, &s);` |
+| C17 |   The withdrawal path requires Active status   | `contracts/streaming-payments/src/lib.rs:1738` | `if s.status != StreamStatus::Active {` |
+| C18 |   A payout that makes withdrawn equal deposit marks the stream Depleted   | `contracts/streaming-payments/src/lib.rs:1811` | `s.status = StreamStatus::Depleted;` |
 | C19 |   Elapsed time is the window-clamped `now - start_time`   | `contracts/streaming-payments/src/stream.rs:1164` | `if now <= start_time {` |
 | C20 |   Accrual: `min(deposit * elapsed / duration, deposit)`, zero on degenerate input   | `contracts/streaming-payments/src/stream.rs:1216` | `let streamed = (product / (duration.max(1) as u128)).min(deposit as u128);` |
 | C21 |   Streamed amount applies accrual to the stream's own deposit and duration   | `contracts/streaming-payments/src/stream.rs:1224` | `streamed_at(stream.deposit, stream.duration(), elapsed)` |
-| C22 |   Available is streamed minus withdrawn (zero once cancelled)   | `contracts/streaming-payments/src/stream.rs:1283` | `.checked_sub(stream.withdrawn)` |
-| C23 |   A new stream starts with withdrawn = 0   | `contracts/streaming-payments/src/lib.rs:877` | `withdrawn: 0,` |
-| C24 |   Withdraw requires a positive amount not exceeding available   | `contracts/streaming-payments/src/lib.rs:1314` | `if amount > available {` |
-| C25 |   A payout raises withdrawn by the amount, persists, then pushes   | `contracts/streaming-payments/src/lib.rs:1806` | `.checked_add(amount)` |
-| C26 |   Withdraw-max pays the whole available balance, refusing zero   | `contracts/streaming-payments/src/lib.rs:1595` | `let amount = stream::available_amount_with_plan(env, s, resolved.timestamp)?;` |
-| C27 |   Creation pulls deposit + fee before persisting the stream   | `contracts/streaming-payments/src/lib.rs:557` | `let pull_amount = deposit_amount` |
-| C28 |   Top-up pulls the added amount (no fee) before writing   | `contracts/streaming-payments/src/lib.rs:2168` | `Branch::TopUpTransferFailed,` |
+| C22 |   Available is streamed minus withdrawn (zero once cancelled)   | `contracts/streaming-payments/src/stream.rs:1296` | `.checked_sub(stream.withdrawn)` |
+| C23 |   A new stream starts with withdrawn = 0   | `contracts/streaming-payments/src/lib.rs:879` | `withdrawn: 0,` |
+| C24 |   Withdraw requires a positive amount not exceeding available   | `contracts/streaming-payments/src/lib.rs:1316` | `if amount > available {` |
+| C25 |   A payout raises withdrawn by the amount, persists, then pushes   | `contracts/streaming-payments/src/lib.rs:1808` | `.checked_add(amount)` |
+| C26 |   Withdraw-max pays the whole available balance, refusing zero   | `contracts/streaming-payments/src/lib.rs:1597` | `let amount = stream::available_amount_with_plan(env, s, resolved.timestamp)?;` |
+| C27 |   Creation pulls deposit + fee before persisting the stream   | `contracts/streaming-payments/src/lib.rs:559` | `let pull_amount = deposit_amount` |
+| C28 |   Top-up pulls the added amount (no fee) before writing   | `contracts/streaming-payments/src/lib.rs:2170` | `Branch::TopUpTransferFailed,` |
 | C29 |   Treasury collectible is charged minus withdrawn   | `contracts/streaming-payments/src/treasury.rs:100` | `.checked_sub(self.withdrawn_total)` |
 | C30 |   An intent's locked escrow is (deposit + fee_budget) * remaining occurrences   | `contracts/streaming-payments/src/schedule.rs:197` | `per.checked_mul(self.occurrences_remaining as i128)` |
-| C31 |   The stored stream deposit is the requested amount; the fee is applied separately   | `contracts/streaming-payments/src/lib.rs:889` | `treasury::apply_fee(env, &token, id, fee)?;` |
-| C32 |   Batch creation sums deposit + fee per token and pulls once per token   | `contracts/streaming-payments/src/lib.rs:1009` | `pull_totals.push_back((input.token, pull_amount));` |
-| C33 |   Payout pushes to the recipient after state and event are committed   | `contracts/streaming-payments/src/lib.rs:1778` | `Branch::RecipientPayoutFailed,` |
-| C34 |   Cancel finalises status and withdrawn before any transfer   | `contracts/streaming-payments/src/lib.rs:1968` | `s.status = StreamStatus::Cancelled;` |
-| C35 |   Treasury withdrawal is bounded by collectible   | `contracts/streaming-payments/src/lib.rs:4280` | `if amount > t.collectible()? {` |
-| C36 |   Scheduling pulls the whole escrow into the contract   | `contracts/streaming-payments/src/lib.rs:3791` | `&total_escrow,` |
+| C31 |   The stored stream deposit is the requested amount; the fee is applied separately   | `contracts/streaming-payments/src/lib.rs:891` | `treasury::apply_fee(env, &token, id, fee)?;` |
+| C32 |   Batch creation sums deposit + fee per token and pulls once per token   | `contracts/streaming-payments/src/lib.rs:1011` | `pull_totals.push_back((input.token, pull_amount));` |
+| C33 |   Payout pushes to the recipient after state and event are committed   | `contracts/streaming-payments/src/lib.rs:2005` | `Branch::RecipientPayoutFailed,` |
+| C34 |   Cancel finalises status and withdrawn before any transfer   | `contracts/streaming-payments/src/lib.rs:2343` | `s.status = StreamStatus::Cancelled;` |
+| C35 |   Treasury withdrawal is bounded by collectible   | `contracts/streaming-payments/src/lib.rs:4282` | `if amount > t.collectible()? {` |
+| C36 |   Scheduling pulls the whole escrow into the contract   | `contracts/streaming-payments/src/lib.rs:3793` | `&total_escrow,` |
 | C37 |   Cancel split: recipient gets streamed - withdrawn, sender gets deposit - streamed   | `contracts/streaming-payments/src/stream.rs:1298` | `let sender_amount = stream` |
-| C38 |   Cancel pushes each leg only if positive, mapping failures to distinct codes   | `contracts/streaming-payments/src/lib.rs:2025` | `Branch::SenderRefundFailed,` |
-| C39 |   Cancel authorisation: sender always; recipient only if cancelable   | `contracts/streaming-payments/src/lib.rs:1952` | `return Err(surface::reject(Branch::CancelStreamNotCancellable));` |
-| C40 |   Withdrawals require the recipient's authorisation   | `contracts/streaming-payments/src/lib.rs:1746` | `s.recipient.require_auth();` |
-| C41 |   Top-ups require the sender's authorisation   | `contracts/streaming-payments/src/lib.rs:2136` | `s.sender.require_auth();` |
+| C38 |   Cancel pushes each leg only if positive, mapping failures to distinct codes   | `contracts/streaming-payments/src/lib.rs:2027` | `Branch::SenderRefundFailed,` |
+| C39 |   Cancel authorisation: sender always; recipient only if cancelable   | `contracts/streaming-payments/src/lib.rs:1954` | `return Err(surface::reject(Branch::CancelStreamNotCancellable));` |
+| C40 |   Withdrawals require the recipient's authorisation   | `contracts/streaming-payments/src/lib.rs:1748` | `s.recipient.require_auth();` |
+| C41 |   Top-ups require the sender's authorisation   | `contracts/streaming-payments/src/lib.rs:2138` | `s.sender.require_auth();` |
 | C42 |   Fee = floor(deposit * bps / 10,000), checked; zero at 0 bps or non-positive deposit   | `contracts/streaming-payments/src/treasury.rs:141` | `Ok((product / (BPS_DENOMINATOR as u128)) as i128)` |
-| C43 |   Setting the fee rejects rates above the cap   | `contracts/streaming-payments/src/lib.rs:4144` | `if new_fee_bps > MAX_FEE_BPS {` |
+| C43 |   Setting the fee rejects rates above the cap   | `contracts/streaming-payments/src/lib.rs:4146` | `if new_fee_bps > MAX_FEE_BPS {` |
 | C44 |   Charged fees accumulate into the token's charged_total   | `contracts/streaming-payments/src/treasury.rs:226` | `treasury.charged_total = treasury` |
-| C45 |   Single creation computes the fee   | `contracts/streaming-payments/src/lib.rs:556` | `let fee = treasury::fee_amount(deposit_amount, fee_bps)?;` |
+| C45 |   Single creation computes the fee   | `contracts/streaming-payments/src/lib.rs:558` | `let fee = treasury::fee_amount(deposit_amount, fee_bps)?;` |
 | C46 |   TTL threshold 200,000 ledgers, extension 500,000 ledgers   | `contracts/streaming-payments/src/stream.rs:120` | `TTL_EXTEND_LEDGERS: u32 = 500_000;` |
-| C47 |   Every stream write extends the stream entry's TTL   | `contracts/streaming-payments/src/stream.rs:1544` | `.extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);` |
+| C47 |   Every stream write extends the stream entry's TTL   | `contracts/streaming-payments/src/stream.rs:1596` | `.extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);` |
 | C48 |   Treasury writes extend the treasury entry's TTL   | `contracts/streaming-payments/src/treasury.rs:211` | `.extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_LEDGERS);` |
-| C49 |   The get_stream and available views read without extending TTL   | `contracts/streaming-payments/src/lib.rs:3582` | `stream::available_amount_with_plan(&env, &s, resolved.timestamp)` |
+| C49 |   The get_stream and available views read without extending TTL   | `contracts/streaming-payments/src/lib.rs:3584` | `stream::available_amount_with_plan(&env, &s, resolved.timestamp)` |
 | C50 |   The stream-id counter is written without a TTL extension   | `contracts/streaming-payments/src/stream.rs:1441` | `env.storage().persistent().set(&key, &id.saturating_add(1));` |
 | C51 |   Index append rewrites the whole vector and extends it; paging extends too   | `contracts/streaming-payments/src/stream.rs:1894` | `ids.push_back(id);` |
-| C52 |   Batch creation runs `validate_stream_creation` for every input   | `contracts/streaming-payments/src/lib.rs:970` | `Self::validate_stream_creation(` |
-| C53 |   Cancel requires Active status   | `contracts/streaming-payments/src/lib.rs:1944` | `return Err(surface::reject(Branch::StreamNotActive));` |
-| C54 |   Top-up requires Active status   | `contracts/streaming-payments/src/lib.rs:2134` | `return Err(surface::reject(Branch::StreamNotActive));` |
-| C55 |   Batch creation computes the fee per input   | `contracts/streaming-payments/src/lib.rs:982` | `let fee = treasury::fee_amount(input.deposit_amount, fee_bps)?;` |
+| C52 |   Batch creation runs `validate_stream_creation` for every input   | `contracts/streaming-payments/src/lib.rs:972` | `Self::validate_stream_creation(` |
+| C53 |   Cancel requires Active status   | `contracts/streaming-payments/src/lib.rs:1946` | `return Err(surface::reject(Branch::StreamNotActive));` |
+| C54 |   Top-up requires Active status   | `contracts/streaming-payments/src/lib.rs:2136` | `return Err(surface::reject(Branch::StreamNotActive));` |
+| C55 |   Batch creation computes the fee per input   | `contracts/streaming-payments/src/lib.rs:984` | `let fee = treasury::fee_amount(input.deposit_amount, fee_bps)?;` |
 | C56 |   An event with no declaration cannot be published, the registry scan fails the build   | `contracts/streaming-payments/src/event_registry.rs:1036` | `Some(name) if !declared.contains(name.as_str()) => problems.push(format!(` |
 | C57 |   A declaration nothing emits is rejected too, so the registry cannot promise an event that never fires   | `contracts/streaming-payments/src/event_registry.rs:1062` | `declared events with no publish site: {never:?}` |
 | C58 |   Payload-enum variant names and their payload types fold into the canonical shape, so variant order is wire-visible   | `contracts/streaming-payments/src/event_registry.rs:148` | `"{name}{{payload_enum:{}}}",` |
 | C59 |   Each event publishes a JSON Schema for its positional topics, not only its data fields   | `contracts/streaming-payments/src/event_registry.rs:813` | `let mut topic_properties = Map::new();` |
 | C60 |   The catalog indexes every event with its structural fingerprint   | `contracts/streaming-payments/src/event_registry.rs:859` | `"fingerprint": e.fingerprint(defs),` |
-| C61 |   Deleting a published event is a breaking change and fails the compatibility gate   | `scripts/event_compat_check.mjs:68` | `REMOVED event ${name}` |
-| C62 |   Deleting a positional topic is breaking   | `scripts/event_compat_check.mjs:83` | `REMOVED topic field ${name}.${t.name} (position ${i})` |
-| C63 |   Renaming a topic at a position is breaking, because topics are positional   | `scripts/event_compat_check.mjs:86` | `topic at position ${i} changed name` |
-| C64 |   Deleting a data field is breaking, because consumers decode it by name   | `scripts/event_compat_check.mjs:109` | `REMOVED data field ${name}.${field}: ${type}` |
-| C65 |   An added field is allowed only when the event changelog records it   | `scripts/event_compat_check.mjs:98` | `MISSING CHANGELOG: added topic ${name}.${t.name} must be recorded in` |
+| C61 |   Deleting a published event is a breaking change and fails the compatibility gate   | `scripts/event_compat_check.mjs:175` | `REMOVED event ${name}` |
+| C62 |   Deleting a positional topic is breaking   | `scripts/event_compat_check.mjs:192` | `REMOVED topic field ${name}.${t.name} (position ${i})` |
+| C63 |   Renaming a topic at a position is breaking, because topics are positional   | `scripts/event_compat_check.mjs:197` | `topic at position ${i} changed name` |
+| C64 |   Deleting a data field is breaking, because consumers decode it by name   | `scripts/event_compat_check.mjs:221` | `REMOVED data field ${name}.${field}: ${type}` |
+| C65 |   An added field is allowed only when the event changelog records it   | `scripts/event_compat_check.mjs:209` | `MISSING CHANGELOG: added topic ${name}.${t.name} must be recorded in` |
 | C66 |   The indexer refuses a governed event that omits a declared data field   | `indexer/src/decoder.ts:423` | `is missing registry data field(s):` |
 | C67 |   The indexed stream id comes only from a topic the registry declares as stream_id   | `indexer/src/decoder.ts:417` | `if (field.name === "stream_id") streamId = String(positional[i]);` |
 | C68 |   Events from another contract id are journalled without a stream claim   | `indexer/src/decoder.ts:439` | `if (!fromGovernedContract) {` |
-| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:251` | `if (event.streamId === null) {` |
+| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:308` | `if (event.streamId === null) {` |
 <!-- claims:end -->

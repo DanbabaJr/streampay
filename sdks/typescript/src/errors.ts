@@ -4,8 +4,13 @@ import {
   type StreamErrorName,
 } from "./generated.js";
 
-/** Contract error codes that are retained for wire compatibility but retired. */
-export const RETIRED_CONTRACT_ERROR_CODES: ReadonlySet<number> = new Set([2, 3]);
+/** Contract error codes that are retained for wire compatibility but retired.
+ *
+ * Kept in step with `RETIRED_CODES` in `contracts/streaming-payments/src/surface.rs`;
+ * `test/errors.test.ts` fails if the two ever disagree. */
+export const RETIRED_CONTRACT_ERROR_CODES: ReadonlySet<number> = new Set([
+  2, 3, 126, 127, 128, 129,
+]);
 
 export interface ContractErrorMapping {
   code: number;

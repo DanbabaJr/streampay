@@ -876,22 +876,38 @@ pub enum StreamError {
     InvalidHookSelector = 125,
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = " The agent is not authorized for delegated withdrawals on this stream."
+        doc = " **Retired — never produced.** Reserved agent-delegation code kept"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " so the number is never reused. See `docs/ERROR_SURFACE.md`."
     )]
     AgentNotAuthorized = 126,
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = " The agent authorization has expired."
+        doc = " **Retired — never produced.** Reserved agent-delegation code kept"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " so the number is never reused. See `docs/ERROR_SURFACE.md`."
     )]
     AgentExpired = 127,
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = " The delegated withdrawal exceeds the agent's cap for the current period."
+        doc = " **Retired — never produced.** Reserved agent-delegation code kept"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " so the number is never reused. See `docs/ERROR_SURFACE.md`."
     )]
     CapExceededPeriod = 128,
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = " The delegated withdrawal exceeds the agent's total cap for this stream."
+        doc = " **Retired — never produced.** Reserved agent-delegation code kept"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " so the number is never reused. See `docs/ERROR_SURFACE.md`."
     )]
     CapExceededStream = 129,
 }
