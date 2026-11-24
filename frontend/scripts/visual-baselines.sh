@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # Keep in step with @playwright/test in package.json and the CI container tag.
-IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble"
+IMAGE="mcr.microsoft.com/playwright:v1.65.1-noble"
 
 FRONTEND="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

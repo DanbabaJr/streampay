@@ -62,7 +62,7 @@ run. Four things make that so:
    `main.ts`, including an RPC URL that points at a closed local port, and the
    visual suite aborts and fails on any request that leaves the Storybook server.
 3. **One renderer.** Baselines are rendered and compared inside
-   `mcr.microsoft.com/playwright:v1.64.1-noble`, the image tag that matches the
+   `mcr.microsoft.com/playwright:v1.65.1-noble`, the image tag that matches the
    pinned `@playwright/test`. Fonts and anti-aliasing differ between operating
    systems; inside one image they do not, so the comparison runs at
    `maxDiffPixels: 0`. A CI step fails if the package and the image tag drift
