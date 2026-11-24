@@ -306,6 +306,26 @@ def check_workflows(root, ref=None):
                     if "with" in step and not has_uses:
                         problems.append(("steps", rel, 0,
                                          f"{where} ({label}): has with: but no uses: to pass it to"))
+                    if "working-directory" in step and has_uses and not has_run:
+                        # Measured, not inferred. Probe run 45373317235 (a step
+                        # with uses:, no run:, and working-directory:) gives a
+                        # run named after the file path with 0 jobs and no logs -
+                        # GitHub refuses to load the workflow. Its control, probe
+                        # run 45373319494 (the same directory set with job-level
+                        # `defaults: run: working-directory:`), loads and runs.
+                        # So the job-level form is fine and the step-level form
+                        # is not. PyYAML accepts both, so nothing else here
+                        # notices. A workflow that silently produces no checks is
+                        # worse than one that fails loudly: every gate reads green
+                        # because no gate ran.
+                        problems.append((
+                            "steps", rel, 0,
+                            f"{where} ({label}): has working-directory: on a step with uses: and no run:. "
+                            "GitHub refuses to load the whole workflow file, so the run gets 0 jobs and the "
+                            "pull request shows no checks at all. `working-directory` belongs to run: steps; "
+                            "pass the destination to the action instead (actions/checkout uses `with: "
+                            "path:`) or set it job-wide with `defaults: run: working-directory:`.",
+                        ))
                     if has_uses:
                         ref_text = str(step["uses"])
                         if ref_text.startswith("./"):
@@ -660,13 +680,25 @@ FIXTURES = {
         "      - name: bare\n        with:\n          foo: bar\n"
         "      - name: branch\n        uses: some/action@main\n"
         "      - name: lost\n        uses: ./does-not-exist\n"
+        # Probe run 45373317235: this step makes GitHub refuse to load the file,
+        # so the workflow reports zero checks instead of a failure.
+        "      - name: wd-on-uses\n        uses: actions/checkout@v7\n"
+        "        working-directory: frontend\n"
         "  b:\n    runs-on: ubuntu-latest\n    needs: nonexistent\n    steps:\n      - run: echo x\n"
         # Prefix stripping must not make the detector blind: the checkout dir is
         # real, the action inside it is not.
         "  c:\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - name: checkout into head-repo\n        uses: actions/checkout@v7\n"
         "        with:\n          path: head-repo\n"
-        "      - name: lost under the checkout dir\n        uses: ./head-repo/.github/actions/nope\n",
+        "      - name: lost under the checkout dir\n        uses: ./head-repo/.github/actions/nope\n"
+        # Probe run 45373319494: the job-level spelling of the same thing loads
+        # and runs, so the detector has to stay quiet about it. A rule that fires
+        # on legal YAML is a rule that keeps CI permanently red.
+        "  d:\n    runs-on: ubuntu-latest\n"
+        "    defaults:\n      run:\n        working-directory: frontend\n"
+        "    steps:\n"
+        "      - name: defaults control uses\n        uses: actions/checkout@v7\n"
+        "      - name: defaults control run\n        run: pwd\n",
     ),
     "triggers": (
         "notriggers.yml",
@@ -722,6 +754,15 @@ def self_test():
         if "head-repo/.github/actions/nope" not in messages:
             failures.append("steps detector stopped reporting a local action that is missing under a "
                             "`with: path:` checkout directory")
+        wd = [message for _, rel, _, message in problems
+              if "working-directory" in message and rel.endswith("shape.yml")]
+        if not any("wd-on-uses" in message for message in wd):
+            failures.append("steps detector no longer reports working-directory: on a uses:/run-less step, "
+                            "the construct that makes GitHub load nothing (probe run 45373317235)")
+        if any("defaults control" in message for message in wd):
+            failures.append("steps detector reported the job-level `defaults: run: working-directory:` "
+                            "control, which GitHub loads and runs (probe run 45373319494) - a rule that "
+                            "fires on legal YAML keeps CI permanently red")
         # A detector that fires on everything would keep CI permanently red, so
         # a valid workflow has to come back clean.
         for kind, rel, _, message in problems:

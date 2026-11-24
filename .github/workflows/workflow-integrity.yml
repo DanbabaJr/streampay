@@ -135,8 +135,13 @@ jobs:
             replacing it. Locally PyYAML keeps the last value and says nothing;
             GitHub's parser refuses the file. Replace the line, do not add one.
           - `[steps]` A step carries both `run:` and `uses:`, or neither, or a
-            `with:` with nothing to pass it to. Also a `needs:` pointing at a job
-            that does not exist, and an action referenced by `@main` / `@master`.
+            `with:` with nothing to pass it to. Also `working-directory:` on a
+            step that has `uses:` and no `run:` -- GitHub refuses the file for
+            that one, so the pull request shows **no checks at all** rather than
+            a red one; the same directory set job-wide with
+            `defaults: run: working-directory:` is legal. Also a `needs:` pointing
+            at a job that does not exist, and an action referenced by
+            `@main` / `@master`.
           - `[gates]` A named CI step that existed at the merge base, or that
             `.github/ci-gates.json` lists as required, is no longer in the
             workflow. A deleted gate cannot fail -- it simply stops running, and
