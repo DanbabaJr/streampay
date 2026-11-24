@@ -60,7 +60,7 @@ fn errors(schema: &Value, instance: &Value) -> Vec<String> {
     let validator = jsonschema::draft202012::new(schema).expect("schema compiles");
     validator
         .iter_errors(instance)
-        .map(|e| format!("{} at {}", e, e.instance_path))
+        .map(|e| format!("{} at {}", e, e.instance_path()))
         .collect()
 }
 
