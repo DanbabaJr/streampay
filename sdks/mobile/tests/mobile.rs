@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use stellar_xdr::{Limits, ReadXdr, ScError, ScVal, WriteXdr};
+use stellar_xdr::{Limits, ScError, ScVal, WriteXdr};
 use streampay_mobile::{RpcReadTransport, StreamPayError, StreamPayMobile, StreamStatus};
 
 fn vector(name: &str) -> serde_json::Value {

@@ -61,7 +61,10 @@ function udl() {
   }
   const type = (value) => {
     if (typeof value === "string") {
-      if (value === "u64" || value === "u32" || value === "bool") return value;
+      // The UDL builtin is spelled `boolean`; `bool` is the Rust name, and
+      // uniffi_bindgen aborts the whole build with "unknown type reference".
+      if (value === "u64" || value === "u32") return value;
+      if (value === "bool") return "boolean";
       if (value === "string" || value === "address") return "string";
       if (value === "i128" || value === "u128") return "string";
       return value;
@@ -132,7 +135,7 @@ function rustCatalog() {
     "    Unknown,",
   ];
   const codes = errors.map(
-    ([code, name]) => `            ${code} => Some(Self::${name}),`
+    ([code, name]) => `            Self::${name} => Some(${code}),`
   );
   const namesMatch = errors.map(([, name]) => `            Self::${name} => "${name}",`);
   const fromCodes = errors.map(([code, name]) => `            ${code} => Self::${name},`);
