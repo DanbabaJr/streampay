@@ -515,13 +515,19 @@ Withdrawn, in the order the size demanded:
 
 | PR | Surface removed | Why this one |
 |---|---|---|
-| #626 | `batch_amend.rs`, `insurance.rs`, `sender_policy.rs`, `voting_power.rs` | Merged in the bulk merge (`66514d1b`) and reverted by this repair (`a254e202`): the insurance pool was fundable by anyone and drainable by the first caller, the accrual re-baseline it needed was never measured, and its `surface.rs` half landed without the `Branch` variants it references — which is why the tree did not compile at all. |
+| #626 | `batch_amend.rs`, `insurance.rs`, `sender_policy.rs`, `voting_power.rs` + their 11 schema events | Merged in the bulk merge (`66514d1b`) and reverted by this repair (`a254e202`) — for the build and the design, not the bytes: it added no entrypoints, so it is not where the size went. It is, though, the reason `main` did not **compile**: the merge kept its `surface.rs` branch→action mapping (7 lines naming `Branch::BatchAmendment*`) while the `Branch` enum never declared the 19 variants the four modules and that mapping reference. And the insurance pool has no loss proof: `file_claim` takes an arbitrary `amount` from the stream's recipient, is not once-per-stream, and is bounded only by a governance cap and `pool.balance`, so any terminated stream can be claimed repeatedly up to the cap regardless of accrued loss — against a pool funded from the protocol fee slice (`treasury.rs:226`), i.e. treasury revenue. |
 | #660 | delegated session keys (`session_keys.rs`): `authorize_agent`, `revoke_agent`, `withdraw_delegated`, `agent_status`, plus the `AGENT_AUTHORIZED` / `AGENT_REVOKED` events — landed as `a62a030b` inside merge `f489a428` | #677's entrypoints are built on this state, so neither can move out without taking the other. Session keys are the smaller of the two and the one with a superseded auth model (the contract already has `add_delegate`-style per-stream agents). |
 | #677 | commit-reveal claims: `commit_claim`, `reveal_claim`, `expire_reveal`, `get_claim_commitment`, `privacy_claims.rs` — plus a second copy of #660's session-key module (`session_keys.rs`, 206 lines) that the same merge re-introduced and `33995cc0` deleted | 4 entrypoints + a stored commitment map + 4 error codes' worth of new state. Privacy on claims is a design question (a `Vec` of hashed commitments on instance storage is per-claim griefing surface), not a size question, so it goes back to being designed rather than shrinking in place. |
 
+The wall was hit by public entrypoints, not by private modules: #660's four
+(`authorize_agent`, `revoke_agent`, `withdraw_delegated`, `agent_status`) and
+#677's four (`commit_claim`, `reveal_claim`, `expire_reveal`,
+`get_claim_commitment`) cost ~680 B of `code` each as measured at #426, plus
+their spec entries, stored types and events. #626 added none, which is why its
+revert is recorded as a build-and-design fix rather than a size measure.
+
 What the tree is after the revert, measured by CI's own build (`Contract — test
 / fmt / clippy / wasm`, "Wasm size budget check", commit `e7acae41`):
-
 | Quantity | Bytes | Against |
 |---|---|---|
 | Contract Wasm, canonical build | **129,742** | — |
