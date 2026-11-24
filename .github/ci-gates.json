@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Minimum set of CI gate steps every workflow must keep running, enforced by scripts/check_ci_integrity.py in .github/workflows/workflow-integrity.yml. Deleting one of these steps cannot fail CI by itself - a removed step reports nothing - so the gate checks this list instead. Retiring a gate deliberately is allowed: move its name out of must_have and into retired, with a reason, in the same pull request, so the deletion is in the diff.",
+  "description": "Minimum set of CI gate steps every workflow must keep running, enforced by scripts/check_ci_integrity.py in .github/workflows/workflow-integrity.yml. Deleting one of these steps cannot fail CI by itself - a removed step reports nothing - so the gate checks this list instead. Retiring a gate deliberately is allowed: move its name out of must_have and into retired, with a reason, in the same pull request, so the deletion is in the diff. Consolidating a job into another one is allowed the same way: record the old job id under moved with its destination and a reason, and every step that job was required to run is then enforced in the destination instead - a move that loses a step fails exactly like a deletion.",
   "must_have": {
     "ci.yml": {
       "contract": [
@@ -17,7 +17,10 @@
         "Coverage",
         "Wasm build (stellar contract build)",
         "Wasm size budget check",
-        "Upload contract Wasm artifact"
+        "Upload contract Wasm artifact",
+        "Install Rust toolchain (mirrors devcontainer feature)",
+        "Wasm build (devcontainer path)",
+        "Assert wasm artifact is present and non-empty"
       ],
       "frontend": [
         "Install dependencies",
@@ -33,7 +36,9 @@
         "Scheduler + fee-series simulation (vitest)",
         "Build",
         "Dependency audit",
-        "Explain a dependency-audit failure"
+        "Explain a dependency-audit failure",
+        "Install CLI dependencies",
+        "CLI tests including parity fixtures"
       ],
       "storybook-visual": [
         "Install dependencies",
@@ -45,25 +50,20 @@
         "Upload candidate baselines",
         "Explain a visual-regression failure"
       ],
-      "ttl-sentinel": [
+      "data-plane": [
+        "Event registry artifacts are up to date",
+        "Event compatibility check against the base",
+        "Compatibility checker tests",
         "Typecheck",
         "Unit + fast-forward ledger tests",
-        "Dependency audit"
-      ],
-      "indexer": [
-        "Typecheck",
+        "Dependency audit",
         "Tests",
-        "Dependency audit"
-      ],
-      "reconciler": [
-        "Typecheck",
-        "Build",
-        "Tests",
-        "Soak tests"
-      ],
-      "cli-parity": [
-        "Install CLI dependencies",
-        "CLI tests including parity fixtures"
+        "Soak tests",
+        "Check performance budgets (3-run median & bounds)",
+        "Seeded regression defense test",
+        "Lint runbook command freshness",
+        "Error catalog is up to date",
+        "Benchmark freshness & regression check"
       ],
       "supply-chain": [
         "cargo-deny (advisories, licenses, bans, sources)",
@@ -73,17 +73,6 @@
         "Check internal markdown links",
         "No duplicate JSON keys",
         "Tracked files are stored with LF"
-      ],
-      "devcontainer-verify": [
-        "Install Rust toolchain (mirrors devcontainer feature)",
-        "Wasm build (devcontainer path)",
-        "Assert wasm artifact is present and non-empty"
-      ],
-      "perf-budgets": [
-        "Check performance budgets (3-run median & bounds)",
-        "Seeded regression defense test",
-        "Lint runbook command freshness",
-        "Error catalog is up to date"
       ]
     },
     "attestation.yml": {
@@ -256,5 +245,41 @@
       ]
     }
   },
-  "retired": {}
+  "retired": {},
+  "moved": {
+    "ci.yml": {
+      "devcontainer-verify": {
+        "to": "contract",
+        "reason": "Its whole purpose was a red that survives a formatting failure in the contract job, so that a compile error reads differently from a rustfmt complaint. The steps now run inside contract under `if: always() && !cancelled()`, which preserves that: they still execute when the job already failed at Format check or Clippy. One check instead of two, same diagnostic separation."
+      },
+      "cli-parity": {
+        "to": "frontend",
+        "reason": "The frontend job already installs this same tools/streampay-cli tree (`Install CLI dependencies for cross-client parity`) and runs the parity suite against it; the separate job existed only to have its own check run. Folded so the wire-parity result travels with the app it mirrors."
+      },
+      "event-registry": {
+        "to": "data-plane",
+        "reason": "The registry, the schemas and the TypeScript types are the contract's wire format, and indexer/reconciler/ttl-sentinel/perf-budgets are its consumers. One job owns the producer and every consumer, so a PR that changes an event shape sees the drift in the same check that reports the consumer breakage."
+      },
+      "indexer": {
+        "to": "data-plane",
+        "reason": "Consumer of the event registry; folded into the job that gates the schema it reads. Its own working-directory is inlined per step, so `npm ci` still runs against indexer/package-lock.json."
+      },
+      "reconciler": {
+        "to": "data-plane",
+        "reason": "Consumer of the indexer's output and the contract events; same merge as indexer, with reconciler's working-directory inlined per step."
+      },
+      "ttl-sentinel": {
+        "to": "data-plane",
+        "reason": "The sentinel reads contract storage constants and emits the same event shapes the registry owns, so it belongs with the wire-format checks. infra/ttl-sentinel working-directory is inlined per step."
+      },
+      "perf-budgets": {
+        "to": "data-plane",
+        "reason": "Builds and measures the indexer, which data-plane already builds; the budget numbers are only meaningful against that tree, and the error-catalog freshness gate is a derived-artifact check like the event registry's."
+      },
+      "benchmarks": {
+        "to": "data-plane",
+        "reason": "Protocol comparison over the same contract build, with no baseline-comparison isolation requirement, so it shares the data-plane runner instead of paying for another checkout and toolchain install."
+      }
+    }
+  }
 }
