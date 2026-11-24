@@ -48,7 +48,7 @@ timelocked and scoped, with fail-closed execution. Integrates with the
 | Three-way engine | `src/engine/threeway.js` | Pairwise comparison, layer attribution, confidence, dedup/flap suppression |
 | Legacy diff engine | `src/engine/diff.ts` | Two-way consistency-window comparison used by `runCycle` |
 | Suppression | `src/engine/suppression.js` | Cooldown dedup and recurring-flap suppression |
-| Alerting Service | `src/alerting.ts` | Structured JSON logging + diagnosis webhook dispatch to the indexer dashboard |
+| Alerting Service | `src/alerting.ts` | Structured JSON logging, per-divergence alert dedup/flap suppression, and diagnosis webhook dispatch to the indexer dashboard |
 | Heal proposals | `src/heal/proposals.js` | Typed proposals, governance approvals, timelock/TTL/veto, idempotent scoped execution |
 | Dry-run + merkle | `src/heal/dryrun.js`, `src/heal/merkle.js` | Exact change preview and before/after state roots |
 
@@ -85,6 +85,16 @@ normalization (`Active`/`active`, `Cancelled`/`canceled`, `Paused`/`paused`).
 Identical diagnoses are deduplicated for `SUPPRESSION_COOLDOWN_MS` and a
 diagnosis that recurs `FLAP_THRESHOLD` times is suppressed as flapping until it
 clears; agreement on a stream clears its suppression state.
+
+Divergence webhooks (`stream_divergence`) are de-duplicated per stream and
+divergence key by `AlertingService`. A violation must be observed in
+`ALERT_CONFIRM_PASSES` consecutive reconciliation passes before the first page,
+so a value oscillating around the tolerance boundary never alerts. Once open it
+pages once and then re-pages only every `ALERT_REMINDER_MS` (`0` disables
+reminders). It resolves — and its state is dropped — after
+`ALERT_RESOLVE_PASSES` consecutive clean passes, so a resolved-then-reopened
+divergence is a new alert rather than a suppressed duplicate. The webhook
+payload is unchanged: only when an alert is sent changes, never its shape.
 
 ## Governance-gated heal proposals
 
@@ -136,6 +146,9 @@ Create a `.env` file in `reconciler/` (copy from `.env.example`):
 | `ROUNDING_TOLERANCE_PPM` | No | `0` | Relative amount tolerance in parts per million |
 | `SUPPRESSION_COOLDOWN_MS` | No | `300000` | Dedup window for an identical diagnosis |
 | `FLAP_THRESHOLD` | No | `3` | Recurrences before a diagnosis is suppressed as flapping |
+| `ALERT_CONFIRM_PASSES` | No | `2` | Consecutive passes a divergence must persist before the first alert |
+| `ALERT_RESOLVE_PASSES` | No | `2` | Consecutive clean passes before an open divergence resolves |
+| `ALERT_REMINDER_MS` | No | `1800000` | Reminder cadence for an open divergence (`0` disables reminders) |
 | `HEAL_PROPOSALS_ENABLED` | No | `true` | Generate and execute governance-gated heal proposals |
 | `HEAL_TIMELOCK_MS` | No | `86400000` | Delay between approval and earliest execution |
 | `HEAL_TTL_MS` | No | `172800000` | Proposal expiry after creation |

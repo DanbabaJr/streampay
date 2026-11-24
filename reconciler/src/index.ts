@@ -35,6 +35,9 @@ export interface ReconcilerServiceConfig {
   tolerance: { absolute: number; relativePpm: number };
   suppressionCooldownMs: number;
   flapThreshold: number;
+  alertConfirmPasses: number;
+  alertResolvePasses: number;
+  alertReminderMs: number;
   healEnabled: boolean;
   healTimelockMs: number;
   healTtlMs: number;
@@ -100,6 +103,9 @@ function loadConfig(): ReconcilerServiceConfig {
     },
     suppressionCooldownMs: parseInteger(process.env.SUPPRESSION_COOLDOWN_MS, 300_000),
     flapThreshold: parseInteger(process.env.FLAP_THRESHOLD, 3),
+    alertConfirmPasses: parseInteger(process.env.ALERT_CONFIRM_PASSES, 2),
+    alertResolvePasses: parseInteger(process.env.ALERT_RESOLVE_PASSES, 2),
+    alertReminderMs: parseInteger(process.env.ALERT_REMINDER_MS, 1_800_000),
     healEnabled: process.env.HEAL_PROPOSALS_ENABLED === "true",
     healTimelockMs: parseInteger(process.env.HEAL_TIMELOCK_MS, 86_400_000),
     healTtlMs: parseInteger(process.env.HEAL_TTL_MS, 172_800_000),
@@ -153,6 +159,11 @@ export async function createReconcilerService(): Promise<ReconcilerService> {
     serviceName: SERVICE_NAME,
     environment: config.environment,
     reconcilerId: config.reconcilerId,
+    dedupe: {
+      confirmPasses: config.alertConfirmPasses,
+      resolvePasses: config.alertResolvePasses,
+      reminderCadenceMs: config.alertReminderMs,
+    },
   });
 
   const projectionReader = new ProjectionReader({
@@ -282,8 +293,13 @@ export async function runThreeWayCycle(
 
   const report = service.threeWay.reconcile({ snapshots, streamIds });
 
-  for (const diagnosis of report.diagnoses) {
-    await service.alerting.dispatchDiagnosis(diagnosis, report);
+  service.alerting.beginPass();
+  try {
+    for (const diagnosis of report.diagnoses) {
+      await service.alerting.dispatchDiagnosis(diagnosis, report);
+    }
+  } finally {
+    service.alerting.endPass();
   }
 
   let proposals: any[] = [];
