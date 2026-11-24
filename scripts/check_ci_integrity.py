@@ -69,6 +69,7 @@ import argparse
 import collections.abc
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -109,7 +110,7 @@ SKIP_DIRS = {".git", "node_modules", "target", ".next", "dist", "build",
              "coverage", ".venv", "venv", "__pycache__", ".cargo"}
 WORKFLOW_DIR = ".github/workflows"
 GATES_FILE = ".github/ci-gates.json"
-ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "gates", "encoding")
+ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "paths", "gates", "encoding")
 
 
 class DupKeyLoader(yaml.SafeLoader):
@@ -367,6 +368,114 @@ def check_workflows(root, ref=None):
 # ---------------------------------------------------------------------------
 # required gates
 # ---------------------------------------------------------------------------
+
+def tracked_paths(root, ref=None):
+    """Every tracked path in the checkout, no extension filter."""
+    names = None
+    if ref:
+        proc = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref], cwd=root,
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode == 0:
+            names = proc.stdout.splitlines()
+    if names is None:
+        proc = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        if proc.returncode == 0 and proc.stdout.strip():
+            names = proc.stdout.split("\0")
+    if names is None:  # not a git checkout: walk instead
+        names = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            names.extend(os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/")
+                         for n in filenames)
+    return {n for n in names if n}
+
+
+def filter_prefix(pattern):
+    """The glob-free leading path of a paths: pattern, or "" if it has none.
+
+    GitHub's filter grammar here is * (within one path segment), ** , ? and a
+    bracket class, so the first occurrence of any of those ends the literal
+    part. "" means the pattern is not anchored to a directory that could be
+    shown to exist or not exist, so nothing may be concluded from it.
+    """
+    if pattern.startswith("$"):  # an expression, not a path
+        return ""
+    head = re.split(r"[*?\[]", pattern.lstrip("!"))[0]
+    head = head[2:] if head.startswith("./") else head
+    return head.rstrip("/")
+
+
+def can_match(paths, prefix):
+    if not prefix or prefix == ".":
+        return True
+    if prefix in paths:
+        return True
+    return any(name.startswith(prefix + "/") for name in paths)
+
+
+def line_of(text, needle):
+    for number, line in enumerate(text.splitlines(), 1):
+        if needle in line:
+            return number
+    return 0
+
+
+def check_path_filters(root, ref=None):
+    """paths: / paths-ignore: entries that no file in the repo can satisfy.
+
+    A dead filter is the quiet twin of the parse rejection: the job does not
+    fail, it never runs, and the pull request reads green because the only
+    evidence that the gate exists is an absent check. infra.yml carried
+    "deploy/**" for a directory that has never existed in this repository's
+    history (git log --all -- deploy is empty), so its IaC proof silently
+    stopped running on any PR that did not also touch infra/ or digests/.
+    """
+    problems = []
+    files = list_workflows(root, ref)
+    if files is None:
+        return [("paths", WORKFLOW_DIR, 0,
+                 f"could not list workflows at ref {ref}, so no filter could be judged")]
+    if not files:
+        return problems
+    paths = tracked_paths(root, ref)
+    for rel in files:
+        text = read_any(root, ref, rel)
+        if text is None:
+            continue
+        docs, parse_error, _ = parse_yaml(text)
+        if parse_error:
+            continue  # the parse rule already covers this file
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            triggers = doc.get("on", doc.get(True))
+            if not isinstance(triggers, dict):
+                continue
+            for event, config in triggers.items():
+                if not isinstance(config, dict):
+                    continue
+                for key in ("paths", "paths-ignore"):
+                    patterns = config.get(key)
+                    if not isinstance(patterns, list):
+                        continue
+                    for pattern in patterns:
+                        if not isinstance(pattern, str):
+                            continue
+                        prefix = filter_prefix(pattern)
+                        if can_match(paths, prefix):
+                            continue
+                        problems.append((
+                            "paths", rel, line_of(text, pattern),
+                            f"{event}.{key} pattern {pattern!r} can never match: nothing named "
+                            f"{prefix!r} exists in the repository. A job gated only by this pattern "
+                            "does not fail, it silently never runs -- which reads as green. Create the "
+                            "path, drop the pattern, or (if the directory was renamed) fix every "
+                            "workflow still filtering on the old name.",
+                        ))
+    return problems
+
 
 def load_inventory(root, ref=None):
     text = read_any(root, ref, GATES_FILE)
@@ -704,6 +813,18 @@ FIXTURES = {
         "notriggers.yml",
         "name: x\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
     ),
+    # Dead path filters, the shape infra.yml carried as "deploy/**" for a
+    # directory no commit in this repository has ever had. Two of the five
+    # pull_request patterns below are legal and must stay quiet, so this fixture
+    # pins the rule in both directions like every other one here.
+    "paths": (
+        "deadfilter.yml",
+        "name: dead\n'on':\n  pull_request:\n    paths:\n      - \"deploy/**\"\n"
+        "      - \"infra/**\"\n      - \"**/*.md\"\n      - \"scripts/nope.py\"\n"
+        "      - \".github/workflows/deadfilter.yml\"\n"
+        "  push:\n    paths-ignore:\n      - \"docs/**\"\n"
+        "jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo x\n",
+    ),
 }
 
 GATE_BASE = (
@@ -745,9 +866,6 @@ def self_test():
         if not ok:
             failures.append("work-tree workflow listing returned nothing")
         kinds = {kind for kind, _, _, _ in problems}
-        for rule in FIXTURES:
-            if rule not in kinds:
-                failures.append(f"{rule} detector reported nothing on its own fixture")
         messages = " || ".join(message for _, _, _, message in problems)
         if "does not resolve" not in messages:
             failures.append("steps detector did not report a local action path that does not resolve")
@@ -768,6 +886,31 @@ def self_test():
         for kind, rel, _, message in problems:
             if rel.endswith(VALID_WORKFLOW[0]) or rel.endswith(VALID_SUBDIR_WORKFLOW[0]):
                 failures.append(f"false positive on the valid fixture {rel}: [{kind}] {message}")
+
+        # paths: only the infra/ directory and the fixture's own workflow file
+        # exist here, which is what makes the other four patterns dead.
+        os.makedirs(os.path.join(tmp, "infra"))
+        with open(os.path.join(tmp, "infra", "main.tf"), "w", encoding="utf-8", newline="") as handle:
+            handle.write("resource \"null_resource\" \"fixture\" {}\n")
+        path_problems = check_path_filters(tmp)
+        reported = " || ".join(message for _, _, _, message in path_problems)
+        for pattern in ("deploy/**", "scripts/nope.py", "docs/**"):
+            if pattern not in reported:
+                failures.append(f"paths detector no longer reports the dead pattern {pattern!r} "
+                                "(deploy/** is the one infra.yml shipped with)")
+        for pattern in ("infra/**", "**/*.md", ".github/workflows/deadfilter.yml"):
+            if pattern in reported:
+                failures.append(f"paths detector reported the satisfiable pattern {pattern!r} - a rule "
+                                "that fires on a working filter keeps CI red for the wrong reason")
+        for kind, rel, _, message in path_problems:
+            if rel.endswith(VALID_WORKFLOW[0]) or rel.endswith(VALID_SUBDIR_WORKFLOW[0]):
+                failures.append(f"false positive from the paths detector on {rel}: {message}")
+        kinds = kinds | {kind for kind, _, _, _ in path_problems}
+        # Every fixture in the table has to be caught by the detector it is
+        # named for; a fixture nobody fires on means the rule is decorative.
+        for rule in FIXTURES:
+            if rule not in kinds:
+                failures.append(f"{rule} detector reported nothing on its own fixture")
 
         # gates: a step present at the base and absent here must be reported, a
         # step that is still present must not be, and a documented retirement is
@@ -979,6 +1122,8 @@ def main(argv=None):
         problems += [p for p in found if p[0] in workflow_rules]
     if "gates" in rules:
         problems += gate_problems(root, base)
+    if "paths" in rules:
+        problems += check_path_filters(root)
     if "encoding" in rules:
         problems += check_encodings(root, base)
 
