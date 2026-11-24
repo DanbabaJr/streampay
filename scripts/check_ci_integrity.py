@@ -41,7 +41,12 @@ What it checks
   gates      every named step that existed in --base still exists in the same
              job here, plus everything listed in the must_have inventory of
              .github/ci-gates.json. Retiring a gate is allowed, but only by
-             recording it under "retired" with a reason, in the open.
+             recording it under "retired" with a reason, in the open. A job
+             that is *re-homed* - folded into another job because the check
+             surface is being consolidated, not because the gate is unwanted -
+             is recorded under "moved" with its destination and a reason, which
+             is checked the same way: every named step it had must be running in
+             the destination job here.
   encoding   no tracked text file is committed as UTF-16, with a UTF-8 BOM, or
              containing any C0 control byte (0x00-0x1F) other than tab and LF,
              or a CR that is not part of a CRLF pair
@@ -386,6 +391,50 @@ def gate_problems(root, base=None):
             steps_cache[rel] = (None, None) if text is None else named_steps_per_job(text)
         return steps_cache[rel]
 
+    # "moved": a job folded into another job, with its steps still expected to
+    # run there. Consolidating the check surface is a legitimate change; the
+    # point of this gate is that a gate cannot quietly vanish, and a move is
+    # only a move if the destination really carries everything. A PR that
+    # invents a destination is caught by the existence test below, and one that
+    # moves a job and drops a step on the way is caught exactly as a deletion
+    # would be.
+    moved = {}
+    for inv in (inventory_base, inventory_here):
+        for workflow, jobs in (inv.get("moved") or {}).items():
+            key = os.path.basename(workflow)
+            for old_job, entry in (jobs or {}).items():
+                dest = entry.get("to") if isinstance(entry, dict) else entry
+                reason = entry.get("reason") if isinstance(entry, dict) else ""
+                if not dest:
+                    problems.append(("gates", GATES_FILE, 0,
+                                     f"moved entry '{key}' / '{old_job}' names no destination job. "
+                                     "Record where the steps went, in the open."))
+                    continue
+                if not str(reason or "").strip():
+                    problems.append(("gates", GATES_FILE, 0,
+                                     f"moved entry '{key}' / '{old_job}' -> '{dest}' has no reason. "
+                                     "A move needs the same justification a retirement does."))
+                moved.setdefault(key, {})[old_job] = str(dest)
+    for key, pairs in moved.items():
+        for old_job, dest in pairs.items():
+            if old_job == dest:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' points at itself"))
+            elif dest in pairs:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' -> '{dest}', which is itself a move. "
+                                 "Chains are not followed: point at the job that runs the steps now."))
+            present, _ = steps_here(f"{WORKFLOW_DIR}/{key}")
+            if present is not None and dest not in present:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' -> '{dest}', but no job '{dest}' "
+                                 "exists in this branch's workflow. The steps went nowhere."))
+
+    def home(key, job_id, present):
+        """The job a base job's steps must be found in here, after any move."""
+        dest = moved.get(key, {}).get(job_id, job_id)
+        return dest, dest in present
+
     # 1. must_have: the curated floor. The inventory itself is read from --base,
     #    so a pull request cannot lower it; the steps are verified here.
     for workflow, jobs in (inventory_base.get("must_have") or {}).items():
@@ -399,18 +448,24 @@ def gate_problems(root, base=None):
             problems.append(("gates", workflow, 0,
                              f"cannot verify the required steps, the workflow does not parse: {parse_error}"))
             continue
-        allowed = retired.get(os.path.basename(workflow), {})
+        key = os.path.basename(workflow)
+        allowed = retired.get(key, {})
         for job_id, names in (jobs or {}).items():
+            dest, dest_present = home(key, job_id, present)
             for name in names:
                 if name in allowed.get(job_id, set()):
                     continue
-                if job_id not in present:
+                if not dest_present:
                     problems.append(("gates", workflow, 0,
-                                     f"job '{job_id}' is gone, so its required step '{name}' cannot run"))
-                elif name.strip() not in present[job_id]:
+                                     f"job '{job_id}' is gone, so its required step '{name}' cannot run"
+                                     + (f" (it is recorded as moved to '{dest}', which does not exist)"
+                                        if dest != job_id else "")))
+                elif name.strip() not in present[dest]:
                     problems.append((
                         "gates", workflow, 0,
-                        f"job '{job_id}' no longer runs the required step '{name}'. A removed gate cannot "
+                        f"job '{dest}' no longer runs the required step '{name}'"
+                        + (f" it took over from '{job_id}'" if dest != job_id else "")
+                        + ". A removed gate cannot "
                         "fail, so the PR that removed it stays green. Restore the step, or retire it in "
                         f"{GATES_FILE} under \"retired\" with a reason.",
                     ))
@@ -435,19 +490,23 @@ def gate_problems(root, base=None):
             workflow = rel.split("/")[-1]
             for job_id, names in base_jobs.items():
                 allowed = retired.get(workflow, {}).get(job_id, set())
+                dest, _ = home(workflow, job_id, head_jobs)
                 # Only compare against the merge base, so steps main added after
                 # this branch forked are never blamed on the branch.
                 for name in names:
                     if name in allowed:
                         continue
-                    if job_id not in head_jobs:
+                    if dest not in head_jobs:
                         problems.append(("gates", rel, 0,
-                                         f"job '{job_id}' existed at the merge base and is gone"))
-                    elif name not in head_jobs[job_id]:
+                                         f"job '{job_id}' existed at the merge base and is gone"
+                                         + (f", and its recorded move to '{dest}' does not exist here"
+                                            if dest != job_id else "")))
+                    elif name not in head_jobs[dest]:
                         problems.append((
                             "gates", rel, 0,
-                            f"job '{job_id}' dropped the step '{name}' that existed at the merge base. "
-                            f"Deleted gates do not fail -- they disappear. Restore it, or retire it in "
+                            f"job '{dest}' dropped the step '{name}' that existed at the merge base"
+                            + (f" (taken over from '{job_id}')" if dest != job_id else "")
+                            + ". Deleted gates do not fail -- they disappear. Restore it, or retire it in "
                             f"{GATES_FILE} with a reason.",
                         ))
     return problems
@@ -713,6 +772,70 @@ def self_test():
             if [m for m in found if "Retired step" in m]:
                 failures.append("gates detector reported a step that ci-gates.json retires on purpose")
 
+        # gates/moved: consolidating the check surface re-homes a job's steps in
+        # another job. That has to be allowed, or the gate would block every
+        # honest cleanup - and a step lost on the way still has to be reported,
+        # or "moved" is just a deletion loophole.
+        mrepo = os.path.join(tmp, "moved-repo")
+        os.makedirs(mrepo)
+        mrun = lambda *a: subprocess.run(a, cwd=mrepo, capture_output=True, text=True,
+                                         encoding="utf-8", errors="replace")
+        mrun("git", "init", "-q")
+        mrun("git", "config", "user.email", "self-test@example.invalid")
+        mrun("git", "config", "user.name", "self-test")
+        MOVE_BASE_YML = (
+            "name: x\n'on': push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Kept step\n        run: echo x\n"
+            "  b:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Relocated step\n        run: echo y\n"
+            "      - name: Dropped step\n        run: echo z\n"
+        )
+        MOVE_HEAD_YML = (
+            "name: x\n'on': push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Kept step\n        run: echo x\n"
+            "      - name: Relocated step\n        run: echo y\n"
+        )
+        MOVE_BASE_INV = {"version": 1,
+                         "must_have": {"gate-ci.yml": {"b": ["Relocated step", "Dropped step"]}},
+                         "retired": {}}
+        MOVE_HEAD_INV = {"version": 1,
+                         "must_have": MOVE_BASE_INV["must_have"],
+                         "retired": {},
+                         "moved": {"gate-ci.yml": {
+                             "b": {"to": "a", "reason": "self-test fixture: folded into a"},
+                             "c": {"to": "ghost", "reason": "self-test fixture: destination is not there"},
+                             "d": {"to": "a"},
+                         }}}
+
+        def commit_files(repo, run, files, message):
+            for rel, body in files:
+                path = os.path.join(repo, rel.replace("/", os.sep))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(body)
+            run("git", "add", "-A")
+            run("git", "commit", "-qm", message)
+
+        wf_dir = f"{WORKFLOW_DIR}/gate-ci.yml"
+        commit_files(mrepo, mrun, [(wf_dir, MOVE_BASE_YML),
+                                   (GATES_FILE, json.dumps(MOVE_BASE_INV))], "base")
+        commit_files(mrepo, mrun, [(wf_dir, MOVE_HEAD_YML),
+                                   (GATES_FILE, json.dumps(MOVE_HEAD_INV))], "head")
+        mbase = mrun("git", "rev-parse", "HEAD~1").stdout.strip()
+        if not mbase:
+            failures.append("self-test could not build a base commit for the moved-job check")
+        else:
+            found = [message for _, _, _, message in gate_problems(mrepo, mbase)]
+            if [m for m in found if "Relocated step" in m]:
+                failures.append("gates detector reported a step whose job moved and carried it over: "
+                                + " || ".join(m for m in found if "Relocated step" in m))
+            if not [m for m in found if "Dropped step" in m]:
+                failures.append("gates detector let a step vanish behind a recorded job move")
+            if not [m for m in found if "ghost" in m]:
+                failures.append("gates detector accepted a move to a destination job that does not exist")
+            if not [m for m in found if "'d' -> 'a' has no reason" in m]:
+                failures.append("gates detector accepted a move recorded without a reason")
+
         # encoding: UTF-16 and a UTF-8 BOM must both be reported.
         with open(os.path.join(repo, "notes.md"), "wb") as handle:
             handle.write("# StreamPay\nsecond line\n".encode("utf-16"))
@@ -764,7 +887,8 @@ def self_test():
             print(f"SELF-TEST FAIL: {message}")
         return 1
     print(f"self-test: {len(FIXTURES) + 2} detectors each fired on their own fixture and stayed "
-          "quiet on a valid one; retired/added steps are handled. The checker is capable of failing.")
+          "quiet on a valid one; retired, added and relocated steps are handled. The checker is "
+          "capable of failing.")
     return 0
 
 
