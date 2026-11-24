@@ -3,6 +3,264 @@
 import { createHttpAgent } from "./http.js";
 import type { DivergenceRecord, WebhookPayload } from "./types.js";
 
+/**
+ * Alert de-duplication and flap suppression knobs.
+ *
+ * A divergence is only paged once it has been observed in `confirmPasses`
+ * consecutive reconciliation passes, so a value that oscillates around the
+ * tolerance boundary (present, clean, present, clean...) never reaches the
+ * threshold and never alerts. Once open, it alerts once and then only repeats
+ * on the `reminderCadenceMs` cadence. It resolves — and its state is dropped —
+ * after `resolvePasses` consecutive clean passes, so a divergence that comes
+ * back afterwards is a fresh alert rather than a suppressed duplicate.
+ */
+export interface AlertDedupeConfig {
+  /** Consecutive passes a divergence must be seen in before the first alert. */
+  confirmPasses: number;
+  /** Consecutive clean passes before an open divergence resolves. */
+  resolvePasses: number;
+  /** How often an open divergence re-alerts. 0 disables reminders. */
+  reminderCadenceMs: number;
+  /** Clock override for tests. */
+  now: () => number;
+}
+
+export type AlertDedupeReason =
+  | "new"
+  | "reminder"
+  | "pending_confirmation"
+  | "duplicate";
+
+export interface AlertDedupeDecision {
+  action: "alert" | "suppress";
+  reason: AlertDedupeReason;
+  key: string;
+  open: boolean;
+  occurrences: number;
+  firstSeenAt: string;
+  suppressedUntil?: string;
+}
+
+export interface OpenDivergenceState {
+  key: string;
+  streamId: string;
+  checkType: string;
+  classification: string;
+  openSince: string;
+  lastAlertAt: string | null;
+  alerts: number;
+}
+
+export const DEFAULT_ALERT_DEDUPE: Omit<AlertDedupeConfig, "now"> = {
+  confirmPasses: 2,
+  resolvePasses: 2,
+  reminderCadenceMs: 30 * 60_000,
+};
+
+/**
+ * Identity of one open divergence: a stream and the check that diverged. A
+ * classification change is a different divergence, so it opens its own alert.
+ */
+export function divergenceAlertKey(
+  d: Pick<DivergenceRecord, "streamId" | "checkType" | "classification">
+): string {
+  return `${d.streamId}:${d.checkType}:${d.classification}`;
+}
+
+interface DivergenceAlertEntry {
+  key: string;
+  streamId: string;
+  checkType: string;
+  classification: string;
+  presentStreak: number;
+  cleanStreak: number;
+  open: boolean;
+  openSince: number | null;
+  lastSeenPass: number;
+  lastAlertAt: number | null;
+  alerts: number;
+}
+
+function positiveInt(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+/**
+ * Per-key alert state machine driven by explicit reconciliation passes.
+ *
+ * Call `beginPass()` once per cycle, `observe()` for every divergence found in
+ * that cycle (webhook dispatch does it), and `endPass()` when the cycle ends so
+ * keys that were not observed count as clean passes.
+ */
+export class DivergenceAlertDedupe {
+  private confirmPasses: number;
+  private resolvePasses: number;
+  private reminderCadenceMs: number;
+  private now: () => number;
+  private entries = new Map<string, DivergenceAlertEntry>();
+  private pass = 0;
+  private passOpen = false;
+
+  constructor(options: Partial<AlertDedupeConfig> = {}) {
+    this.confirmPasses = positiveInt(options.confirmPasses, DEFAULT_ALERT_DEDUPE.confirmPasses);
+    this.resolvePasses = positiveInt(options.resolvePasses, DEFAULT_ALERT_DEDUPE.resolvePasses);
+    this.reminderCadenceMs =
+      options.reminderCadenceMs === undefined || !Number.isFinite(options.reminderCadenceMs)
+        ? DEFAULT_ALERT_DEDUPE.reminderCadenceMs
+        : Math.max(0, Math.floor(options.reminderCadenceMs));
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  /** Open a new reconciliation pass. A pass left open is closed first. */
+  beginPass(): number {
+    if (this.passOpen) this.endPass();
+    this.passOpen = true;
+    this.pass += 1;
+    return this.pass;
+  }
+
+  /**
+   * Close the current pass and age every key that was not observed in it.
+   * Returns the keys that resolved on this pass.
+   */
+  endPass(): string[] {
+    const resolved: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (entry.lastSeenPass === this.pass) continue;
+      entry.presentStreak = 0;
+      entry.cleanStreak += 1;
+      if (!entry.open || entry.cleanStreak >= this.resolvePasses) {
+        this.entries.delete(key);
+        if (entry.open) resolved.push(key);
+      }
+    }
+    this.passOpen = false;
+    return resolved;
+  }
+
+  /** Record one observation and decide whether it should page. */
+  observe(d: DivergenceRecord): AlertDedupeDecision {
+    if (!this.passOpen) this.beginPass();
+
+    const key = divergenceAlertKey(d);
+    const at = this.now();
+    let entry = this.entries.get(key);
+    if (!entry) {
+      entry = {
+        key,
+        streamId: d.streamId,
+        checkType: d.checkType,
+        classification: d.classification,
+        presentStreak: 0,
+        cleanStreak: 0,
+        open: false,
+        openSince: null,
+        // A new entry has not been observed yet in this pass.
+        lastSeenPass: this.pass - 1,
+        lastAlertAt: null,
+        alerts: 0,
+      };
+      this.entries.set(key, entry);
+    }
+
+    // One observation per key per pass: a duplicate inside one cycle must not
+    // count as the second consecutive pass.
+    if (entry.lastSeenPass !== this.pass) {
+      entry.lastSeenPass = this.pass;
+      entry.presentStreak += 1;
+      entry.cleanStreak = 0;
+    }
+
+    const firstSeenAt = new Date(at).toISOString();
+
+    if (!entry.open) {
+      if (entry.presentStreak < this.confirmPasses) {
+        return {
+          action: "suppress",
+          reason: "pending_confirmation",
+          key,
+          open: false,
+          occurrences: entry.presentStreak,
+          firstSeenAt,
+        };
+      }
+      entry.open = true;
+      entry.openSince = at;
+      entry.lastAlertAt = at;
+      entry.alerts = 1;
+      return {
+        action: "alert",
+        reason: "new",
+        key,
+        open: true,
+        occurrences: entry.presentStreak,
+        firstSeenAt,
+      };
+    }
+
+    entry.cleanStreak = 0;
+    if (
+      this.reminderCadenceMs > 0 &&
+      entry.lastAlertAt !== null &&
+      at - entry.lastAlertAt >= this.reminderCadenceMs
+    ) {
+      entry.lastAlertAt = at;
+      entry.alerts += 1;
+      return {
+        action: "alert",
+        reason: "reminder",
+        key,
+        open: true,
+        occurrences: entry.presentStreak,
+        firstSeenAt,
+      };
+    }
+
+    return {
+      action: "suppress",
+      reason: "duplicate",
+      key,
+      open: true,
+      occurrences: entry.presentStreak,
+      firstSeenAt,
+      suppressedUntil:
+        entry.lastAlertAt !== null && this.reminderCadenceMs > 0
+          ? new Date(entry.lastAlertAt + this.reminderCadenceMs).toISOString()
+          : undefined,
+    };
+  }
+
+  /** Currently open divergences, in insertion order. */
+  openDivergences(): OpenDivergenceState[] {
+    const open: OpenDivergenceState[] = [];
+    for (const entry of this.entries.values()) {
+      if (!entry.open || entry.openSince === null) continue;
+      open.push({
+        key: entry.key,
+        streamId: entry.streamId,
+        checkType: entry.checkType,
+        classification: entry.classification,
+        openSince: new Date(entry.openSince).toISOString(),
+        lastAlertAt: entry.lastAlertAt === null ? null : new Date(entry.lastAlertAt).toISOString(),
+        alerts: entry.alerts,
+      });
+    }
+    return open;
+  }
+
+  /** All tracked keys, open or still awaiting confirmation. */
+  size(): number {
+    return this.entries.size;
+  }
+
+  reset(): void {
+    this.entries.clear();
+    this.pass = 0;
+    this.passOpen = false;
+  }
+}
+
 export interface AlertingConfig {
   webhookUrl?: string;
   consistencyWindowMs: number;
@@ -10,6 +268,7 @@ export interface AlertingConfig {
   serviceName: string;
   environment: string;
   reconcilerId: string;
+  dedupe?: Partial<AlertDedupeConfig>;
 }
 
 export interface WebhookDispatchResult {
@@ -24,22 +283,50 @@ export interface ReconcilerAlertingMetrics {
   realDivergenceCount: number;
   webhooksDispatchedCount: number;
   webhooksFailedCount: number;
+  alertsEmittedCount: number;
+  alertsRemindedCount: number;
+  alertsSuppressedDuplicateCount: number;
+  alertsSuppressedPendingCount: number;
 }
 
 export class AlertingService {
   private config: AlertingConfig;
   private webhookUrl?: string;
   private httpAgent = createHttpAgent();
+  private dedupe: DivergenceAlertDedupe;
   private metrics: ReconcilerAlertingMetrics = {
     roundingWithinToleranceCount: 0,
     realDivergenceCount: 0,
     webhooksDispatchedCount: 0,
     webhooksFailedCount: 0,
+    alertsEmittedCount: 0,
+    alertsRemindedCount: 0,
+    alertsSuppressedDuplicateCount: 0,
+    alertsSuppressedPendingCount: 0,
   };
 
   constructor(config: AlertingConfig) {
     this.config = config;
     this.webhookUrl = config.webhookUrl;
+    this.dedupe = new DivergenceAlertDedupe(config.dedupe);
+  }
+
+  /**
+   * Open a reconciliation pass. Every cycle must call this before dispatching
+   * the divergences it found, then `endPass()` once the cycle is done.
+   */
+  beginPass(): void {
+    this.dedupe.beginPass();
+  }
+
+  /** Close the pass; keys unseen this cycle age towards resolution. */
+  endPass(): string[] {
+    return this.dedupe.endPass();
+  }
+
+  /** Open divergences currently tracked by the de-duplicator. */
+  getOpenDivergences(): OpenDivergenceState[] {
+    return this.dedupe.openDivergences();
   }
 
   /**
@@ -72,6 +359,10 @@ export class AlertingService {
       realDivergenceCount: 0,
       webhooksDispatchedCount: 0,
       webhooksFailedCount: 0,
+      alertsEmittedCount: 0,
+      alertsRemindedCount: 0,
+      alertsSuppressedDuplicateCount: 0,
+      alertsSuppressedPendingCount: 0,
     };
   }
 
@@ -95,7 +386,9 @@ export class AlertingService {
 
   /**
    * Dispatch a divergence alert to the webhook target.
-   * Only pages on real divergences (suppresses webhooks for rounding within epsilon).
+   * Only pages on real divergences (suppresses webhooks for rounding within epsilon),
+   * once per open divergence, after it has persisted across the configured
+   * confirmation passes, and re-pages only on the reminder cadence.
    */
   async dispatchWebhook(d: DivergenceRecord): Promise<WebhookDispatchResult> {
     const start = Date.now();
@@ -111,6 +404,42 @@ export class AlertingService {
     }
 
     this.metrics.realDivergenceCount++;
+
+    const decision = this.dedupe.observe(d);
+    if (decision.action === "suppress") {
+      if (decision.reason === "pending_confirmation") {
+        this.metrics.alertsSuppressedPendingCount++;
+        this.log("DEBUG", `Divergence alert pending confirmation for stream ${d.streamId}`, {
+          streamId: d.streamId,
+          checkType: d.checkType,
+          classification: d.classification,
+          passes: decision.occurrences,
+        });
+        return {
+          success: true,
+          message: `Suppressed: pending confirmation (${decision.occurrences} pass(es))`,
+          durationMs: Date.now() - start,
+        };
+      }
+      this.metrics.alertsSuppressedDuplicateCount++;
+      this.log("DEBUG", `Duplicate divergence alert suppressed for stream ${d.streamId}`, {
+        streamId: d.streamId,
+        checkType: d.checkType,
+        classification: d.classification,
+        suppressedUntil: decision.suppressedUntil ?? null,
+      });
+      return {
+        success: true,
+        message: "Suppressed: duplicate open divergence",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    this.metrics.alertsEmittedCount++;
+    if (decision.reason === "reminder") {
+      this.metrics.alertsRemindedCount++;
+    }
+
     const payload = this.buildWebhookPayload(d);
     const payloadStr = JSON.stringify(payload);
 
@@ -119,6 +448,7 @@ export class AlertingService {
       checkType: d.checkType,
       severity: d.severity,
       classification: d.classification,
+      alertReason: decision.reason,
     });
 
     if (!this.webhookUrl) {
@@ -253,6 +583,8 @@ export class AlertingService {
 
   /**
    * Build a structured webhook payload for the indexer dashboard.
+   * The alert envelope is frozen: consumers only depend on `alert.*` and
+   * `metadata.*`, so de-duplication never changes the payload shape.
    */
   private buildWebhookPayload(d: DivergenceRecord): WebhookPayload {
     return {

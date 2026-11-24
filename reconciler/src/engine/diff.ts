@@ -180,18 +180,26 @@ export class ReconciliationEngine {
     
     const ledgerGap = this.calculateLedgerGap(horizonStates, sorobanStates);
     
-    // Dispatch webhooks ONLY for critical real divergences (never for rounding within epsilon)
-    for (const divergence of divergences) {
-      if (
-        divergence.severity === "critical" &&
-        divergence.classification !== "rounding_within_epsilon"
-      ) {
-        await this.alerting.dispatchWebhook(divergence);
-      } else if (divergence.classification === "rounding_within_epsilon") {
-        if (typeof (this.alerting as any).recordRounding === "function") {
-          (this.alerting as any).recordRounding(divergence);
+    // Dispatch webhooks ONLY for critical real divergences (never for rounding within epsilon).
+    // One reconciliation pass is one de-duplication pass: a divergence pages once
+    // it has persisted across the configured confirmation windows, and keys that
+    // are absent this pass age towards resolution.
+    (this.alerting as any).beginPass?.();
+    try {
+      for (const divergence of divergences) {
+        if (
+          divergence.severity === "critical" &&
+          divergence.classification !== "rounding_within_epsilon"
+        ) {
+          await this.alerting.dispatchWebhook(divergence);
+        } else if (divergence.classification === "rounding_within_epsilon") {
+          if (typeof (this.alerting as any).recordRounding === "function") {
+            (this.alerting as any).recordRounding(divergence);
+          }
         }
       }
+    } finally {
+      (this.alerting as any).endPass?.();
     }
     
     // Log reconciliation summary
