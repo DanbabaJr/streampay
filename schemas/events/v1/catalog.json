@@ -20,18 +20,6 @@
       "struct": "AdvanceRepaid"
     },
     {
-      "event_key": "agent_authorized",
-      "fingerprint": "sha256:4dfb405cd582dffeed64b66ee9297ba4aa37f608760db13c5e1ecb8ca4a65f8e",
-      "schema": "events/agent_authorized.json",
-      "struct": "AgentAuthorized"
-    },
-    {
-      "event_key": "agent_revoked",
-      "fingerprint": "sha256:a96acdc2e00253728af03989e1d61ce1f94a32b973a4a4bc9bd3cdaf824c78bf",
-      "schema": "events/agent_revoked.json",
-      "struct": "AgentRevoked"
-    },
-    {
       "event_key": "batch_withdraw_summary",
       "fingerprint": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
       "schema": "events/batch_withdraw_summary.json",
@@ -42,24 +30,6 @@
       "fingerprint": "sha256:8a457d9c30ee67b51c5709af2eb838deacb19d55dc53a93055734d920e77e7d7",
       "schema": "events/beneficiary_enrolled.json",
       "struct": "BeneficiaryEnrolled"
-    },
-    {
-      "event_key": "claim_committed",
-      "fingerprint": "sha256:52f4e724f639ea31aa0ed5b3946bf91d790bfe9c9773b813602d35b00d5b00dc",
-      "schema": "events/claim_committed.json",
-      "struct": "ClaimCommitted"
-    },
-    {
-      "event_key": "claim_expired",
-      "fingerprint": "sha256:34aea123ccd4e8bd4d2e8b2a0fb8c44db4a4ccfbc2a1f13b5da5525fb1baa0d2",
-      "schema": "events/claim_expired.json",
-      "struct": "ClaimExpired"
-    },
-    {
-      "event_key": "claim_revealed",
-      "fingerprint": "sha256:faf5c8cdb3386c933e61c990712b65cfa687892c3e5d4efef033211fb25f029d",
-      "schema": "events/claim_revealed.json",
-      "struct": "ClaimRevealed"
     },
     {
       "event_key": "condition_expired",

@@ -6,24 +6,33 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
-## v1.0.6 — 2026-11-23 (privacy commit-reveal claims #677, `main` repair)
+## v1.0.6 — 2026-11-24 (`main` repair #697: session-key, commit-reveal and insurance surfaces withdrawn)
 
-Three additive events; no existing event changed shape (entry count 64 → 67).
-All three carry the positional topic `stream_id:u64`:
+Eight registry entries disappear (entry count 70 → 62): `AgentAuthorized` and
+`AgentRevoked` (added in v1.0.5 by #660), plus `PolicyViolation`, `PowerAccrued`,
+`PremiumAccrued`, `SenderPolicyRevoked`, `SenderPolicySet` and `VoteCast` (added
+by #626, whose registry regeneration landed without a changelog entry — recorded
+here so the count is auditable).
 
-- `ClaimCommitted`: added event (data `recipient`, `commitment_hash`, `reveal_deadline`) — emitted by `commit_claim` when a recipient books a hashed claim amount behind a safety deposit.
-- `ClaimRevealed`: added event (data `recipient`, `commitment_hash`, `amount`) — emitted by `reveal_claim` when the preimage matches the commitment and the withdrawal settles.
-- `ClaimExpired`: added event (data `sender`, `commitment_hash`, `deposit`) — emitted by `expire_reveal` when the reveal deadline passes and the sender reclaims the deposit.
+A third surface is withdrawn without any registry change: #677's commit-reveal
+claims emitted `ClaimCommitted`, `ClaimRevealed` and `ClaimExpired`, but `main`'s
+registry never carried those entries, so deleting `commit_claim`, `reveal_claim`,
+`expire_reveal` and `get_claim_commitment` removes shapes that were never
+published.
 
-The same repair reverts #626, whose insurance-pool / voting-power surface was
-merged without its `errors.rs` half — `main` did not compile at that merge, so
-no Wasm built from it ever emitted its events, and no release or deployment
-contains them. Six registry entries therefore disappear with the revert:
-`PolicyViolation`, `PowerAccrued`, `PremiumAccrued`, `SenderPolicyRevoked`,
-`SenderPolicySet`, `VoteCast`. No consumer could have depended on them, so no
-v1 → v2 coexistence is needed.
+All three withdrawals share one reason: the tree they produced measured 140,693
+bytes of contract code, past Soroban's 131,072-byte limit, so no build of `main`
+containing them could be deployed and nothing shipped ever emitted these events.
+#626 additionally drained the insurance pool on an unauthenticated path. Each
+removal carries a grant in [removals.json](removals.json); `v0.2.0`/`v0.3.0` hold
+none of these shapes, so no v1 → v2 coexistence is needed. Re-landing any of
+these designs needs its own contract — see
+[docs/WASM_SIZE.md](../../docs/WASM_SIZE.md).
 
 ## v1.0.5 — 2026-11-21 (session-key delegation, #660)
+
+> Superseded by v1.0.6: these two events were withdrawn with the delegated-agent
+> entrypoints that emitted them.
 
 Two additive events; no existing event changed shape (entry count 62 → 64).
 Both carry the positional topics `stream_id:u64` and `agent:Address`:

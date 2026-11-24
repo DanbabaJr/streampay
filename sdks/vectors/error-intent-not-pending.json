@@ -1,7 +1,7 @@
 {
   "schema": "streampay-vector/v1",
   "name": "error-intent-not-pending",
-  "specFingerprint": "0ce656cd8728f998b2eaa2ae77be4337de4c7f6355c74e35c05d2a3c74bbf7c9",
+  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
   "provenance": "schedule_test::execute_twice_reverts_double_execution_race: the second execute_scheduled of an already-executed one-shot intent (the first call succeeded; see execute-scheduled); the same code also rejects executing a cancelled intent.",
   "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAARZXhlY3V0ZV9zY2hlZHVsZWQAAAAAAAACAAAABQAAAAAAAAABAAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQAAAAAAAAAAAAAAARRG0iwAAABAfogESKeobAMobAfNKbovMZFO5RmkK1g2PD19zPeRG3hc/o9HM7wEUyrmnGqcXGvFQRyIKnlmt/QGzbwdl2+dDA==",
   "resultXdr": "AAAAAgAAAAAAAAAT",

@@ -255,6 +255,15 @@ jobs:
         run: |
           wasm=target/wasm32v1-none/release/streampay_contract.wasm
           size=$(stat -c '%s' "$wasm")
+          # Soroban refuses to install contract code above 128 KiB, so a build
+          # past this line can never be deployed at all. This ceiling is written
+          # here independently of WASM_SIZE_BUDGET_KB on purpose: raising that
+          # knob to unblock a merge must not hide a hard protocol wall.
+          protocol_limit=131072
+          if [ "$size" -gt "$protocol_limit" ]; then
+            echo "::error::${wasm} is ${size} bytes, over the Soroban contract-code limit of ${protocol_limit} bytes. This build cannot be deployed; the fix is to remove contract surface (see docs/WASM_SIZE.md), not to raise a budget."
+            exit 1
+          fi
           budget=$(( WASM_SIZE_BUDGET_KB * 1024 ))
           {
             echo "### Contract Wasm size"

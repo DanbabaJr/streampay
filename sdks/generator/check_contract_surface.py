@@ -96,7 +96,6 @@ NON_INVOKABLE = {"__constructor"}
 # safe direction for a client: a mutating call that is simulated still works,
 # while signing a read-only call needlessly asks for a signature.
 READ_ONLY = {
-    "agent_status",
     "available",
     "beneficiary_spend",
     "get_beneficiary_public_key",

@@ -1,5 +1,14 @@
 # Privacy Preserving Payment Claims Analysis
 
+> **Status: design record, not shipped surface.** The commit-reveal entrypoints
+> analysed here (`commit_claim`, `reveal_claim`, `expire_reveal`,
+> `get_claim_commitment`) were merged in #677 and reverted in #697: they and the
+> delegated-agent surface grew the contract Wasm to 140,693 B, past Soroban's
+> 131,072 B code limit, so no build of it could be deployed. This analysis is
+> kept as the design input for a separate privacy contract, which
+> `docs/WASM_SIZE.md` names as the only remaining way to add this size of
+> feature.
+
 ## 1. Overview and Problem Statement
 
 In standard public streaming payments on Stellar Soroban, stream parameters (sender, recipient, token, total deposit, start time, end time) and every individual withdrawal transaction are recorded publicly on ledger. In many business contexts - such as contractor payroll, subscription payouts, or confidential vendor disbursements - public real-time visibility into the exact timing and granular amount of every intermediate withdrawal allows observers to infer cash-flow velocity, vendor burn rates, or sensitive compensation details.

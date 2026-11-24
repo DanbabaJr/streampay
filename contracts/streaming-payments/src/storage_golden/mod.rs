@@ -368,8 +368,6 @@ pub(crate) fn kind_for_key(env: &Env, key_sc: &xdr::ScVal) -> Option<String> {
             DataKey::StreamTemplateLineage(_) => "stream_template_lineage",
             DataKey::StreamHook(_, _) => "stream_hook",
             DataKey::StreamReentrancyLock(_) => "stream_reentrancy_lock",
-            DataKey::AgentAuth(_, _) => "agent_auth",
-            DataKey::AgentCap(_, _) => "agent_cap",
         }));
     }
     if let Ok(pk) = PolicyDataKey::try_from_val(env, key_sc) {

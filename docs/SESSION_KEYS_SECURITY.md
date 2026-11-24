@@ -1,5 +1,13 @@
 # Session Keys Security Model and Incident Response
 
+> **Status: design record, not shipped surface.** The entrypoints described here
+> (`authorize_agent`, `revoke_agent`, `withdraw_delegated`, `agent_status`) were
+> merged in #677 and reverted in #697: together with the commit-reveal surface
+> they pushed the contract Wasm to 140,693 B, past Soroban's 131,072 B code
+> limit, so the build could not be deployed at all. Error codes 126–129 stay
+> reserved and are listed in `surface.rs::RETIRED_CODES`; re-landing this design
+> needs its own contract, per `docs/WASM_SIZE.md`.
+
 ## 1. Overview and Problem Statement
 
 Automated stream withdrawals (e.g. daily sweeping into cold storage, recurring treasury distributions, automated portfolio rebalancing) traditionally require exposing the recipient's primary private key to continuous hot environment execution. If an automation server or cloud agent hosting the private key is breached, the attacker gains unbounded access to all active streams and wallet assets.
