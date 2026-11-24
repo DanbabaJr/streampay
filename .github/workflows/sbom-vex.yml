@@ -402,7 +402,7 @@ jobs:
             cli=sbom/cli.cdx.json \
             python=sbom/python.cdx.json \
             indexer-image=sbom/indexer-image.cdx.json; do
-            [ -f "${pair#*=}" ] && args+=(--sbom "$pair")
+            if [ -f "${pair#*=}" ]; then args+=(--sbom "$pair"); fi
           done
 
           # Published artifacts, each bound to the SBOM that describes it.
@@ -416,19 +416,25 @@ jobs:
             indexer=indexer/package-lock.json \
             sdk=sdks/typescript/package-lock.json \
             cli=tools/streampay-cli/package-lock.json; do
-            [ -f "${pair#*=}" ] && args+=(--lock "$pair")
+            if [ -f "${pair#*=}" ]; then args+=(--lock "$pair"); fi
           done
           # The reverse half of the Cargo.lock check runs against what the Wasm
           # links, not against the whole resolve. Without it the gate refuses to
           # guess, so a missing file here fails the job rather than the check.
-          [ -f sbom/rust/normal-deps.txt ] && args+=(--shipped-graph rust=sbom/rust/normal-deps.txt)
+          if [ -f sbom/rust/normal-deps.txt ]; then
+            args+=(--shipped-graph rust=sbom/rust/normal-deps.txt)
+          fi
 
           # Advisory reports, normalised from the three ecosystems.
-          [ -f advisories/cargo-deny.json ] && args+=(--advisories "cargo-deny=advisories/cargo-deny.json")
+          if [ -f advisories/cargo-deny.json ]; then
+            args+=(--advisories "cargo-deny=advisories/cargo-deny.json")
+          fi
           for report in advisories/npm-audit-*.json; do
-            [ -s "$report" ] && args+=(--advisories "npm-audit=$report")
+            if [ -s "$report" ]; then args+=(--advisories "npm-audit=$report"); fi
           done
-          [ -f advisories/pip-audit.json ] && args+=(--advisories "pip-audit=advisories/pip-audit.json")
+          if [ -f advisories/pip-audit.json ]; then
+            args+=(--advisories "pip-audit=advisories/pip-audit.json")
+          fi
 
           if [ -f security/sbom-baseline.json ]; then
             args+=(--baseline security/sbom-baseline.json)
@@ -439,7 +445,7 @@ jobs:
           args+=(--vex security/vex/vex.json --index-out sbom/sbom-index.json)
           # cargo-deny's own ignore list is a suppression this gate would never
           # see as an advisory, so require each ignored id to be triaged too.
-          [ -f deny.toml ] && args+=(--deny-config deny.toml)
+          if [ -f deny.toml ]; then args+=(--deny-config deny.toml); fi
           python3 scripts/sbom_vex.py "${args[@]}"
 
       - name: Upload SBOMs, advisory reports and the index

@@ -131,7 +131,7 @@ jobs:
           tag="${{ steps.rel.outputs.tag }}"
           args=()
           for f in streampay_contract.wasm SHA256SUMS release-metadata.json UPGRADE_DIGESTS.txt; do
-            [ -f "dist/$f" ] && args+=(--artifact "dist/$f")
+            if [ -f "dist/$f" ]; then args+=(--artifact "dist/$f"); fi
           done
           bash scripts/sigstore_sign.sh \
             --tag "$tag" \
@@ -153,7 +153,7 @@ jobs:
           tag="${{ steps.rel.outputs.tag }}"
           args=()
           for f in streampay_contract.wasm SHA256SUMS release-metadata.json UPGRADE_DIGESTS.txt; do
-            [ -f "dist/$f" ] && args+=(--artifact "dist/$f")
+            if [ -f "dist/$f" ]; then args+=(--artifact "dist/$f"); fi
           done
           bash scripts/verify_sigstore.sh \
             --tag "$tag" \
