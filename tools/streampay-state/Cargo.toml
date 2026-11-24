@@ -32,4 +32,4 @@ anyhow = "1"
 
 [dev-dependencies]
 # Validates emitted verify reports against json-schema-v1.json (tests only).
-jsonschema = { version = "0.33", default-features = false }
+jsonschema = { version = "0.61", default-features = false }
