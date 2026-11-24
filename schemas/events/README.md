@@ -55,21 +55,39 @@ schemas/events/
 
 | Change | Verdict |
 | --- | --- |
-| Remove/rename an event or event key | **FAIL** — breaking |
+| Remove/rename an event or event key | **FAIL** — breaking, unless granted (see below) |
 | Remove/rename/re-type/re-order a **topic** field | **FAIL** — topics are positional XDR |
 | Remove or re-type a **data** field | **FAIL** — consumers decode by name |
 | Re-order data fields | pass — the wire map is symbol-keyed (order-neutral) |
-| Remove/rename/re-type a field of a referenced struct (e.g. `StreamPolicy`) | **FAIL** — every referencing event inherits it |
-| Add a new event | warn + **required CHANGELOG entry** |
-| Add a data field | warn + **required CHANGELOG entry** |
-| Add a topic field | warn + **required CHANGELOG entry** (consumers decode positionally) |
-
 | Remove/rename/re-type a field of a referenced struct (e.g. `StreamPolicy`) | **FAIL** — every referencing event inherits it |
 | Remove/rename a variant of a referenced enum (e.g. `OwnershipRole`) | **FAIL** — events encode the variant symbol on the wire |
 | Add a new event | warn + **required CHANGELOG entry** |
 | Add a data field | warn + **required CHANGELOG entry** |
 | Add a topic field | warn + **required CHANGELOG entry** (consumers decode positionally) |
 | Add an enum variant | warn + **required CHANGELOG entry** |
+
+### When a deletion is allowed
+
+`Remove … = FAIL` protects shapes a consumer can already hold, so the only
+deletion CI can accept is one that never reached a consumer. The gate honours an
+entry in [`removals.json`](removals.json) when **both** hold:
+
+- the shape is absent from `schemas/events/registry.json` at **every release
+  tag** (so nothing published carries it), and
+- the PR that deletes it adds the grant itself — a grant whose shape is still in
+  the registry fails, so permission cannot be parked here for a later PR.
+
+Each entry names one deletable shape and says why it was safe:
+
+```json
+{ "shape": "event:VoteCast", "reason": "…", "pr": "#697" }
+```
+
+Shapes use `event:Name`, `event:Name#data:field`, `event:Name#topic:field`,
+`definition:Name`, `definition:Name#field:f` and
+`definition:Name#variant:V`. A shape that did appear in a release has no hatch:
+it needs the v1 + v2 migration below. Once a granted deletion has merged, its
+entry goes stale (warns, never blocks) and can be cleaned up.
 
 ## Workflow for changing an event
 
