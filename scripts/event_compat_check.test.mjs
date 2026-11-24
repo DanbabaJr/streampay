@@ -12,13 +12,30 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { checkRegistries, REGISTRY_PATH, CHANGELOG_PATH } from "./event_compat_check.mjs";
+import { checkRegistries, REGISTRY_PATH, CHANGELOG_PATH, shapeTokens } from "./event_compat_check.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function registry(events, definitions = {}) {
   return { registry_version: 1, events, definitions };
 }
+
+/** A released baseline where none of these shapes ever shipped. */
+const UNRELEASED = { available: true, tags: [], shapes: new Map() };
+
+/** A released baseline carrying the given shape tokens under the given tags. */
+function releasedWith(entries) {
+  const shapes = new Map();
+  for (const [token, tags] of Object.entries(entries)) shapes.set(token, tags);
+  return { available: true, tags: [...new Set(Object.values(entries).flat())], shapes };
+}
+
+const WITHDRAWN = {
+  event_key: "withdrawn",
+  fingerprint: "sha256:bbb",
+  topics: [{ name: "stream_id", type: "u64" }],
+  data: [],
+};
 
 const STREAM_CREATED = {
   event_key: "stream_created",
@@ -72,6 +89,136 @@ test("removed event fails", () => {
   const head = registry({ StreamCreated: structuredClone(STREAM_CREATED) });
   const { errors } = checkRegistries(base, head, "");
   assert.ok(errors.some((e) => e.includes('REMOVED event Withdrawn (key "withdrawn")')), errors.join("\n"));
+});
+
+test("a granted deletion of an unreleased event passes as a warning", () => {
+  const base = registry({ StreamCreated: structuredClone(STREAM_CREATED), Withdrawn: structuredClone(WITHDRAWN) });
+  const head = registry({ StreamCreated: structuredClone(STREAM_CREATED) });
+  const grant = [{ shape: "event:Withdrawn", reason: "reverted unreleased work", pr: "#1" }];
+  const { errors, warnings } = checkRegistries(base, head, "", {
+    authorizedRemovals: grant,
+    released: UNRELEASED,
+  });
+  assert.deepEqual(errors, [], errors.join("\n"));
+  assert.ok(warnings.some((w) => w.startsWith("AUTHORIZED REMOVAL event:Withdrawn")), warnings.join("\n"));
+});
+
+test("a grant cannot delete a released shape, even with a reason", () => {
+  const base = registry({ StreamCreated: structuredClone(STREAM_CREATED), Withdrawn: structuredClone(WITHDRAWN) });
+  const head = registry({ StreamCreated: structuredClone(STREAM_CREATED) });
+  const { errors } = checkRegistries(base, head, "", {
+    authorizedRemovals: [{ shape: "event:Withdrawn", reason: "we would like to" }],
+    released: releasedWith({ "event:Withdrawn": ["v0.3.0"] }),
+  });
+  assert.ok(
+    errors.some((e) => e.includes("REMOVED event Withdrawn") && e.includes("released in v0.3.0")),
+    errors.join("\n")
+  );
+});
+
+test("an unused grant fails so it cannot be parked for a later PR", () => {
+  const both = registry({ StreamCreated: structuredClone(STREAM_CREATED), Withdrawn: structuredClone(WITHDRAWN) });
+  const stillThere = checkRegistries(both, structuredClone(both), "", {
+    authorizedRemovals: [{ shape: "event:Withdrawn", reason: "deleted by this PR" }],
+    released: UNRELEASED,
+  });
+  assert.ok(
+    stillThere.errors.some((e) => e.includes("UNUSED REMOVAL GRANT event:Withdrawn")),
+    stillThere.errors.join("\n")
+  );
+
+  const notInBase = checkRegistries(
+    registry({ StreamCreated: structuredClone(STREAM_CREATED) }),
+    registry({ StreamCreated: structuredClone(STREAM_CREATED) }),
+    "",
+    {
+      authorizedRemovals: [{ shape: "event:Withdrawn", reason: "deleted by this PR" }],
+      released: UNRELEASED,
+    }
+  );
+  assert.deepEqual(notInBase.errors, [], notInBase.errors.join("\n"));
+  assert.ok(
+    notInBase.warnings.some((w) => w.startsWith("STALE REMOVAL GRANT event:Withdrawn")),
+    notInBase.warnings.join("\n")
+  );
+});
+
+test("a malformed grant fails instead of being skipped", () => {
+  const base = registry({ Withdrawn: structuredClone(WITHDRAWN) });
+  const head = registry({});
+  for (const bad of [
+    { shape: "Withdrawn", reason: "no kind prefix" },
+    { shape: "event:Withdrawn", reason: "   " },
+    { shape: "event:Withdrawn" },
+    { reason: "no shape" },
+  ]) {
+    const { errors } = checkRegistries(base, head, "", {
+      authorizedRemovals: [bad],
+      released: UNRELEASED,
+    });
+    assert.ok(
+      errors.some((e) => e.includes("INVALID schemas/events/removals.json ENTRY")),
+      `${JSON.stringify(bad)} -> ${errors.join("\n")}`
+    );
+  }
+});
+
+test("a shallow clone cannot honor a grant, because it cannot prove anything", () => {
+  const base = registry({ StreamCreated: structuredClone(STREAM_CREATED), Withdrawn: structuredClone(WITHDRAWN) });
+  const head = registry({ StreamCreated: structuredClone(STREAM_CREATED) });
+  const { errors } = checkRegistries(base, head, "", {
+    authorizedRemovals: [{ shape: "event:Withdrawn", reason: "unreleased" }],
+    released: { available: false, tags: [], shapes: new Map() },
+  });
+  assert.ok(
+    errors.some((e) => e.includes("no release tags are readable in this clone")),
+    errors.join("\n")
+  );
+});
+
+test("a granted field deletion inside a surviving definition works", () => {
+  const defs = { StreamPolicy: {
+    fingerprint: "sha256:p1",
+    fields: [{ name: "min_rate", type: "i128" }, { name: "min_duration", type: "u64" }],
+  } };
+  const event = {
+    event_key: "stream_policy_set", fingerprint: "sha256:e1", topics: [],
+    data: [{ name: "new_policy", type: "StreamPolicy" }],
+  };
+  const base = registry({ StreamPolicySet: structuredClone(event) }, defs);
+  const shrunk = structuredClone(defs);
+  shrunk.StreamPolicy.fields = [{ name: "min_rate", type: "i128" }];
+  shrunk.StreamPolicy.fingerprint = "sha256:p2";
+  const head = registry({ StreamPolicySet: { ...event, fingerprint: "sha256:e2" } }, shrunk);
+
+  const ungranted = checkRegistries(base, head, "", { released: UNRELEASED });
+  assert.ok(
+    ungranted.errors.some((e) => e.includes("REMOVED field StreamPolicy.min_duration")),
+    ungranted.errors.join("\n")
+  );
+
+  const granted = checkRegistries(base, head, "", {
+    authorizedRemovals: [{ shape: "definition:StreamPolicy#field:min_duration", reason: "unreleased" }],
+    released: UNRELEASED,
+  });
+  assert.deepEqual(granted.errors, [], granted.errors.join("\n"));
+});
+
+test("shapeTokens names every deletable unit of a registry", () => {
+  const doc = registry({ StreamCreated: structuredClone(STREAM_CREATED) }, {
+    StreamPolicy: { fingerprint: "sha256:p", fields: [{ name: "min_rate", type: "i128" }] },
+    OwnershipRole: { kind: "enum", fingerprint: "sha256:r", variants: ["Sender"] },
+  });
+  assert.deepEqual([...shapeTokens(doc)].sort(), [
+    "definition:OwnershipRole",
+    "definition:OwnershipRole#variant:Sender",
+    "definition:StreamPolicy",
+    "definition:StreamPolicy#field:min_rate",
+    "event:StreamCreated",
+    "event:StreamCreated#data:deposit",
+    "event:StreamCreated#data:sender",
+    "event:StreamCreated#topic:stream_id",
+  ]);
 });
 
 test("renamed event key fails", () => {

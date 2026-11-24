@@ -43,7 +43,6 @@ import {
   Networks,
   nativeToScVal,
   rpc,
-  scValToNative,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -62,7 +61,7 @@ const PASSKEY_CONTRACT_ID =
   process.env.NEXT_PUBLIC_PASSKEY_CONTRACT_ID ?? "";
 const RP_ID =
   process.env.NEXT_PUBLIC_PASSKEY_RP_ID ?? "streampay.app";
-const RP_ORIGIN =
+export const RP_ORIGIN =
   process.env.NEXT_PUBLIC_PASSKEY_ORIGIN ??
   (typeof window !== "undefined" ? window.location.origin : "https://streampay.app");
 
@@ -162,7 +161,7 @@ function bufferToHex(buf: Uint8Array): string {
   return Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function base64urlToBytes(b64: string): Uint8Array {
+export function base64urlToBytes(b64: string): Uint8Array {
   const padded = b64.replace(/-/g, "+").replace(/_/g, "/").padEnd(
     b64.length + (4 - (b64.length % 4)) % 4, "="
   );
@@ -170,7 +169,7 @@ function base64urlToBytes(b64: string): Uint8Array {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-function bytesToBase64url(bytes: Uint8Array): string {
+export function bytesToBase64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")

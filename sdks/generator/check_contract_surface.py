@@ -725,7 +725,17 @@ def parse_contract() -> dict:
 
     functions = parse_functions(lib)
     structs, enums, unions = parse_structs_and_enums(type_sources)
+    # `events.rs` is the canonical home, but a domain module may declare its own
+    # `#[contractevent]` structs. The in-crate registry generator walks every
+    # module, so the spec parser has to see the same set or the two disagree.
     events = parse_events(events_source)
+    seen_events = {event["name"] for event in events}
+    for source in [lib, *sources.values()]:
+        for event in parse_events(source):
+            if event["name"] in seen_events:
+                raise ValueError(f"event `{event['name']}` is declared twice")
+            seen_events.add(event["name"])
+            events.append(event)
     errors = parse_errors(errors_source)
     constants = parse_constants(sources)
 

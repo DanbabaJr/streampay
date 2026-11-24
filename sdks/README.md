@@ -5,11 +5,14 @@ is derived from the contract's own sources.
 
 | Piece | Path | Status |
 |---|---|---|
-| Spec (contract IR) + schema guard | [`spec/`](./spec), [`generator/check_contract_surface.py`](./generator/check_contract_surface.py) | this change |
-| Generator driver | [`generator/generate.py`](./generator/generate.py) | this change |
-| Conformance vectors | [`vectors/`](./vectors) | this change |
-| TypeScript client | [`typescript/`](./typescript) (workspace / `npm pack` only, not on npm) | this change |
-| Rust, Python clients | — | later, one PR per language |
+| Spec (contract IR) + schema guard | [`spec/`](./spec), [`generator/check_contract_surface.py`](./generator/check_contract_surface.py) | shipped |
+| Generator driver | [`generator/generate.py`](./generator/generate.py) | shipped |
+| Conformance vectors | [`vectors/`](./vectors) | shipped |
+| TypeScript client | [`typescript/`](./typescript) (workspace / `npm pack` only, not on npm) | shipped |
+| Rust client (read-only) | [`rust/`](./rust) (crates.io workspace only, not published) | shipped |
+| Python client | [`python/`](./python) (no third-party runtime dependency) | shipped |
+| Cross-SDK live conformance | [`conformance/`](./conformance) | shipped |
+| Mobile (UniFFI Kotlin/Swift) | [`mobile/`](./mobile) | shipped |
 
 Language packages land separately so each one is reviewed against the shared
 spec on its own. This directory holds only what every language shares.
@@ -27,8 +30,13 @@ sdks/
   vectors/*.json                  shared conformance fixtures (tx + events + result)
   vectors/builder/                deterministic fixture builder (Node, stellar-sdk)
   generator/emit_typescript.py    IR -> typescript/src/generated.ts + methods.ts
+  generator/emit_rust.py          IR -> rust/src/generated.rs (read operations only)
   typescript/                     generated bindings + runtime + tests
-  Makefile                        spec / check / vectors
+  rust/                           generated read-only crate + conformance decoder
+  python/                         dependency-free Python client + vector decoder
+  conformance/                    orchestrator, live sandbox, lifecycle tests
+  mobile/                         UniFFI UDL, Rust core, Kotlin/Swift smoke
+  Makefile                        spec / check / vectors / rust / conformance
 ```
 
 ## The contract is the source of truth
@@ -81,17 +89,30 @@ change touches no error code and no `surface.rs` branch.
 
 `generate.py` loads the spec and the error catalog and runs each
 `generator/emit_<language>.py` whose package directory exists. Today that is
-`emit_typescript.py`, which writes `typescript/src/generated.ts` and
-`typescript/src/methods.ts`; the `--check` gate fails when either differs from
-the generator output. Generated files carry the spec fingerprint in their
-header; add behaviour in `client.ts` / `events.ts`, not in generated files.
+`emit_typescript.py` (writing `typescript/src/generated.ts` and
+`typescript/src/methods.ts`) and `emit_rust.py` (writing
+`rust/src/generated.rs`); the `--check` gate fails when any output differs from
+the generator. Generated files carry the spec fingerprint in their header; add
+behaviour in `client.ts` / `events.ts` / `lib.rs`, not in generated files.
 
 ```bash
 make -C sdks spec          # re-derive the spec + fingerprint
 make -C sdks generate      # rewrite generated.ts + methods.ts
 make -C sdks check         # guard + tests + "regeneration is a no-op"
 make -C sdks test          # TypeScript typecheck + tests, incl. every vector
+make -C sdks test-rust     # Rust conformance vectors + doctests
 ```
+
+## Rust client (read-only)
+
+`sdks/rust` is a generated read-only client: it emits only operations the spec
+marks non-mutating, the typed result decoders and the contract error enum. It
+has no signing, submission or write path and is `#![forbid(unsafe_code)]`.
+`ReadClient<T>` works over any `ReadTransport` implementation, so the crate
+makes no network calls itself. `cargo test` decodes the shared read vectors
+(`get-stream-active`, `get-stream-cancelled`, `error-not-active`) and checks the
+`get_stream` argument builder against the signed envelope. See
+[`rust/README.md`](./rust/README.md).
 
 ## Conformance vectors
 
@@ -106,6 +127,33 @@ make -C sdks vectors       # rebuild; CI fails if this changes any file
 ```
 
 See [`vectors/README.md`](./vectors/README.md) for the format.
+
+## Cross-SDK conformance
+
+Every client decodes the same `sdks/vectors/*.json` into one canonical JSON
+shape. [`conformance/orchestrator.py`](./conformance/orchestrator.py) runs the
+TypeScript, Rust and Python clients, requires each payload to match the
+recorded expectation **and** every other client, and pins any failure to
+`client`, `vector`, `ledger` and decoded contract error code:
+
+```bash
+make -C sdks conformance       # offline: build + decode + compare
+make -C sdks conformance-test  # orchestrator lifecycle tests (no Docker/network)
+make -C sdks conformance-live  # ephemeral sandbox, live on-chain bytes
+```
+
+`--live` starts a throwaway `stellar/quickstart` container on a random loopback
+port, funds one identity from `STREAMPAY_SANDBOX_SECRET`, deploys
+`STREAMPAY_WASM`, simulates the read, and feeds the real result XDR through all
+three decoders. Teardown always runs; a dirty container/identity fails the run.
+Per-client and whole-run runtime budgets are hard deadlines. Artifacts
+(`summary.json`, per-client payloads, sandbox state) are written to
+`sdks/conformance/out/` on every run and uploaded on CI failure.
+
+The mobile SDK has its own host-side runner
+(`cargo run --bin streampay-mobile-conformance -- sdks/vectors`) and a binding
+freshness gate that fails when the spec or the error catalog changes without
+regenerating the UDL.
 
 ## Versioning and publishing
 

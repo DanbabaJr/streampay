@@ -1,3 +1,5 @@
+import { MAX_DURATION_SECONDS } from "./protocol-limits.ts";
+
 export interface BatchStreamEntry {
   recipient: string;
   deposit: string;
@@ -5,7 +7,6 @@ export interface BatchStreamEntry {
 }
 
 const I128_MAX = (1n << 127n) - 1n;
-const MAX_DURATION_SECONDS = 3_155_760_000n;
 
 /** Parses address,rate,duration rows; rate is smallest token units per second. */
 export function parseBatchCsv(csv: string): BatchStreamEntry[] {
@@ -41,7 +42,7 @@ export function parseBatchCsv(csv: string): BatchStreamEntry[] {
     if (rate <= 0n || duration <= 0n) {
       throw new Error(`CSV row ${index + 1}: rate and duration must be positive.`);
     }
-    if (duration > MAX_DURATION_SECONDS) {
+    if (duration > BigInt(MAX_DURATION_SECONDS)) {
       throw new Error(`CSV row ${index + 1}: duration exceeds the 100-year stream limit.`);
     }
 

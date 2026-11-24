@@ -6,12 +6,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "fixture:webhook:generate": "tsx scripts/generate-webhook-fixture.ts",
     "start": "npm run build && node dist/index.js",
     "build": "tsc --outDir dist",
-    "test": "npm run build && node --test dist/decoder.test.js dist/store.test.js dist/proof.test.js dist/indexer.test.js dist/registry.test.js dist/webhooks.test.js dist/outbox/outbox.test.js dist/telemetry.test.js dist/rpc-manager.test.js dist/ingest/pipeline.test.js",
-    "test:ingest": "npm run build && node --test dist/ingest/pipeline.test.js",
+    "test": "npm run build && node --test dist",
+    "outbox:replay": "npm run build --silent && node dist/outbox/replay-cli.js",
+    "test:ingest": "npm run build && node --test dist/ingest/pipeline.test.js dist/shutdown.test.js",
     "bench:ingest": "npm run build && node ../perf/harness/indexer_parallel_bench.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "spec:check": "npm run build && node --test dist/contract/openapi.test.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.2.1",

@@ -16,6 +16,8 @@
 //! * `ScheduledIntent` in all four statuses.
 //! * Treasury: charged and partially drained, `StreamFee` records present
 //!   and absent (zero-fee streams).
+//! * Sponsor registration: config, operator key, and period spend.
+//! * Dispute bond: active dispute and persisted dispute count.
 //! * Governance: governor + pending nominee, policy admin after a
 //!   completed handoff (with a cancelled handoff along the way), a removed
 //!   asset, a live queued change, per-token and global stream policies, a
@@ -177,12 +179,17 @@ pub(crate) fn run(baseline_wasm: Option<Vec<u8>>) -> ScenarioOut {
 
     let sender = Address::generate(&env);
     let recipient = Address::generate(&env);
+    let sponsor = Address::generate(&env);
     let governor = Address::generate(&env);
     let (contract, upgrade_target) = deploy(&env, &governor, baseline_wasm.as_ref());
     let client = Client::new(&env, &contract);
 
     mint_and_approve(&env, &token1, &contract, &sender);
     mint_and_approve(&env, &token2, &contract, &sender);
+    // The dispute recipient also needs a token balance and contract allowance
+    // when `raise_dispute` pulls the economic bond.
+    StellarAssetClient::new(&env, &token1).mint(&recipient, &MINT);
+    StellarAssetClient::new(&env, &token1).approve(&recipient, &contract, &MINT, &1_000_000u32);
 
     let other_recipient = Address::generate(&env);
     let keeper = Address::generate(&env);
@@ -316,13 +323,27 @@ pub(crate) fn run(baseline_wasm: Option<Vec<u8>>) -> ScenarioOut {
 
     // -- T0+3DAY: execute both live intents (i2 keeps one occurrence
     //    pending), take a partial withdrawal, and let the sender cancel the
-    //    stream its recipient may not.
+    //    stream its recipient may not. Register a sponsored budget and open
+    //    a dispute so sponsor and dispute record families are pinned.
     set_time(&env, T0 + 3 * DAY);
     let s4 = stepv!(client.execute_scheduled(&i1, &keeper));
     let s5 = stepv!(client.execute_scheduled(&i2, &keeper));
     let partial = client.available(&s1) / 3;
     step!(client.withdraw(&s1, &partial));
     step!(client.cancel_stream(&sender, &s2));
+    if !replay {
+        let operator_key = BytesN::from_array(&env, &[0x11u8; 32]);
+        step!(client.register_sponsor(
+            &sponsor,
+            &token1,
+            &2_000_000_000i128,
+            &500_000_000i128,
+            &DAY,
+            &operator_key,
+        ));
+        // Leave the config paused so active=false is meaningful in the golden.
+        step!(client.set_sponsor_active(&sponsor, &false));
+    }
 
     // -- T0+7DAY: stream 3 has passed its end time, so `withdraw_max`
     //    drains it to Depleted; the batch entrypoint adds a fee-charged
@@ -357,6 +378,9 @@ pub(crate) fn run(baseline_wasm: Option<Vec<u8>>) -> ScenarioOut {
     //    policy handoff is proposed, cancelled, re-proposed and accepted.
     set_time(&env, T0 + 11 * DAY);
     step!(client.top_up(&s1, &(DEPOSIT / 5)));
+    if !replay {
+        step!(client.raise_dispute(&s1));
+    }
     step!(client.policy_propose_handoff(&new_admin));
     step!(client.policy_cancel_handoff());
     step!(client.policy_propose_handoff(&new_admin));

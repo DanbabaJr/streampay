@@ -26,11 +26,16 @@ import {
   xdr,
   type Keypair,
   type Transaction,
-} from '@stellar/stellar-sdk';
+} from "@stellar/stellar-sdk";
 
-import { rentStroops, extensionOverheadStroops, stroopsToXlm } from './rent.js';
-import type { EntryClass } from './cliff.js';
-import type { ExtenderSection } from './config.js';
+import {
+  codeRentStroops,
+  rentStroops,
+  extensionOverheadStroops,
+  stroopsToXlm,
+} from "./rent.js";
+import type { EntryClass } from "./cliff.js";
+import type { ExtenderSection } from "./config.js";
 
 export interface ExtendTarget {
   id: string;
@@ -58,10 +63,10 @@ export interface ExtensionPlan {
 export class ExtenderDisabledError extends Error {
   constructor() {
     super(
-      'the extender is disabled (extender.enabled = false). The core sentinel is read-only by design; ' +
-        'enable the extender and provide its key deliberately.',
+      "the extender is disabled (extender.enabled = false). The core sentinel is read-only by design; " +
+        "enable the extender and provide its key deliberately.",
     );
-    this.name = 'ExtenderDisabledError';
+    this.name = "ExtenderDisabledError";
   }
 }
 
@@ -76,7 +81,11 @@ export function buildExtensionPlan(
   feePer1Kb: bigint = 1000n,
 ): ExtensionPlan {
   const below = targets
-    .filter((t) => t.remainingLedgers <= cfg.thresholdLedgers && t.remainingLedgers < cfg.extendTo)
+    .filter(
+      (t) =>
+        t.remainingLedgers <= cfg.thresholdLedgers &&
+        t.remainingLedgers < cfg.extendTo,
+    )
     .sort((a, b) => a.remainingLedgers - b.remainingLedgers);
 
   const maxPerTx = Math.max(1, cfg.maxEntriesPerTx);
@@ -85,12 +94,8 @@ export function buildExtensionPlan(
     const group = below.slice(i, i + maxPerTx);
     let rent = 0n;
     for (const t of group) {
-      const ledgersAdded = BigInt(Math.max(0, cfg.extendTo - t.remainingLedgers));
-      const size = BigInt(t.sizeBytes ?? 400);
-      rent += rentStroops(size, ledgersAdded, feePer1Kb);
+      rent += estimateExtensionCost(t, cfg, feePer1Kb);
     }
-    // Each batch pays one TTL-entry write + per-entry write fee on submission.
-    rent += extensionOverheadStroops() * BigInt(group.length);
     batches.push({ targets: group, estimatedRentStroops: rent });
   }
 
@@ -99,7 +104,10 @@ export function buildExtensionPlan(
     thresholdLedgers: cfg.thresholdLedgers,
     batches,
     healthy: targets.length - below.length,
-    estimatedTotalStroops: batches.reduce((sum, b) => sum + b.estimatedRentStroops, 0n),
+    estimatedTotalStroops: batches.reduce(
+      (sum, b) => sum + b.estimatedRentStroops,
+      0n,
+    ),
   };
 }
 
@@ -110,9 +118,12 @@ export function buildExtendTransaction(
   extendTo: number,
   networkPassphrase: string,
 ): Transaction {
-  const keys = keyBase64s.map((b64) => xdr.LedgerKey.fromXDR(b64, 'base64'));
+  const keys = keyBase64s.map((b64) => xdr.LedgerKey.fromXDR(b64, "base64"));
   const sorobanData = new SorobanDataBuilder().setReadOnly(keys).build();
-  const builder = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase })
+  const builder = new TransactionBuilder(source, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
     .addOperation(Operation.extendFootprintTtl({ extendTo }))
     .setTimeout(30);
   builder.setSorobanData(sorobanData);
@@ -142,11 +153,24 @@ export interface ServerLike {
  * sentinel's scan path never constructs this class.
  */
 export class SdkExtendSubmitter implements ExtendSubmitter {
-  constructor(private readonly opts: { networkPassphrase: string; server: ServerLike; keypair: Keypair }) {}
+  constructor(
+    private readonly opts: {
+      networkPassphrase: string;
+      server: ServerLike;
+      keypair: Keypair;
+    },
+  ) {}
 
   async submit(keyBase64s: string[], extendTo: number): Promise<SubmitResult> {
-    const account = await this.opts.server.getAccount(this.opts.keypair.publicKey());
-    const tx = buildExtendTransaction(account, keyBase64s, extendTo, this.opts.networkPassphrase);
+    const account = await this.opts.server.getAccount(
+      this.opts.keypair.publicKey(),
+    );
+    const tx = buildExtendTransaction(
+      account,
+      keyBase64s,
+      extendTo,
+      this.opts.networkPassphrase,
+    );
     const prepared = await this.opts.server.prepareTransaction(tx);
     // `prepareTransaction` runs simulation and fills in the resource fee; read
     // it back so the budget meter tracks real spend. Falls back to the plan's
@@ -179,11 +203,13 @@ export function readOnlyFootprint(prepared: Transaction): xdr.LedgerKey[] {
 }
 
 /** Soroban data (resources + fee) carried in a v1 envelope's transaction ext. */
-function sorobanDataOf(prepared: Transaction): xdr.SorobanTransactionData | null {
-  const env = xdr.TransactionEnvelope.fromXDR(prepared.toXDR(), 'base64');
-  if (env.type !== 'envelopeTypeTx') return null;
+function sorobanDataOf(
+  prepared: Transaction,
+): xdr.SorobanTransactionData | null {
+  const env = xdr.TransactionEnvelope.fromXDR(prepared.toXDR(), "base64");
+  if (env.type !== "envelopeTypeTx") return null;
   const ext = env.v1.tx.ext;
-  return ext.type === 'sorobanData' ? ext.sorobanData : null;
+  return ext.type === "sorobanData" ? ext.sorobanData : null;
 }
 
 /** Spend meter persisted between runs so the monthly budget actually binds. */
@@ -198,14 +224,14 @@ export function newSpenderState(now: Date = new Date()): SpenderState {
 }
 
 export function monthKey(now: Date): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export interface ExtensionRunResult {
   dryRun: boolean;
   submitted: { batch: ExtensionBatch; result: SubmitResult }[];
   planned: ExtensionBatch[];
-  stoppedBy: 'budget' | 'submission-failed' | null;
+  stoppedBy: "budget" | "submission-failed" | null;
   budgetStroops: bigint;
   spentStroops: bigint;
   failedBatches?: { batch: ExtensionBatch; error: string }[];
@@ -251,25 +277,33 @@ export class Extender {
 
     const dryRun = this.opts.dryRun ?? this.cfg.dryRun;
     const budgetStroops = xlmToStroops(this.cfg.monthlyBudgetXlm);
-    const submitted: ExtensionRunResult['submitted'] = [];
+    const submitted: ExtensionRunResult["submitted"] = [];
     const planned: ExtensionBatch[] = [];
     const failedBatches: { batch: ExtensionBatch; error: string }[] = [];
-    let stoppedBy: ExtensionRunResult['stoppedBy'] = null;
-    const isolateFailures = this.opts.isolateFailures ?? (this.cfg as any).isolateFailures ?? false;
+    let stoppedBy: ExtensionRunResult["stoppedBy"] = null;
+    const isolateFailures =
+      this.opts.isolateFailures ?? (this.cfg as any).isolateFailures ?? false;
     const quarantineThreshold = this.opts.quarantineThreshold ?? 3;
 
-    const ok = new Set(['pending', 'duplicate', 'success', 'tryagainlater']);
+    const ok = new Set(["pending", "duplicate", "success", "tryagainlater"]);
     for (let i = 0; i < plan.batches.length; i++) {
       const batch = plan.batches[i] as ExtensionBatch;
-      const account = (batch as any).account ?? batch.targets[0]?.id ?? `batch-${i}`;
+      const account =
+        (batch as any).account ?? batch.targets[0]?.id ?? `batch-${i}`;
 
       if (this.quarantined.has(account)) {
-        failedBatches.push({ batch, error: `Account ${account} is in poison quarantine` });
+        failedBatches.push({
+          batch,
+          error: `Account ${account} is in poison quarantine`,
+        });
         continue;
       }
 
-      if (this.spender.spentStroops + batch.estimatedRentStroops > budgetStroops) {
-        stoppedBy = 'budget';
+      if (
+        this.spender.spentStroops + batch.estimatedRentStroops >
+        budgetStroops
+      ) {
+        stoppedBy = "budget";
         planned.push(...plan.batches.slice(i));
         break;
       }
@@ -291,11 +325,14 @@ export class Extender {
           if (failures >= quarantineThreshold) {
             this.quarantined.add(account);
           }
-          failedBatches.push({ batch, error: `Submission returned status: ${result.status}` });
+          failedBatches.push({
+            batch,
+            error: `Submission returned status: ${result.status}`,
+          });
 
           if (!isolateFailures) {
             // Non-isolated mode: halt queue
-            stoppedBy = 'submission-failed';
+            stoppedBy = "submission-failed";
             break;
           }
           // Failure isolation: log and continue to remaining batches
@@ -304,7 +341,8 @@ export class Extender {
 
         // Success: reset retry ladder for account
         this.failureLadder.delete(account);
-        this.spender.spentStroops += result.feeStroops ?? batch.estimatedRentStroops;
+        this.spender.spentStroops +=
+          result.feeStroops ?? batch.estimatedRentStroops;
         submitted.push({ batch, result });
       } catch (err: any) {
         const failures = (this.failureLadder.get(account) ?? 0) + 1;
@@ -315,7 +353,7 @@ export class Extender {
         failedBatches.push({ batch, error: String(err?.message ?? err) });
 
         if (!isolateFailures) {
-          stoppedBy = 'submission-failed';
+          stoppedBy = "submission-failed";
           break;
         }
       }
@@ -335,11 +373,93 @@ export class Extender {
 }
 
 export function xlmToStroops(xlm: string): bigint {
-  const [whole = '0', frac = ''] = xlm.trim().split('.');
-  const fracPadded = (frac + '0000000').slice(0, 7);
-  return BigInt(whole || '0') * 10_000_000n + BigInt(fracPadded || '0');
+  const [whole = "0", frac = ""] = xlm.trim().split(".");
+  const fracPadded = (frac + "0000000").slice(0, 7);
+  return BigInt(whole || "0") * 10_000_000n + BigInt(fracPadded || "0");
 }
 
 export function formatPlanBudget(plan: ExtensionPlan): string {
   return `${stroopsToXlm(plan.estimatedTotalStroops)} XLM across ${plan.batches.length} tx`;
+}
+
+export function estimateExtensionCost(
+  target: ExtendTarget,
+  cfg: ExtenderSection,
+  feePer1Kb: bigint,
+): bigint {
+  const ledgersAdded = BigInt(
+    Math.max(0, cfg.extendTo - target.remainingLedgers),
+  );
+  const size = BigInt(target.sizeBytes ?? 400);
+  const rent =
+    target.cls === "code"
+      ? codeRentStroops(size, ledgersAdded, feePer1Kb)
+      : rentStroops(size, ledgersAdded, feePer1Kb);
+  return rent + extensionOverheadStroops();
+}
+
+export interface DryRunReport {
+  contractId: string;
+  atLedger: number;
+  dryRun: true;
+  assumptions: {
+    feeModel: "rs-soroban-env fees.rs rent fee";
+    feePer1KbStroops: string;
+    rentConstantsDocumentation: "docs/FOOTPRINT.md";
+  };
+  entries: {
+    id: string;
+    cls: EntryClass;
+    currentTtlLedgers: number;
+    requiredTtlLedgers: number;
+    estimatedRentStroops: string;
+  }[];
+  healthy: number;
+  estimatedTotalStroops: string;
+  transactions: {
+    operation: "ExtendFootprintTTL";
+    ledgerKeys: string[];
+    extendTo: number;
+    estimatedRentStroops: string;
+  }[];
+}
+
+export function buildDryRunReport(
+  contractId: string,
+  atLedger: number,
+  plan: ExtensionPlan,
+  feePer1Kb: bigint,
+  cfg: ExtenderSection,
+): DryRunReport {
+  return {
+    contractId,
+    atLedger,
+    dryRun: true,
+    assumptions: {
+      feeModel: "rs-soroban-env fees.rs rent fee",
+      feePer1KbStroops: feePer1Kb.toString(),
+      rentConstantsDocumentation: "docs/FOOTPRINT.md",
+    },
+    entries: plan.batches.flatMap((batch) =>
+      batch.targets.map((target) => ({
+        id: target.id,
+        cls: target.cls,
+        currentTtlLedgers: target.remainingLedgers,
+        requiredTtlLedgers: plan.extendTo,
+        estimatedRentStroops: estimateExtensionCost(
+          target,
+          cfg,
+          feePer1Kb,
+        ).toString(),
+      })),
+    ),
+    healthy: plan.healthy,
+    estimatedTotalStroops: plan.estimatedTotalStroops.toString(),
+    transactions: plan.batches.map((batch) => ({
+      operation: "ExtendFootprintTTL",
+      ledgerKeys: batch.targets.map((target) => target.keyB64),
+      extendTo: plan.extendTo,
+      estimatedRentStroops: batch.estimatedRentStroops.toString(),
+    })),
+  };
 }

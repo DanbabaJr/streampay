@@ -91,8 +91,12 @@ mod differential_harness;
 mod differential_test;
 #[cfg(test)]
 mod error_surface_test;
+#[cfg(test)]
+mod oracle_staleness_test;
 
 mod dispute;
+#[cfg(test)]
+mod dispute_lifecycle_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
@@ -100,8 +104,14 @@ mod events;
 mod governance;
 #[cfg(test)]
 mod governance_test;
-mod oracle;
+pub mod hooks;
+#[cfg(test)]
+mod hostile_token_fuzz_test;
+pub mod oracle;
 mod policy;
+pub mod receivables;
+#[cfg(test)]
+mod receivables_conditions_templates_hooks_test;
 mod schedule;
 #[cfg(test)]
 mod schedule_test;
@@ -116,6 +126,7 @@ mod sponsor_test;
 mod storage_golden;
 mod stream;
 pub mod surface;
+pub mod templates;
 #[cfg(test)]
 mod test;
 #[cfg(any(test, feature = "testutils"))]
@@ -123,9 +134,14 @@ pub mod test_client;
 mod treasury;
 pub mod verification;
 
+pub use hooks::{HookEventClass, HookFailurePolicy, StreamHook};
+pub use oracle::{ConditionPredicate, ConditionStatus, StreamCondition};
+pub use receivables::{Advance, ReceivablesConfig};
+pub use templates::{StreamTemplate, TemplateLineage};
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, token::TokenClient, Address, BytesN, ConversionError,
-    Env, Error as SorobanError, InvokeError, MuxedAddress, Vec,
+    Env, Error as SorobanError, InvokeError, MuxedAddress, Symbol, Vec,
 };
 
 use surface::Branch;
@@ -136,18 +152,20 @@ pub use dispute::{
 };
 pub use errors::StreamError;
 pub use events::{
-    BatchWithdrawSummary, BeneficiaryEnrolled, ContractFrozenStateChanged, ContractUpgraded,
-    DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
+    AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, BatchWithdrawSummary, BeneficiaryEnrolled,
+    ConditionExpired, ConditionMet, ConditionRegistered, ContractFrozenStateChanged,
+    ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
     GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
-    GovernanceActionVetoed, GovernanceSignersSet, OperatorKeyRotated, OracleConfigUpdated,
-    OracleStaleFallback, OracleTimeReported, OwnershipAccepted, OwnershipProposed,
-    PolicyAssetExecuted, PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled,
-    PolicyHandoffProposed, PolicyInitialized, RateChangeAccepted, RateChangeProposed,
-    ScheduledIntentCancelled, ScheduledIntentExpired, ScheduledStreamExecuted,
-    SenderTransferExpired, SenderTransferProposed, SenderTransferred, SponsorActiveSet,
-    SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled, StreamCreated, StreamPaused,
-    StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged, StreamResumed,
-    StreamScheduled, StreamToppedUp, StreamsCreated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked, HookRegistered,
+    OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback, OracleTimeReported,
+    OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted, PolicyAssetQueued,
+    PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed, PolicyInitialized,
+    RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired,
+    ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
+    SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
+    StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
+    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
+    TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -1286,8 +1304,14 @@ impl StreamingPayments {
     #[cfg_attr(not(target_family = "wasm"), doc = " `docs/ARCHITECTURE.md` §6.1.")]
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
         Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
         if amount <= 0 {
             return Err(surface::reject(Branch::WithdrawAmountNonPositive));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
         }
         let mut s = Self::authorize_withdrawal(&env, stream_id)?;
 
@@ -1340,6 +1364,12 @@ impl StreamingPayments {
     )]
     pub fn withdraw_max(env: Env, stream_id: u64) -> Result<i128, StreamError> {
         Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
+        if oracle::is_release_gated(&env, stream_id) {
+            return Err(surface::reject(Branch::ConditionNotMet));
+        }
         let mut s = Self::authorize_withdrawal(&env, stream_id)?;
         Self::settle_accrued(&env, stream_id, &mut s)
     }
@@ -1739,14 +1769,39 @@ impl StreamingPayments {
         doc = " moving tokens, so a reentrant token callback can never double-spend."
     )]
     fn pay_out(env: &Env, s: &mut Stream, amount: i128) -> Result<(), StreamError> {
+        let (net_recipient, intercept_lender, lender_opt) =
+            receivables::intercept_repayment(env, s.id, amount);
+
         Self::record_payout(env, s, amount)?;
-        push(
-            env,
-            &s.token,
-            &stream::muxed(&s.recipient),
-            amount,
-            Branch::RecipientPayoutFailed,
-        )
+
+        if intercept_lender > 0 {
+            if let Some(lender) = lender_opt {
+                push(
+                    env,
+                    &s.token,
+                    &stream::muxed(&lender),
+                    intercept_lender,
+                    Branch::RecipientPayoutFailed,
+                )?;
+            }
+        }
+
+        if net_recipient > 0 {
+            push(
+                env,
+                &s.token,
+                &stream::muxed(&s.recipient),
+                net_recipient,
+                Branch::RecipientPayoutFailed,
+            )?;
+        }
+
+        hooks::dispatch_hook(env, s.id, HookEventClass::Withdraw, amount)?;
+        if s.status == StreamStatus::Depleted {
+            hooks::dispatch_hook(env, s.id, HookEventClass::Complete, amount)?;
+        }
+
+        Ok(())
     }
 
     /// The checks-effects half of [`Self::pay_out`]: books `amount` as withdrawn
@@ -1885,6 +1940,9 @@ impl StreamingPayments {
     )]
     pub fn cancel_stream(env: Env, caller: Address, stream_id: u64) -> Result<(), StreamError> {
         Self::require_not_frozen(&env)?;
+        if hooks::is_stream_locked(&env, stream_id) {
+            return Err(surface::reject(Branch::HookReentrancyBlocked));
+        }
         caller.require_auth();
 
         let mut s = stream::get_stream(&env, stream_id)?;
@@ -1938,14 +1996,30 @@ impl StreamingPayments {
         if recipient_amount > 0 || sender_amount > 0 {
             let current_contract = env.current_contract_address();
             if recipient_amount > 0 {
-                push_from(
-                    &env,
-                    &s.token,
-                    &current_contract,
-                    &stream::muxed(&s.recipient),
-                    recipient_amount,
-                    Branch::RecipientPayoutFailed,
-                )?;
+                let (net_recipient, intercept_lender, lender_opt) =
+                    receivables::liquidate_on_cancellation(&env, stream_id, recipient_amount);
+                if intercept_lender > 0 {
+                    if let Some(lender) = lender_opt {
+                        push_from(
+                            &env,
+                            &s.token,
+                            &current_contract,
+                            &stream::muxed(&lender),
+                            intercept_lender,
+                            Branch::RecipientPayoutFailed,
+                        )?;
+                    }
+                }
+                if net_recipient > 0 {
+                    push_from(
+                        &env,
+                        &s.token,
+                        &current_contract,
+                        &stream::muxed(&s.recipient),
+                        net_recipient,
+                        Branch::RecipientPayoutFailed,
+                    )?;
+                }
             }
             if sender_amount > 0 {
                 push_from(
@@ -1958,6 +2032,8 @@ impl StreamingPayments {
                 )?;
             }
         }
+
+        hooks::dispatch_hook(&env, stream_id, HookEventClass::Cancel, recipient_amount)?;
 
         Ok(())
     }
@@ -3505,6 +3581,9 @@ impl StreamingPayments {
     )]
     pub fn available(env: Env, stream_id: u64) -> Result<i128, StreamError> {
         let s = stream::get_stream(&env, stream_id)?;
+        if oracle::is_release_gated(&env, stream_id) {
+            return Ok(0);
+        }
         let resolved = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle());
         stream::available_amount_with_plan(&env, &s, resolved.timestamp)
     }
@@ -5399,5 +5478,187 @@ impl StreamingPayments {
             .instance()
             .get(&governance::GovernanceDataKey::ProposalCount)
             .unwrap_or(0)
+    }
+
+    // ----------------------------------------------------------- receivables
+    pub fn set_receivables_config(
+        env: Env,
+        caller: Address,
+        max_ltv_bps: u32,
+        fee_bps: u32,
+    ) -> Result<(), StreamError> {
+        treasury::require_governor(&env, &caller)?;
+        receivables::set_receivables_config(&env, max_ltv_bps, fee_bps)
+    }
+
+    pub fn get_receivables_config(env: Env) -> ReceivablesConfig {
+        receivables::get_receivables_config(&env)
+    }
+
+    pub fn draw_advance(
+        env: Env,
+        stream_id: u64,
+        lender: Address,
+        amount: i128,
+        repayment_bps: u32,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        receivables::draw_advance(&env, stream_id, lender, amount, repayment_bps)
+    }
+
+    pub fn repay_advance(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        amount: i128,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        receivables::repay_advance(&env, caller, stream_id, amount)
+    }
+
+    pub fn get_advance(env: Env, stream_id: u64) -> Option<Advance> {
+        receivables::get_advance(&env, stream_id)
+    }
+
+    // --------------------------------------------------- conditional streams
+    pub fn register_condition(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        predicate: ConditionPredicate,
+        publishers: Vec<Address>,
+        threshold: u32,
+        timeout: u64,
+    ) -> Result<u64, StreamError> {
+        Self::require_not_frozen(&env)?;
+        oracle::register_condition(
+            &env, caller, stream_id, predicate, publishers, threshold, timeout,
+        )
+    }
+
+    pub fn attest_condition(
+        env: Env,
+        publisher: Address,
+        stream_id: u64,
+        attestation: ConditionPredicate,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        oracle::attest_condition(&env, publisher, stream_id, attestation)
+    }
+
+    pub fn get_condition(env: Env, stream_id: u64) -> Option<StreamCondition> {
+        oracle::get_condition(&env, stream_id)
+    }
+
+    pub fn is_release_gated(env: Env, stream_id: u64) -> bool {
+        oracle::is_release_gated(&env, stream_id)
+    }
+
+    // ------------------------------------------------------ stream templates
+    pub fn approve_template(
+        env: Env,
+        caller: Address,
+        template_id: u32,
+        version: u32,
+        template: StreamTemplate,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        templates::approve_template(&env, caller, template_id, version, template)
+    }
+
+    pub fn instantiate_template(
+        env: Env,
+        template_id: u32,
+        version: u32,
+        sender: Address,
+        recipient: Address,
+        deposit: i128,
+        start_time: u64,
+    ) -> Result<u64, StreamError> {
+        Self::require_not_frozen(&env)?;
+        let template = templates::get_template(&env, template_id, version)
+            .ok_or_else(|| surface::reject(Branch::TemplateNotFound))?;
+
+        if deposit < template.min_deposit || deposit > template.max_deposit {
+            return Err(surface::reject(Branch::TemplateValidationFailed));
+        }
+
+        let now = env.ledger().timestamp();
+        let effective_start = if start_time == 0 { now } else { start_time };
+        let end_time = effective_start
+            .checked_add(template.duration)
+            .ok_or_else(|| surface::reject(Branch::CreateDurationTooLong))?;
+
+        let stream_id = Self::create_stream_with_oracle(
+            env.clone(),
+            sender.clone(),
+            recipient.clone(),
+            template.token.clone(),
+            deposit,
+            effective_start,
+            end_time,
+            template.cancelable,
+            template.use_oracle,
+        )?;
+
+        templates::record_lineage(&env, stream_id, template_id, version);
+
+        #[cfg(test)]
+        cei_trace::record("event TemplateInstantiated");
+        TemplateInstantiated {
+            template_id,
+            version,
+            stream_id,
+            sender,
+            recipient,
+            deposit,
+        }
+        .publish(&env);
+
+        Ok(stream_id)
+    }
+
+    pub fn get_template(env: Env, template_id: u32, version: u32) -> Option<StreamTemplate> {
+        templates::get_template(&env, template_id, version)
+    }
+
+    pub fn get_stream_lineage(env: Env, stream_id: u64) -> Option<TemplateLineage> {
+        templates::get_stream_lineage(&env, stream_id)
+    }
+
+    // ------------------------------------------------------ integrator hooks
+    pub fn register_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+        callback_contract: Address,
+        selector: Symbol,
+        failure_policy: HookFailurePolicy,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        hooks::register_hook(
+            &env,
+            caller,
+            stream_id,
+            event_class,
+            callback_contract,
+            selector,
+            failure_policy,
+        )
+    }
+
+    pub fn unregister_hook(
+        env: Env,
+        caller: Address,
+        stream_id: u64,
+        event_class: HookEventClass,
+    ) -> Result<(), StreamError> {
+        Self::require_not_frozen(&env)?;
+        hooks::unregister_hook(&env, caller, stream_id, event_class)
+    }
+
+    pub fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook> {
+        hooks::get_hook(&env, stream_id, event_class)
     }
 }

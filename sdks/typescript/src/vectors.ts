@@ -18,6 +18,8 @@ import {
   contractErrorName,
   decodeGetStreamResult,
   decodeStreamPayEvent,
+  decodeWithdrawEntry,
+  decodeWithdrawAllResult,
   type StreamPayEvent,
 } from "./generated.js";
 
@@ -68,13 +70,38 @@ function canonicalValue(value: xdr.ScVal, type: string): Canonical {
     const inner = type.slice(4);
     const native = scValToNative(value);
     if (!Array.isArray(native)) throw new Error(`${type}: expected an array`);
-    // Re-decode each element through its ScVal counterpart is not necessary:
-    // integers are the only vector type today.
     return native.map((item) => {
+      if (inner === "WithdrawEntry") {
+        const decoded = decodeWithdrawEntry(item);
+        return {
+          stream_id: decoded.streamId.toString(),
+          amount: decoded.amount.toString(),
+          code: String(decoded.code),
+        };
+      }
       if (inner === "u64" || inner === "i128") return String(item);
       if (inner === "address") return asString(item, inner);
       throw new Error(`unsupported vec element type ${inner}`);
     });
+  }
+  if (type === "WithdrawAllResult") {
+    const decoded = decodeWithdrawAllResult(scValToNative(value));
+    return {
+      transfers: decoded.transfers.map((transfer) => ({
+        token: transfer.token,
+        amount: transfer.amount.toString(),
+      })),
+      successful_stream_ids: decoded.successfulStreamIds.map((id) => id.toString()),
+      failed_streams: decoded.failedStreams.map((failure) => ({
+        stream_id: failure.streamId.toString(),
+        error_code: String(failure.errorCode),
+      })),
+      next_offset: decoded.nextOffset === null ? null : String(decoded.nextOffset),
+    };
+  }
+  if (type.startsWith("option:")) {
+    const native = scValToNative(value);
+    return native === undefined ? null : native;
   }
   const native = scValToNative(value);
   switch (type) {
@@ -119,6 +146,20 @@ function canonicalEvent(event: StreamPayEvent): Canonical {
           withdrawn_total: event.withdrawnTotal.toString(),
         },
       };
+    case "BatchWithdrawSummary":
+      return {
+        ...base,
+        topics: { recipient: event.recipient },
+        data: {
+          settled: event.settled.map((outcome) => ({
+            stream_id: outcome.streamId.toString(),
+            amount: outcome.amount.toString(),
+          })),
+          total: event.total.toString(),
+          requested: String(event.requested),
+          skipped: String(event.skipped),
+        },
+      };
     case "StreamCancelled":
       return {
         ...base,
@@ -139,6 +180,48 @@ function canonicalEvent(event: StreamPayEvent): Canonical {
           new_deposit: event.newDeposit.toString(),
         },
       };
+    case "StreamScheduled":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          sender: event.sender,
+          recipient: event.recipient,
+          token: event.token,
+          deposit: event.deposit.toString(),
+          start_time: event.startTime.toString(),
+          end_time: event.endTime.toString(),
+          cancelable: event.cancelable,
+          interval: event.interval.toString(),
+          occurrences: String(event.occurrences),
+          fee_budget: event.feeBudget.toString(),
+          execute_after: event.executeAfter.toString(),
+          expires_at: event.expiresAt.toString(),
+        },
+      };
+    case "ScheduledStreamExecuted":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: {
+          keeper: event.keeper,
+          stream_id: event.streamId.toString(),
+          occurrence_index: String(event.occurrenceIndex),
+          occurrences_remaining: String(event.occurrencesRemaining),
+          fee_paid: event.feePaid.toString(),
+        },
+      };
+    case "ScheduledIntentCancelled":
+    case "ScheduledIntentExpired":
+      return {
+        ...base,
+        topics: { intent_id: event.intentId.toString() },
+        data: { sender: event.sender, refund: event.refund.toString() },
+      };
+    default:
+      // Only the interfaces with recorded vectors are canonicalised; a vector
+      // for any other event must extend this switch rather than be dropped.
+      throw new Error(`no canonical form for event ${event.type}`);
   }
 }
 

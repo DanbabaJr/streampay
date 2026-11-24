@@ -6,8 +6,14 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 
 | Event key | Struct | Topics (positional) | Data fields | Fingerprint |
 | --- | --- | --- | --- | --- |
+| `advance_drawn` | `AdvanceDrawn` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `fee: i128`, `repayment_bps: u32` | `sha256:a1ccbf4cb81…` |
+| `advance_liquidated` | `AdvanceLiquidated` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `remaining_unpaid: i128` | `sha256:5f5906f14d6…` |
+| `advance_repaid` | `AdvanceRepaid` | `stream_id: u64` | `recipient: Address`, `lender: Address`, `amount: i128`, `remaining_owed: i128` | `sha256:f560f54706b…` |
 | `batch_withdraw_summary` | `BatchWithdrawSummary` | `recipient: Address` | `settled: Vec<WithdrawOutcome>`, `total: i128`, `requested: u32`, `skipped: u32` | `sha256:59b5ba85df9…` |
 | `beneficiary_enrolled` | `BeneficiaryEnrolled` | `beneficiary: Address`, `kind: Symbol` | `public_key: BytesN<32>` | `sha256:8a457d9c30e…` |
+| `condition_expired` | `ConditionExpired` | `stream_id: u64` | `condition_id: u64` | `sha256:bf220e706c8…` |
+| `condition_met` | `ConditionMet` | `stream_id: u64` | `condition_id: u64` | `sha256:fd16a5a73e4…` |
+| `condition_registered` | `ConditionRegistered` | `stream_id: u64` | `condition_id: u64` | `sha256:0ac12047ea7…` |
 | `contract_frozen_state_changed` | `ContractFrozenStateChanged` | `frozen: bool` | `changed_by: Address` | `sha256:090c0be66d6…` |
 | `contract_upgraded` | `ContractUpgraded` | `new_wasm_hash: BytesN<32>` | `executed_by: Address` | `sha256:0228c88243e…` |
 | `dispute_expired` | `DisputeExpired` | `stream_id: u64` | `recipient: Address`, `bond: i128`, `sender_share: i128`, `recipient_share: i128` | `sha256:36b0c23354c…` |
@@ -20,6 +26,9 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 | `governance_action_signed` | `GovernanceActionSigned` | `proposal_id: u64` | `signer: Address`, `signature_count: u32` | `sha256:05a46601921…` |
 | `governance_action_vetoed` | `GovernanceActionVetoed` | `proposal_id: u64` | `vetoed_by: Address` | `sha256:fe6590a4870…` |
 | `governance_signers_set` | `GovernanceSignersSet` | `set_by: Address` | `signers: Vec<Address>`, `veto_window: u64` | `sha256:c80b3f90f26…` |
+| `hook_failed` | `HookFailed` | `stream_id: u64` | `event_class: Symbol`, `callback_contract: Address`, `error_code: u32` | `sha256:7fba9960155…` |
+| `hook_invoked` | `HookInvoked` | `stream_id: u64` | `event_class: Symbol`, `callback_contract: Address` | `sha256:11cae2306cf…` |
+| `hook_registered` | `HookRegistered` | `stream_id: u64` | `event_class: Symbol`, `callback_contract: Address`, `selector: Symbol` | `sha256:be27fe4f353…` |
 | `operator_key_rotated` | `OperatorKeyRotated` | `sponsor: Address`, `kind: Symbol` | `new_operator_key: BytesN<32>` | `sha256:e173c61697b…` |
 | `oracle_config_updated` | `OracleConfigUpdated` | — | `threshold: u32`, `max_stale_seconds: u64` | `sha256:91f894797f4…` |
 | `oracle_stale_fallback` | `OracleStaleFallback` | `stream_id: u64` | `ledger_time: u64` | `sha256:d1baed22ab3…` |
@@ -54,6 +63,8 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 | `stream_scheduled` | `StreamScheduled` | `intent_id: u64` | `sender: Address`, `recipient: Address`, `token: Address`, `deposit: i128`, `start_time: u64`, `end_time: u64`, `cancelable: bool`, `interval: u64`, `occurrences: u32`, `fee_budget: i128`, `execute_after: u64`, `expires_at: u64` | `sha256:fcfb97a34e2…` |
 | `stream_topped_up` | `StreamToppedUp` | `stream_id: u64` | `sender: Address`, `amount: i128`, `new_deposit: i128` | `sha256:84629390198…` |
 | `streams_created` | `StreamsCreated` | `sender: Address` | `stream_ids: Vec<u64>` | `sha256:affd0ccd120…` |
+| `template_approved` | `TemplateApproved` | `template_id: u32` | `version: u32`, `token: Address`, `duration: u64` | `sha256:2556ce26fef…` |
+| `template_instantiated` | `TemplateInstantiated` | `template_id: u32` | `version: u32`, `stream_id: u64`, `sender: Address`, `recipient: Address`, `deposit: i128` | `sha256:63f92af80b8…` |
 | `upgrade_cancelled` | `UpgradeCancelled` | `new_wasm_hash: BytesN<32>` | `cancelled_by: Address` | `sha256:f37b6e8e716…` |
 | `upgrade_proposed` | `UpgradeProposed` | `new_wasm_hash: BytesN<32>` | `unlock_time: u64`, `proposer: Address` | `sha256:ab70c35bf98…` |
 | `withdrawn` | `Withdrawn` | `stream_id: u64` | `recipient: Address`, `amount: i128`, `withdrawn_total: i128` | `sha256:f236ec39ef8…` |

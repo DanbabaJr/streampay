@@ -6,6 +6,7 @@ import type { DecodedEvent, Stream } from "./types.js";
 import { EVENT_KEYS } from "./generated/events.js";
 import { WebhookStore } from "./webhooks/store.js";
 import { OutboxStore, newOutboxEventFromDecoded } from "./outbox/store.js";
+import { WasmPluginRegistry } from "./wasm/registry.js";
 import { globalIndexerTracer, traceCorrelationRegistry } from "./telemetry.js";
 
 export interface IngestSummary {
@@ -23,6 +24,8 @@ export class StreamStore extends EventEmitter {
   readonly db: Database.Database;
   readonly webhooks: WebhookStore;
   readonly outbox: OutboxStore;
+  /** WASM plugin registry (#580): content-addressed plugins + per-tenant approvals. */
+  readonly wasm: WasmPluginRegistry;
 
   constructor(path: string) {
     super();
@@ -66,6 +69,7 @@ export class StreamStore extends EventEmitter {
     } catch {}
     this.webhooks = new WebhookStore(this.db);
     this.outbox = new OutboxStore(this.db);
+    this.wasm = new WasmPluginRegistry(this.db);
     this.allowNullStreamId();
   }
 
@@ -112,7 +116,7 @@ export class StreamStore extends EventEmitter {
   }
 
   ingest(event: DecodedEvent): void {
-    const outcome = this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken))();
+    const outcome = this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "ingest"))();
     // #225: `/events/stream` (SSE) listeners are notified only after the write has
     // committed, so a listener that reads back through the store sees this event,
     // and a throwing listener cannot roll the ingestion transaction back.
@@ -130,7 +134,7 @@ export class StreamStore extends EventEmitter {
     const journalled: DecodedEvent[] = [];
     this.db.transaction(() => {
       for (const event of events) {
-        const outcome = this.ingestWithinTransaction(event, cursor ?? event.pagingToken);
+        const outcome = this.ingestWithinTransaction(event, cursor ?? event.pagingToken, "ingest");
         if (outcome.duplicate) summary.duplicates += 1;
         else {
           summary.inserted += 1;
@@ -148,12 +152,65 @@ export class StreamStore extends EventEmitter {
     return summary;
   }
 
+  /**
+   * Projects one event onto `streams` without the live-ingest side effects:
+   * no outbox intent and no webhook delivery are enqueued. Used by the replay
+   * engine (#584), which rebuilds state from the journal and must never emit a
+   * second notification for an event that was already delivered once.
+   *
+   * The event row is still journalled, so replay stays idempotent (a repeated
+   * range reports duplicates) and the projection keeps its monotonic guard.
+   */
+  projectEvent(event: DecodedEvent): { duplicate: boolean; projectionSkipped: boolean } {
+    return this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "project"))();
+  }
+
+  /**
+   * Replaces one stream row with a journal-derived fold (#583). The same
+   * monotonic guard as ingestion applies, so a fold of the whole journal can
+   * only move the projection forward to the state the journal implies.
+   * Returns false when the row was already ahead of the fold.
+   */
+  replaceProjection(stream: Stream): boolean {
+    const row = {
+      stream_id: stream.streamId,
+      sender: stream.sender ?? null,
+      recipient: stream.recipient ?? null,
+      token: stream.token ?? null,
+      deposit: stream.deposit ?? null,
+      withdrawn: stream.withdrawn ?? "0",
+      start_time: stream.startTime ?? null,
+      end_time: stream.endTime ?? null,
+      cancelable: stream.cancelable === null || stream.cancelable === undefined ? null : Number(stream.cancelable),
+      status: stream.status,
+      cancelled_by: stream.cancelled_by ?? null,
+      recipient_amount: stream.recipient_amount ?? null,
+      sender_amount: stream.sender_amount ?? null,
+      refund_target: stream.refund_target ?? null,
+      last_ledger: stream.lastLedger,
+      updated_at: stream.updatedAt,
+    };
+    const res = this.db.prepare(`INSERT INTO streams(stream_id,sender,recipient,token,deposit,withdrawn,start_time,end_time,cancelable,status,cancelled_by,recipient_amount,sender_amount,refund_target,last_ledger,updated_at)
+      VALUES(@stream_id,@sender,@recipient,@token,@deposit,@withdrawn,@start_time,@end_time,@cancelable,@status,@cancelled_by,@recipient_amount,@sender_amount,@refund_target,@last_ledger,@updated_at)
+      ON CONFLICT(stream_id) DO UPDATE SET sender=excluded.sender, recipient=excluded.recipient, token=excluded.token,
+      deposit=excluded.deposit, withdrawn=excluded.withdrawn, start_time=excluded.start_time, end_time=excluded.end_time,
+      cancelable=excluded.cancelable, status=excluded.status, cancelled_by=excluded.cancelled_by,
+      recipient_amount=excluded.recipient_amount, sender_amount=excluded.sender_amount, refund_target=excluded.refund_target,
+      last_ledger=excluded.last_ledger, updated_at=excluded.updated_at
+      WHERE excluded.last_ledger >= streams.last_ledger`).run(row);
+    return res.changes > 0;
+  }
+
   /** The stream row an event concerns; `undefined` for stream-less events. */
   private streamForEvent(event: DecodedEvent): Stream | undefined {
     return event.streamId === null ? undefined : this.getStream(event.streamId);
   }
 
-  private ingestWithinTransaction(event: DecodedEvent, ledgerCursor: string): { duplicate: boolean; projectionSkipped: boolean } {
+  private ingestWithinTransaction(
+    event: DecodedEvent,
+    ledgerCursor: string,
+    mode: "ingest" | "project",
+  ): { duplicate: boolean; projectionSkipped: boolean } {
     // A stream-less event has no `stream.id` to report; the attribute is
     // omitted rather than filled with a placeholder.
     const streamAttributes: Record<string, string | number> = {
@@ -220,23 +277,27 @@ export class StreamStore extends EventEmitter {
         return { duplicate: true, projectionSkipped: false };
       }
 
-      // Transactional outbox: the delivery-intent journal is committed in the
-      // same transaction as the event row, so intents can never be lost.
-      // Deliberately NOT wrapped in try/catch — any failure must roll back the
-      // whole ingestion transaction.
-      this.outbox.enqueueWithinTransaction(newOutboxEventFromDecoded(event, ledgerCursor));
+      // A replay projects only: an event already dispatched once must not be
+      // queued a second time.
+      if (mode === "ingest") {
+        // Transactional outbox: the delivery-intent journal is committed in the
+        // same transaction as the event row, so intents can never be lost.
+        // Deliberately NOT wrapped in try/catch — any failure must roll back the
+        // whole ingestion transaction.
+        this.outbox.enqueueWithinTransaction(newOutboxEventFromDecoded(event, ledgerCursor));
 
-      // Queue webhook deliveries for subscribers
-      try {
-        this.webhooks.queueDeliveriesForEvent({
-          id: event.id,
-          name: event.name,
-          streamId: event.streamId,
-          ledgerClosedAt: event.ledgerClosedAt,
-          data: event.data as Record<string, unknown>,
-        });
-      } catch (err) {
-        console.error("Failed to queue webhook delivery for event:", err);
+        // Queue webhook deliveries for subscribers
+        try {
+          this.webhooks.queueDeliveriesForEvent({
+            id: event.id,
+            name: event.name,
+            streamId: event.streamId,
+            ledgerClosedAt: event.ledgerClosedAt,
+            data: event.data as Record<string, unknown>,
+          });
+        } catch (err) {
+          console.error("Failed to queue webhook delivery for event:", err);
+        }
       }
 
       const d = event.data;

@@ -88,10 +88,7 @@ jobs:
           restore-keys: ${{ runner.os }}-promote-
 
       - name: Install stellar-cli
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Install cargo-fuzz (for the soak gate)
         run: |
@@ -129,10 +126,7 @@ jobs:
           ref: ${{ inputs.release_tag }}
 
       - name: Install stellar-cli
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Download published Wasm
         env:
@@ -196,10 +190,7 @@ jobs:
           ref: ${{ inputs.release_tag }}
 
       - name: Install stellar-cli
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
 
       - name: Download published Wasm
         env:
@@ -268,11 +259,9 @@ jobs:
     environment: mainnet-canary
     steps:
       - uses: actions/checkout@v7
+
       - name: Install stellar-cli
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo install stellar /usr/local/bin/stellar
-          stellar --version
+        run: bash scripts/install_stellar_cli.sh
       - name: Roll back to the previously promoted digest
         env:
           GH_TOKEN: ${{ github.token }}

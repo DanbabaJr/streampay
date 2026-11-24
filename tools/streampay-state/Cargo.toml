@@ -29,3 +29,7 @@ hex = "0.4"
 sha2 = "0.11"
 # Error handling
 anyhow = "1"
+
+[dev-dependencies]
+# Validates emitted verify reports against json-schema-v1.json (tests only).
+jsonschema = { version = "0.61", default-features = false }

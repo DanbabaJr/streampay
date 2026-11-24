@@ -107,6 +107,36 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 97 | `WithdrawBatchTooLarge` | reachable (1 branch(es)) | `withdraw_many` | the batch withdraw exceeds MAX_WITHDRAW_BATCH stream ids |
 | 98 | `WithdrawDuplicateStreamIds` | reachable (1 branch(es)) | `withdraw_many` | the same stream id appears more than once in the batch |
 | 99 | `InvalidPauseTransition` | reachable (2 branch(es)) | `pause_stream`, `resume_stream` | the stream is already paused; the stream is not paused |
+| 100 | `AdvanceExceedsMaxLtv` | reachable (1 branch(es)) | `draw_advance` | draw_advance requested amount exceeds maximum loan-to-value threshold |
+| 101 | `AdvanceAmountNonPositive` | reachable (1 branch(es)) | `draw_advance` | draw_advance amount is zero or negative |
+| 102 | `AdvanceAlreadyActive` | reachable (1 branch(es)) | `draw_advance` | an advance is already active on the stream |
+| 103 | `AdvanceNotFound` | reachable (1 branch(es)) | `repay_advance` | no active advance found for the stream |
+| 104 | `AdvanceRepaymentNonPositive` | reachable (1 branch(es)) | `repay_advance` | repay_advance amount is zero or negative |
+| 105 | `AdvanceRepaymentExceedsBalance` | reachable (1 branch(es)) | `repay_advance` | repayment amount exceeds remaining advance balance |
+| 106 | `InvalidLtvBps` | reachable (1 branch(es)) | `draw_advance`, `set_receivables_config` | receivables configuration or repayment basis points exceed bounds |
+| 107 | `StreamNotEligibleForAdvance` | reachable (1 branch(es)) | `draw_advance` | stream is paused, cancelled, or not active for advance draw |
+| 108 | `ConditionNotMet` | reachable (1 branch(es)) | `withdraw`, `withdraw_max` | release condition has not been attested as met by oracle quorum |
+| 109 | `ConditionExpired` | reachable (1 branch(es)) | `attest_condition`, `register_condition` | release condition has passed its timeout without satisfaction |
+| 110 | `ConditionAlreadyRegistered` | reachable (1 branch(es)) | `register_condition` | a release condition is already registered for this stream |
+| 111 | `ConditionNotFound` | reachable (1 branch(es)) | `attest_condition` | no release condition found for the stream |
+| 112 | `ConditionAlreadySatisfied` | reachable (1 branch(es)) | `attest_condition` | release condition is already satisfied |
+| 113 | `InvalidConditionThreshold` | reachable (1 branch(es)) | `register_condition` | condition quorum threshold is zero or exceeds publisher count |
+| 114 | `NotConditionPublisher` | reachable (1 branch(es)) | `attest_condition` | caller is not an authorized condition publisher |
+| 115 | `ConditionAttestationStale` | reachable (1 branch(es)) | `attest_condition` | condition attestation timestamp is too old |
+| 116 | `TemplateNotFound` | reachable (1 branch(es)) | `instantiate_template` | template id and version not found |
+| 117 | `TemplateAlreadyApproved` | reachable (1 branch(es)) | `approve_template` | template version has already been approved |
+| 118 | `TemplateVersionMismatch` | reachable (1 branch(es)) | `approve_template` | template version must be exactly next in sequence |
+| 119 | `TemplateValidationFailed` | reachable (1 branch(es)) | `approve_template` | template parameters fail validation against policy |
+| 120 | `TemplateRateInvalid` | reachable (1 branch(es)) | `approve_template` | template stream rate evaluates to zero or overflow |
+| 121 | `HookAlreadyRegistered` | reachable (1 branch(es)) | `register_hook` | a callback hook is already registered for this event class |
+| 122 | `HookNotFound` | reachable (1 branch(es)) | `unregister_hook` | no callback hook found to unregister |
+| 123 | `HookReentrancyBlocked` | reachable (1 branch(es)) | `dispatch_hook` | nested contract entry into stream blocked by reentrancy lock |
+| 124 | `HookExecutionFailed` | reachable (1 branch(es)) | `dispatch_hook` | callback contract invocation failed or reverted under Revert failure policy |
+| 125 | `InvalidHookSelector` | reachable (1 branch(es)) | `register_hook` | callback selector is invalid |
+| 126 | `AgentNotAuthorized` | **retired** (unreachable) | — | — |
+| 127 | `AgentExpired` | **retired** (unreachable) | — | — |
+| 128 | `CapExceededPeriod` | **retired** (unreachable) | — | — |
+| 129 | `CapExceededStream` | **retired** (unreachable) | — | — |
 
 ## Branch matrix (entrypoint × condition → error)
 
@@ -245,6 +275,32 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `PauseNotAuthorized` | `pause_stream`, `resume_stream` | `NotAuthorized` | 12 | the caller is not the stream's sender | reachable |
 | `PauseAlreadyPaused` | `pause_stream` | `InvalidPauseTransition` | 99 | the stream is already paused | reachable |
 | `ResumeNotPaused` | `resume_stream` | `InvalidPauseTransition` | 99 | the stream is not paused | reachable |
+| `AdvanceExceedsMaxLtv` | `draw_advance` | `AdvanceExceedsMaxLtv` | 100 | draw_advance requested amount exceeds maximum loan-to-value threshold | reachable |
+| `AdvanceAmountNonPositive` | `draw_advance` | `AdvanceAmountNonPositive` | 101 | draw_advance amount is zero or negative | reachable |
+| `AdvanceAlreadyActive` | `draw_advance` | `AdvanceAlreadyActive` | 102 | an advance is already active on the stream | reachable |
+| `AdvanceNotFound` | `repay_advance` | `AdvanceNotFound` | 103 | no active advance found for the stream | reachable |
+| `AdvanceRepaymentNonPositive` | `repay_advance` | `AdvanceRepaymentNonPositive` | 104 | repay_advance amount is zero or negative | reachable |
+| `AdvanceRepaymentExceedsBalance` | `repay_advance` | `AdvanceRepaymentExceedsBalance` | 105 | repayment amount exceeds remaining advance balance | reachable |
+| `InvalidLtvBps` | `set_receivables_config`, `draw_advance` | `InvalidLtvBps` | 106 | receivables configuration or repayment basis points exceed bounds | reachable |
+| `StreamNotEligibleForAdvance` | `draw_advance` | `StreamNotEligibleForAdvance` | 107 | stream is paused, cancelled, or not active for advance draw | reachable |
+| `ConditionNotMet` | `withdraw`, `withdraw_max` | `ConditionNotMet` | 108 | release condition has not been attested as met by oracle quorum | reachable |
+| `ConditionExpired` | `register_condition`, `attest_condition` | `ConditionExpired` | 109 | release condition has passed its timeout without satisfaction | reachable |
+| `ConditionAlreadyRegistered` | `register_condition` | `ConditionAlreadyRegistered` | 110 | a release condition is already registered for this stream | reachable |
+| `ConditionNotFound` | `attest_condition` | `ConditionNotFound` | 111 | no release condition found for the stream | reachable |
+| `ConditionAlreadySatisfied` | `attest_condition` | `ConditionAlreadySatisfied` | 112 | release condition is already satisfied | reachable |
+| `InvalidConditionThreshold` | `register_condition` | `InvalidConditionThreshold` | 113 | condition quorum threshold is zero or exceeds publisher count | reachable |
+| `NotConditionPublisher` | `attest_condition` | `NotConditionPublisher` | 114 | caller is not an authorized condition publisher | reachable |
+| `ConditionAttestationStale` | `attest_condition` | `ConditionAttestationStale` | 115 | condition attestation timestamp is too old | reachable |
+| `TemplateNotFound` | `instantiate_template` | `TemplateNotFound` | 116 | template id and version not found | reachable |
+| `TemplateAlreadyApproved` | `approve_template` | `TemplateAlreadyApproved` | 117 | template version has already been approved | reachable |
+| `TemplateVersionMismatch` | `approve_template` | `TemplateVersionMismatch` | 118 | template version must be exactly next in sequence | reachable |
+| `TemplateValidationFailed` | `approve_template` | `TemplateValidationFailed` | 119 | template parameters fail validation against policy | reachable |
+| `TemplateRateInvalid` | `approve_template` | `TemplateRateInvalid` | 120 | template stream rate evaluates to zero or overflow | reachable |
+| `HookAlreadyRegistered` | `register_hook` | `HookAlreadyRegistered` | 121 | a callback hook is already registered for this event class | reachable |
+| `HookNotFound` | `unregister_hook` | `HookNotFound` | 122 | no callback hook found to unregister | reachable |
+| `HookReentrancyBlocked` | `dispatch_hook` | `HookReentrancyBlocked` | 123 | nested contract entry into stream blocked by reentrancy lock | reachable |
+| `HookExecutionFailed` | `dispatch_hook` | `HookExecutionFailed` | 124 | callback contract invocation failed or reverted under Revert failure policy | reachable |
+| `InvalidHookSelector` | `register_hook` | `InvalidHookSelector` | 125 | callback selector is invalid | reachable |
 
 ## Retired codes
 
@@ -254,6 +310,10 @@ Codes are append-only: a retired code is never renumbered, reused, or removed �
 | ---: | --- | --- |
 | 2 | `NotStreamSender` | Reserved role check from the original draft. The contract authorizes sender-only actions by comparing the caller address directly and uses `NotAuthorized` (#12) otherwise, so this variant is never returned. Retained for wire compatibility. |
 | 3 | `NotStreamRecipient` | Reserved role check from the original draft. Recipient-only actions require the recipient's authorization (`require_auth`) and use `NotAuthorized` (#12) for business-rule rejections, so this variant is never returned. Retained for wire compatibility. |
+| 126 | `AgentNotAuthorized` | — |
+| 127 | `AgentExpired` | — |
+| 128 | `CapExceededPeriod` | — |
+| 129 | `CapExceededStream` | — |
 
 ## Defensive branches
 

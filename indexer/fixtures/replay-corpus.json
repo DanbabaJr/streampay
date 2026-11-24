@@ -1,0 +1,117 @@
+{
+  "$comment": "Pinned historical journal corpus for the replay gate (#584). Each row is a journal payload as it was written; rows at schemaVersion 0 predate the canonical event registry (#213) and must be upcast before projection. goldenStateRoot is the Merkle root of the state they project to.",
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "rangeSize": 3,
+  "concurrency": 2,
+  "goldenStateRoot": "356f3e93d7ece3dc4cba1893ff4e4f3ed15b8f0a4175d1a15c4877000670e187",
+  "events": [
+    {
+      "id": "hist-100-1",
+      "streamId": "1001",
+      "name": "stream_created",
+      "ledger": 100,
+      "ledgerClosedAt": "2026-01-01T00:100:00Z",
+      "schemaVersion": 0,
+      "payload": {
+        "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "token": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "amount": "1000",
+        "start": 1704067200,
+        "end": 1704153600
+      }
+    },
+    {
+      "id": "hist-101-1",
+      "streamId": "1001",
+      "name": "withdrawn",
+      "ledger": 101,
+      "ledgerClosedAt": "2026-01-01T00:101:00Z",
+      "schemaVersion": 0,
+      "payload": {
+        "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "amount": "100",
+        "total": "100"
+      }
+    },
+    {
+      "id": "hist-102-1",
+      "streamId": "1002",
+      "name": "stream_created",
+      "ledger": 102,
+      "ledgerClosedAt": "2026-01-01T00:102:00Z",
+      "payload": {
+        "sender": "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+        "recipient": "GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+        "token": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "deposit": "800",
+        "start_time": 1704067200,
+        "end_time": 1704153600,
+        "cancelable": false
+      }
+    },
+    {
+      "id": "hist-103-1",
+      "streamId": "1001",
+      "name": "stream_topped_up",
+      "ledger": 103,
+      "ledgerClosedAt": "2026-01-01T00:103:00Z",
+      "schemaVersion": 0,
+      "payload": {
+        "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "amount": "500",
+        "deposit": "1500"
+      }
+    },
+    {
+      "id": "hist-104-1",
+      "streamId": "1001",
+      "name": "stream_cancelled",
+      "ledger": 104,
+      "ledgerClosedAt": "2026-01-01T00:104:00Z",
+      "payload": {
+        "cancelled_by": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "recipient_amount": "300",
+        "sender_amount": "700"
+      }
+    },
+    {
+      "id": "hist-105-1",
+      "streamId": "1002",
+      "name": "stream_paused",
+      "ledger": 105,
+      "ledgerClosedAt": "2026-01-01T00:105:00Z",
+      "payload": {}
+    },
+    {
+      "id": "hist-106-1",
+      "streamId": "1002",
+      "name": "stream_resumed",
+      "ledger": 106,
+      "ledgerClosedAt": "2026-01-01T00:106:00Z",
+      "payload": {}
+    },
+    {
+      "id": "hist-107-1",
+      "streamId": "1002",
+      "name": "withdrawn",
+      "ledger": 107,
+      "ledgerClosedAt": "2026-01-01T00:107:00Z",
+      "payload": {
+        "recipient": "GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+        "amount": "50",
+        "withdrawn_total": "50"
+      }
+    },
+    {
+      "id": "hist-108-1",
+      "streamId": "1002",
+      "name": "stream_refund_target_changed",
+      "ledger": 108,
+      "ledgerClosedAt": "2026-01-01T00:108:00Z",
+      "payload": {
+        "new_target": "GFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+      }
+    }
+  ]
+}

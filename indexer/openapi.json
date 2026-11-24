@@ -1,0 +1,1184 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "StreamPay Indexer Read API",
+    "version": "0.1.0",
+    "description": "Machine-readable description of the StreamPay indexer's HTTP read surface (issue #480).\n\nThis document describes what `indexer/src/index.ts` already returns; it does not change any endpoint. It covers every `GET` route the server registers, including the Server-Sent Events stream, the persisted-query GraphQL read API and the Prometheus endpoint. Mutating routes (POST/DELETE) are intentionally out of scope.\n\n`indexer/src/contract/openapi.test.ts` keeps this document honest in two ways: it checks the component schemas against the TypeScript interfaces in `indexer/src/types.ts`, and it exercises every documented route, validating the actual response bodies against these schemas. `npm test` fails when either drifts.\n\nKnown deviation from the TypeScript types: `StreamServerEvent.streamId` is typed `string`, but the SSE stream emits `null` for events the registry binds to no stream (see `formatSse` in `src/index.ts`). The `SseEvent` schema documents the wire behaviour (`string | null`) and the contract test's type-drift allow-list names this exception."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8787",
+      "description": "Default local indexer"
+    }
+  ],
+  "security": [],
+  "tags": [
+    { "name": "Health" },
+    { "name": "Streams" },
+    { "name": "Events" },
+    { "name": "Outbox" },
+    { "name": "Webhooks" },
+    { "name": "Traces" },
+    { "name": "WASM plugins" },
+    { "name": "GraphQL" },
+    { "name": "Observability" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Liveness, ingestion progress and RPC endpoint health",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Always returned while the process is up.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Server-Sent Events stream of indexed contract events",
+        "description": "Streams live events as `text/event-stream`. An optional `Last-Event-ID` header (or `lastEventId` query parameter) replays the journal after that event id first. A `: ping` comment frame is written every 15 seconds. Each `data:` frame is a JSON document conforming to `#/components/schemas/SseEvent`.",
+        "tags": ["Events"],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose stream has this sender or recipient.",
+            "schema": { "type": "string", "pattern": "^[GCB][A-Z2-7]{55}$" }
+          },
+          {
+            "name": "streamId",
+            "in": "query",
+            "required": false,
+            "description": "Only events for this stream id.",
+            "schema": { "type": "string", "pattern": "^\\d+$" }
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "required": false,
+            "description": "Replay journal events after this event id before switching to live delivery.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "description": "Tenant used to resolve the WASM plugin named by `plugin`. Requires both parameters.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "plugin",
+            "in": "query",
+            "required": false,
+            "description": "Approved WASM plugin digest (lowercase hex sha256) to run this connection's events through.",
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event stream. Frames are `id:`, `event:` and `data:` lines terminated by a blank line.",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/streams": {
+      "get": {
+        "operationId": "listStreamsByRecipient",
+        "summary": "Streams for a recipient address",
+        "description": "Returns every stream whose recipient is `recipient`. A missing `recipient` returns an empty array, not an error.",
+        "tags": ["Streams"],
+        "parameters": [
+          {
+            "name": "recipient",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching streams, oldest stream id first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Stream" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/streams/{id}": {
+      "get": {
+        "operationId": "getStream",
+        "summary": "Latest indexed projection of one stream",
+        "tags": ["Streams"],
+        "parameters": [{ "$ref": "#/components/parameters/StreamId" }],
+        "responses": {
+          "200": {
+            "description": "The projected stream.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Stream" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/streams/{id}/history": {
+      "get": {
+        "operationId": "getStreamHistory",
+        "summary": "Full event log for one stream",
+        "description": "Events are ordered by ledger sequence, then event id. An unknown stream id returns an empty array, not 404.",
+        "tags": ["Streams"],
+        "parameters": [{ "$ref": "#/components/parameters/StreamId" }],
+        "responses": {
+          "200": {
+            "description": "The stream's journal rows.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/StreamHistoryEvent" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/streams/{id}/events": {
+      "get": {
+        "operationId": "replayStreamEvents",
+        "summary": "Transactional-outbox replay feed for one stream",
+        "description": "Cursor-based replay ordered by outbox `seq`. Retracted (reorged) rows are excluded. `next_cursor` is null when the page is empty; otherwise it is the last returned `seq`.",
+        "tags": ["Outbox"],
+        "parameters": [
+          { "$ref": "#/components/parameters/StreamId" },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Return rows with `seq` greater than this cursor. Defaults to 0.",
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, 1-1000. Invalid values fall back to 100.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One replay page.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OutboxReplayPage" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/streams/{id}/proof": {
+      "get": {
+        "operationId": "getStreamProof",
+        "summary": "Signed light-client inclusion proof for one stream",
+        "tags": ["Streams"],
+        "parameters": [{ "$ref": "#/components/parameters/StreamId" }],
+        "responses": {
+          "200": {
+            "description": "Merkle inclusion proof against the signed checkpoint.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LightClientStreamProof" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/address/{addr}/streams": {
+      "get": {
+        "operationId": "listAddressStreams",
+        "summary": "Streams where the address is sender or recipient",
+        "tags": ["Streams"],
+        "parameters": [
+          {
+            "name": "addr",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[GCB][A-Z2-7]{55}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Streams plus the total count.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AddressStreamsResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/ingest/stats": {
+      "get": {
+        "operationId": "getIngestStats",
+        "summary": "Parallel-ingest accounting for the last tick",
+        "tags": ["Observability"],
+        "responses": {
+          "200": {
+            "description": "Ingest statistics.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IngestStats" }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/api/outbox/consumers": {
+      "get": {
+        "operationId": "listOutboxConsumers",
+        "summary": "Registered outbox consumers",
+        "tags": ["Outbox"],
+        "responses": {
+          "200": {
+            "description": "Consumers, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/OutboxConsumer" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/outbox/consumers/{id}": {
+      "get": {
+        "operationId": "getOutboxConsumer",
+        "summary": "One outbox consumer",
+        "tags": ["Outbox"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The consumer.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OutboxConsumer" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/outbox/intents": {
+      "get": {
+        "operationId": "listOutboxIntents",
+        "summary": "Delivery intents, optionally filtered by state or consumer",
+        "tags": ["Outbox"],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/OutboxState" }
+          },
+          {
+            "name": "consumer",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, 1-500. Invalid values fall back to 50.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching intents, oldest id first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/OutboxIntent" } }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/outbox/stats": {
+      "get": {
+        "operationId": "getOutboxStats",
+        "summary": "Outbox depth by state and replay high-water mark",
+        "tags": ["Outbox"],
+        "responses": {
+          "200": {
+            "description": "Outbox counters.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OutboxStats" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/endpoints": {
+      "get": {
+        "operationId": "listWebhookEndpoints",
+        "summary": "Registered webhook endpoints",
+        "description": "Administrative surface: responses include the endpoint's signing secret so an operator can verify deliveries.",
+        "tags": ["Webhooks"],
+        "responses": {
+          "200": {
+            "description": "Endpoints, newest first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/endpoints/{id}": {
+      "get": {
+        "operationId": "getWebhookEndpoint",
+        "summary": "One webhook endpoint (includes its signing secret)",
+        "tags": ["Webhooks"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebhookEndpoint" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/webhooks/deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "summary": "Recent webhook delivery attempts",
+        "tags": ["Webhooks"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, clamped to 1-100. Defaults to 50.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deliveries, newest first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookDelivery" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/dlq": {
+      "get": {
+        "operationId": "listWebhookDeadLetters",
+        "summary": "Webhook dead-letter queue",
+        "tags": ["Webhooks"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, clamped to 1-100. Defaults to 50.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dead-letter items, newest first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookDeadLetterItem" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/traces/correlate": {
+      "get": {
+        "operationId": "getTraceCorrelation",
+        "summary": "Look up a registered trace correlation by transaction hash or stream id",
+        "tags": ["Traces"],
+        "parameters": [
+          {
+            "name": "txHash",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "streamId",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored span context.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TraceCorrelationResponse" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/wasm/plugins": {
+      "get": {
+        "operationId": "listWasmPlugins",
+        "summary": "Registered WASM plugins (only present when a dispatcher is configured)",
+        "tags": ["WASM plugins"],
+        "responses": {
+          "200": {
+            "description": "Plugins, newest first. Plugin bytes are not returned, only their size.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WasmPluginSummary" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wasm/fallbacks": {
+      "get": {
+        "operationId": "listWasmFallbacks",
+        "summary": "Last 100 WASM plugin fallbacks (only present when a dispatcher is configured)",
+        "tags": ["WASM plugins"],
+        "responses": {
+          "200": {
+            "description": "Fallback alerts, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WasmFallbackAlert" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphql": {
+      "get": {
+        "operationId": "getGraphql",
+        "summary": "Ad-hoc GraphQL queries are not supported",
+        "description": "Always answers 400 with the list of allowlisted persisted query ids.",
+        "tags": ["GraphQL"],
+        "responses": {
+          "400": {
+            "description": "Ad-hoc queries are rejected; use `POST /graphql` with a persisted `queryId`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GraphQLResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphql/schema": {
+      "get": {
+        "operationId": "getGraphqlSchema",
+        "summary": "GraphQL schema SDL",
+        "tags": ["GraphQL"],
+        "responses": {
+          "200": {
+            "description": "The schema SDL served verbatim.",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "summary": "Prometheus text exposition",
+        "tags": ["Observability"],
+        "responses": {
+          "200": {
+            "description": "Prometheus exposition format. When no outbox metrics are configured the body is a single comment line.",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "StreamId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Unsigned integer stream id.",
+        "schema": { "type": "string", "pattern": "^\\d+$" }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid parameter.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested resource does not exist.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "The feature is not configured in this process.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" }
+        }
+      },
+      "Stream": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Materialized stream projection. Mirrors the `Stream` interface in `src/types.ts`; optional keys are omitted when unknown rather than sent as null.",
+        "required": [
+          "streamId",
+          "sender",
+          "recipient",
+          "token",
+          "deposit",
+          "withdrawn",
+          "startTime",
+          "endTime",
+          "cancelable",
+          "status",
+          "lastLedger",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "streamId": { "type": "string" },
+          "sender": { "type": ["string", "null"] },
+          "recipient": { "type": ["string", "null"] },
+          "token": { "type": ["string", "null"] },
+          "deposit": { "type": ["string", "null"] },
+          "withdrawn": { "type": "string" },
+          "startTime": { "type": ["string", "null"] },
+          "endTime": { "type": ["string", "null"] },
+          "cancelable": { "type": ["boolean", "null"] },
+          "status": { "type": "string" },
+          "cancelled_by": { "type": ["string", "null"] },
+          "recipient_amount": { "type": ["string", "null"] },
+          "sender_amount": { "type": ["string", "null"] },
+          "refund_target": { "type": ["string", "null"] },
+          "lastLedger": { "type": "integer" },
+          "updatedAt": { "type": "string" }
+        }
+      },
+      "SseEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "JSON body of one Server-Sent Events `data:` frame. Mirrors `StreamServerEvent`, except `streamId` is nullable on the wire.",
+        "required": ["id", "streamId", "eventType", "ledger", "ledgerClosedAt", "data"],
+        "properties": {
+          "id": { "type": "string" },
+          "streamId": { "type": ["string", "null"] },
+          "eventType": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "ledgerClosedAt": { "type": "string" },
+          "data": { "type": "object", "additionalProperties": true },
+          "stream": { "$ref": "#/components/schemas/Stream" }
+        }
+      },
+      "StreamHistoryEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "stream_id", "event_type", "ledger", "ledger_closed_at", "tx_hash", "trace_id", "span_id", "payload"],
+        "properties": {
+          "id": { "type": "string" },
+          "stream_id": { "type": "string" },
+          "event_type": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "ledger_closed_at": { "type": "string" },
+          "tx_hash": { "type": ["string", "null"] },
+          "trace_id": { "type": ["string", "null"] },
+          "span_id": { "type": ["string", "null"] },
+          "payload": {}
+        }
+      },
+      "OutboxReplayPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["events", "next_cursor"],
+        "properties": {
+          "events": { "type": "array", "items": { "$ref": "#/components/schemas/OutboxReplayEvent" } },
+          "next_cursor": { "type": ["integer", "null"] }
+        }
+      },
+      "OutboxReplayEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seq", "idempotency_key", "event_id", "stream_id", "name", "ledger", "ledger_cursor", "payload", "ingested_at"],
+        "properties": {
+          "seq": { "type": "integer" },
+          "idempotency_key": { "type": "string" },
+          "event_id": { "type": "string" },
+          "stream_id": { "type": ["string", "null"] },
+          "name": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "ledger_cursor": { "type": "string" },
+          "payload": { "type": "object", "additionalProperties": true },
+          "ingested_at": { "type": "string" }
+        }
+      },
+      "OutboxConsumer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "url", "secret", "max_attempts", "rate_limit_per_sec", "status", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["push", "pull"] },
+          "url": { "type": ["string", "null"] },
+          "secret": { "type": ["string", "null"] },
+          "max_attempts": { "type": "integer" },
+          "rate_limit_per_sec": { "type": ["number", "null"] },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "created_at": { "type": "string" }
+        }
+      },
+      "OutboxState": {
+        "type": "string",
+        "enum": ["pending", "in_flight", "delivered", "dead"]
+      },
+      "OutboxIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "event_seq",
+          "consumer_id",
+          "idempotency_key",
+          "state",
+          "attempts",
+          "next_retry_at",
+          "claimed_at",
+          "claim_token",
+          "delivered_at",
+          "dead_reason",
+          "last_error",
+          "created_at",
+          "event_id",
+          "stream_id",
+          "name",
+          "ledger",
+          "payload"
+        ],
+        "properties": {
+          "id": { "type": "integer" },
+          "event_seq": { "type": "integer" },
+          "consumer_id": { "type": "string" },
+          "idempotency_key": { "type": "string" },
+          "state": { "$ref": "#/components/schemas/OutboxState" },
+          "attempts": { "type": "integer" },
+          "next_retry_at": { "type": "integer" },
+          "claimed_at": { "type": ["integer", "null"] },
+          "claim_token": { "type": ["string", "null"] },
+          "delivered_at": { "type": ["string", "null"] },
+          "dead_reason": { "type": ["string", "null"] },
+          "last_error": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "event_id": { "type": "string" },
+          "stream_id": { "type": ["string", "null"] },
+          "name": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "payload": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "OutboxStats": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["events", "depth", "oldestPendingAgeMs", "maxSeq"],
+        "properties": {
+          "events": { "type": "integer" },
+          "depth": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pending", "in_flight", "delivered", "dead"],
+            "properties": {
+              "pending": { "type": "integer" },
+              "in_flight": { "type": "integer" },
+              "delivered": { "type": "integer" },
+              "dead": { "type": "integer" }
+            }
+          },
+          "oldestPendingAgeMs": { "type": "number" },
+          "maxSeq": { "type": "integer" }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "url", "secret", "events", "status", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "secret": { "type": "string" },
+          "previous_secret": { "type": ["string", "null"] },
+          "events": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "endpoint_id", "event_id", "stream_id", "event_type", "payload", "attempt", "status", "next_retry_at", "history", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "endpoint_id": { "type": "string" },
+          "event_id": { "type": "string" },
+          "stream_id": { "type": ["string", "null"] },
+          "event_type": { "type": "string" },
+          "payload": { "type": "object", "additionalProperties": true },
+          "attempt": { "type": "integer" },
+          "status": { "type": "string", "enum": ["pending", "delivered", "failed", "dead_letter"] },
+          "status_code": { "type": "integer" },
+          "error": { "type": "string" },
+          "next_retry_at": { "type": "integer" },
+          "history": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookAttemptRecord" } },
+          "created_at": { "type": "string" },
+          "completed_at": { "type": "string" }
+        }
+      },
+      "WebhookAttemptRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt", "timestamp", "duration_ms"],
+        "properties": {
+          "attempt": { "type": "integer" },
+          "timestamp": { "type": "integer" },
+          "status_code": { "type": "integer" },
+          "error": { "type": "string" },
+          "duration_ms": { "type": "integer" }
+        }
+      },
+      "WebhookDeadLetterItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "delivery_id", "endpoint_id", "event_id", "stream_id", "event_type", "payload", "attempts_count", "last_error", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "delivery_id": { "type": "string" },
+          "endpoint_id": { "type": "string" },
+          "event_id": { "type": "string" },
+          "stream_id": { "type": ["string", "null"] },
+          "event_type": { "type": "string" },
+          "payload": { "type": "object", "additionalProperties": true },
+          "attempts_count": { "type": "integer" },
+          "last_error": { "type": "string" },
+          "last_status_code": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "replayed_at": { "type": "string" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok", "status", "lastLedger", "cursor", "ingest", "rpcEndpoints", "checkpointSigner"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "status": { "type": "string" },
+          "lastLedger": { "type": ["string", "null"] },
+          "cursor": { "type": ["string", "null"] },
+          "ingest": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/IngestStats" },
+              { "type": "null" }
+            ]
+          },
+          "rpcEndpoints": { "type": "array", "items": { "$ref": "#/components/schemas/RpcEndpointHealth" } },
+          "checkpointSigner": { "type": ["string", "null"] }
+        }
+      },
+      "IngestStats": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lastTick", "sequencer", "budget"],
+        "properties": {
+          "lastTick": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/IngestTickReport" },
+              { "type": "null" }
+            ]
+          },
+          "sequencer": { "$ref": "#/components/schemas/SequencerMetrics" },
+          "budget": { "$ref": "#/components/schemas/RateBudgetSnapshot" }
+        }
+      },
+      "IngestTickReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "serial",
+          "depth",
+          "maxInFlightObserved",
+          "windowsPlanned",
+          "windowsCommitted",
+          "requests",
+          "caughtUp",
+          "eventsSeen",
+          "eventsInserted",
+          "duplicates",
+          "projectionSkips",
+          "lateEvents",
+          "gapLedgers",
+          "windowLedgers",
+          "ledgersCovered",
+          "durationMs"
+        ],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "serial": { "type": "boolean" },
+          "depth": { "type": "integer" },
+          "maxInFlightObserved": { "type": "integer" },
+          "windowsPlanned": { "type": "integer" },
+          "windowsCommitted": { "type": "integer" },
+          "requests": { "type": "integer" },
+          "caughtUp": { "type": "boolean" },
+          "eventsSeen": { "type": "integer" },
+          "eventsInserted": { "type": "integer" },
+          "duplicates": { "type": "integer" },
+          "projectionSkips": { "type": "integer" },
+          "lateEvents": { "type": "integer" },
+          "gapLedgers": { "type": "integer" },
+          "windowLedgers": { "type": "integer" },
+          "ledgersCovered": { "type": "integer" },
+          "resumeAt": { "type": "integer" },
+          "durationMs": { "type": "integer" },
+          "error": { "type": "string" }
+        }
+      },
+      "SequencerMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "windowsCommitted",
+          "ledgersCovered",
+          "gapWindows",
+          "gapLedgers",
+          "eventsSeen",
+          "lateEvents",
+          "maxLateDepth",
+          "streamsTracked"
+        ],
+        "properties": {
+          "windowsCommitted": { "type": "integer" },
+          "ledgersCovered": { "type": "integer" },
+          "gapWindows": { "type": "integer" },
+          "gapLedgers": { "type": "integer" },
+          "eventsSeen": { "type": "integer" },
+          "lateEvents": { "type": "integer" },
+          "maxLateDepth": { "type": "integer" },
+          "streamsTracked": { "type": "integer" }
+        }
+      },
+      "RateBudgetSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["maxRps", "burstCapacity", "availableTokens", "observedLatencyMs", "healthyEndpoints", "hedgedReads"],
+        "properties": {
+          "maxRps": { "type": "number" },
+          "burstCapacity": { "type": "number" },
+          "availableTokens": { "type": "number" },
+          "observedLatencyMs": { "type": "number" },
+          "healthyEndpoints": { "type": "integer" },
+          "hedgedReads": { "type": "boolean" }
+        }
+      },
+      "RpcEndpointHealth": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "healthy", "latestLedger", "lastSuccessAt", "failures", "lagSeconds"],
+        "properties": {
+          "url": { "type": "string" },
+          "healthy": { "type": "boolean" },
+          "latestLedger": { "type": "integer" },
+          "lastSuccessAt": { "type": "integer" },
+          "failures": { "type": "integer" },
+          "lagSeconds": { "type": "number" }
+        }
+      },
+      "AddressStreamsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["address", "count", "streams"],
+        "properties": {
+          "address": { "type": "string" },
+          "count": { "type": "integer" },
+          "streams": { "type": "array", "items": { "$ref": "#/components/schemas/Stream" } }
+        }
+      },
+      "TraceCorrelationResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok", "context"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "context": { "$ref": "#/components/schemas/SpanContext" }
+        }
+      },
+      "SpanContext": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "The context stored by `POST /api/traces/correlate`. That route validates only `traceContext.traceId` and `traceContext.spanId` and stores the object verbatim, so `traceFlags` and any extra keys are whatever the caller registered.",
+        "required": ["traceId", "spanId"],
+        "properties": {
+          "traceId": { "type": "string" },
+          "spanId": { "type": "string" },
+          "traceFlags": { "type": "integer" },
+          "traceState": { "type": "string" }
+        }
+      },
+      "WasmPluginSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["digest", "version", "name", "createdAt", "size"],
+        "properties": {
+          "digest": { "type": "string" },
+          "version": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "size": { "type": "integer" }
+        }
+      },
+      "WasmFallbackAlert": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tenant", "subscriptionId", "pluginDigest", "eventId", "reason", "at"],
+        "properties": {
+          "tenant": { "type": "string" },
+          "subscriptionId": { "type": "string" },
+          "pluginDigest": { "type": ["string", "null"] },
+          "eventId": { "type": "string" },
+          "reason": { "type": "string" },
+          "at": { "type": "string" }
+        }
+      },
+      "GraphQLResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "errors"],
+        "properties": {
+          "data": { "type": "null" },
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/GraphQLError" } },
+          "persistedQueries": { "type": "array", "items": { "type": "string" } },
+          "retryAfter": { "type": "integer" }
+        }
+      },
+      "GraphQLError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string" }
+        }
+      },
+      "LightClientStreamProof": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "contractId", "streamId", "ledger", "stream", "rpcEntry", "stateLeafHash", "stateProof", "checkpoint"],
+        "properties": {
+          "version": { "const": 1 },
+          "contractId": { "type": "string" },
+          "streamId": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "stream": { "$ref": "#/components/schemas/VerifiedStreamState" },
+          "rpcEntry": { "$ref": "#/components/schemas/RpcLedgerEntryProofData" },
+          "stateLeafHash": { "type": "string" },
+          "stateProof": { "type": "array", "items": { "$ref": "#/components/schemas/MerkleStep" } },
+          "events": { "type": "array", "items": { "$ref": "#/components/schemas/EventProofItem" } },
+          "checkpoint": { "$ref": "#/components/schemas/SignedCheckpoint" }
+        }
+      },
+      "VerifiedStreamState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["streamId", "sender", "recipient", "token", "deposit", "withdrawn", "startTime", "endTime", "cancelable", "status"],
+        "properties": {
+          "streamId": { "type": "string" },
+          "sender": { "type": "string" },
+          "recipient": { "type": "string" },
+          "token": { "type": "string" },
+          "deposit": { "type": "string" },
+          "withdrawn": { "type": "string" },
+          "startTime": { "type": "string" },
+          "endTime": { "type": "string" },
+          "cancelable": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["Active", "Cancelled", "Depleted", "Paused"] }
+        }
+      },
+      "RpcLedgerEntryProofData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyXdr", "entryXdr", "lastModifiedLedgerSeq", "liveUntilLedgerSeq"],
+        "properties": {
+          "keyXdr": { "type": "string" },
+          "entryXdr": { "type": "string" },
+          "lastModifiedLedgerSeq": { "type": "integer" },
+          "liveUntilLedgerSeq": { "type": "integer" }
+        }
+      },
+      "MerkleStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["position", "hash"],
+        "properties": {
+          "position": { "type": "string", "enum": ["left", "right"] },
+          "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      },
+      "SignedCheckpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "networkPassphrase",
+          "contractId",
+          "ledger",
+          "ledgerCloseTime",
+          "stateRoot",
+          "eventRoot",
+          "streamCount",
+          "signerPublicKey",
+          "signature"
+        ],
+        "properties": {
+          "version": { "const": 1 },
+          "networkPassphrase": { "type": "string" },
+          "contractId": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "ledgerCloseTime": { "type": "integer" },
+          "stateRoot": { "type": "string" },
+          "eventRoot": { "type": "string" },
+          "streamCount": { "type": "integer" },
+          "signerPublicKey": { "type": "string" },
+          "signature": { "type": "string" }
+        }
+      },
+      "EventProofItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event", "leafHash", "proof"],
+        "properties": {
+          "event": { "$ref": "#/components/schemas/RpcEvent" },
+          "leafHash": { "type": "string" },
+          "proof": { "type": "array", "items": { "$ref": "#/components/schemas/MerkleStep" } }
+        }
+      },
+      "RpcEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Mirrors the `RpcEvent` interface in `src/types.ts`.",
+        "required": ["id", "ledger", "ledgerClosedAt", "contractId", "topic", "value"],
+        "properties": {
+          "id": { "type": "string" },
+          "pagingToken": { "type": "string" },
+          "ledger": { "type": "integer" },
+          "ledgerClosedAt": { "type": "string" },
+          "contractId": { "type": "string" },
+          "topic": { "type": "array", "items": {} },
+          "value": {},
+          "txHash": { "type": "string" },
+          "transactionHash": { "type": "string" }
+        }
+      }
+    }
+  }
+}

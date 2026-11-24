@@ -8,9 +8,12 @@ name: Workflow integrity
 # damage landed on main after merge), and a fourth (#416) deleted twelve named CI
 # steps, which cannot fail either because the steps were no longer there to run.
 # This job parses every workflow, verifies the step shapes, checks the required
-# gate inventory in .github/ci-gates.json against the merge base, and refuses
-# text files that git would treat as binary. It runs on every pull request, so
-# the failure is attached to the PR that caused it instead of to main at 03:00.
+# gate inventory in .github/ci-gates.json against the merge base, refuses text
+# files that git would treat as binary, and scans every tracked .rs/.ts source
+# file for the structural damage a cleanly-merged conflict leaves behind
+# (duplicate definitions, an unbalanced delimiter, an unterminated token). It
+# runs on every pull request, so the failure is attached to the PR that caused it
+# instead of to main at 03:00.
 
 on:
   pull_request:
@@ -36,6 +39,10 @@ jobs:
           # has to be here to resolve it.
           fetch-depth: 0
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -47,6 +54,9 @@ jobs:
       # forever. Each check runs against a fixture built to violate exactly it.
       - name: "Self-test: the checker can still fail"
         run: python3 scripts/check_ci_integrity.py --self-test
+
+      - name: "Self-test: the source scanner can still fail"
+        run: node --test scripts/check_merge_integrity.test.mjs
 
       - name: Workflows parse and every step is well-formed
         run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps
@@ -90,6 +100,16 @@ jobs:
             python3 scripts/check_ci_integrity.py --checks=encoding
           fi
 
+      # The compiler catches these too, but minutes later and buried under the
+      # downstream errors they cause (`97 errors, mostly spec_xdr_*`). This names
+      # the exact line and costs two seconds.
+      #
+      # On a pull_request event actions/checkout lands on refs/pull/N/merge, so
+      # this reads the tree the merge will produce, not just the branch: which is
+      # where two PRs that each append the same entrypoint to one `impl` collide.
+      - name: Every tracked source file is still a parseable program
+        run: node scripts/check_merge_integrity.mjs
+
       - name: Explain a workflow-integrity failure
         if: failure()
         run: |
@@ -97,9 +117,9 @@ jobs:
           cat <<'EOF'
           ## What just failed
 
-          This job does not build or test the product. It checks that the CI
-          description itself is intact, which is the part that cannot report a
-          problem on its own.
+          This job does not build or test the product. It checks the things that
+          cannot report a problem on their own: that the CI description is
+          intact, and that each source file is still a parseable program.
 
           - `[parse]` A workflow does not load as YAML. GitHub rejects the whole
             file, so Actions shows a run named `.github/workflows/<file>.yml`
@@ -125,17 +145,27 @@ jobs:
             `.github/ci-gates.json` with a reason, in this same PR, so the
             deletion is visible in the diff instead of quiet.
           - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
-            file is stored as UTF-16, carries a UTF-8 BOM, or contains a NUL
-            byte. git then calls it binary: `git diff` prints "Binary files
+            file is stored as UTF-16, carries a UTF-8 BOM, or contains a C0
+            control byte (0x00-0x1F other than tab/LF, or a CR outside CRLF).
+            git then calls it binary: `git diff` prints "Binary files
             differ", the change is unreviewable, and a workflow can be gutted
             without a reviewer seeing a single line. Re-save as UTF-8 without a
             BOM (`* text=auto eol=lf` in `.gitattributes` handles the rest).
+          - `[merge-integrity]` A tracked `.rs` / `.ts` / `.js` file is no longer
+            a parseable program: the same `fn` declared twice in one `impl`, the
+            same top-level `function`/`class`/`const` in one file, a `{`/`(`/`[`
+            without its partner, a string or block comment that runs to the end
+            of the file, or a leftover `<<<<<<<`. Every one of those is what a
+            clean-merging conflict leaves behind, and the compiler reports them
+            as dozens of downstream errors. The finding names the line to repair.
 
           Reproduce locally, no push needed:
 
               pip install pyyaml==6.0.2
               python3 scripts/check_ci_integrity.py
               python3 scripts/check_ci_integrity.py --self-test
+              node --test scripts/check_merge_integrity.test.mjs
+              node scripts/check_merge_integrity.mjs
 
           The checker's own fixtures are in the script; if it ever reports 0
           problems while CI is broken, run the self-test first -- it fails when

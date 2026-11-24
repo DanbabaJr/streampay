@@ -22,6 +22,18 @@ mkdir -p "$evidence"
 require cargo
 require stellar
 
+# Build before the tests run. `upgrade_replay_preserves_every_record` boots the
+# release-line records into the *host* and then swaps the live instance over to
+# `target/wasm32v1-none/release/streampay_contract.wasm`, so it is only a gate on
+# this tree if those bytes are this tree's bytes. Building here also means a
+# machine with a warm cargo cache cannot replay some earlier commit's Wasm, and
+# REQUIRE_WASM below turns "no artifact" into a failure instead of a silent skip.
+say "Building the Wasm the gates consume"
+(cd "$REPO_ROOT/contracts/streaming-payments" && stellar contract build)
+wasm="$REPO_ROOT/$WASM_REL"
+[ -f "$wasm" ] || die "expected Wasm at $WASM_REL after build"
+export STORAGE_GOLDEN_REQUIRE_WASM=1
+
 # --- 1. tests ---------------------------------------------------------------
 say "Gate 1/4 — contract tests"
 set +e
@@ -48,10 +60,8 @@ else
   fi
 fi
 
-# --- 3. reproducible build + digest continuity ------------------------------
-say "Gate 3/4 — reproducible Wasm build"
-(cd "$REPO_ROOT/contracts/streaming-payments" && stellar contract build)
-wasm="$REPO_ROOT/$WASM_REL"
+# --- 3. digest of the artifact under test -----------------------------------
+say "Gate 3/4 — Wasm digest recorded"
 [ -f "$wasm" ] || die "expected Wasm at $WASM_REL after build"
 digest="$(sha256sum "$wasm" | awk '{print $1}')"
 printf '%s  %s\n' "$digest" "$WASM_REL" > "$evidence/SHA256SUMS"

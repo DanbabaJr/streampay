@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SettingsNav from "@/components/SettingsNav";
 import { useState, useEffect, useCallback } from "react";
 import { isConnected, requestAccess, signMessage } from "@stellar/freighter-api";
 import { checkWalletNetwork } from "@/lib/network";
@@ -236,6 +237,7 @@ export default function NotificationsSettingsPage() {
           ← Back to StreamPay
         </Link>
       </div>
+      <SettingsNav />
 
       <header style={{ marginBottom: 24 }}>
         <h1>Notification Channels</h1>
@@ -513,8 +515,8 @@ export default function NotificationsSettingsPage() {
             headers (e.g. <code>evt_123:sub_456</code>) so downstream sinks can deduplicate retries safely.
           </li>
           <li>
-            <strong>HMAC Request Authentication:</strong> Webhooks include an <code>X-StreamPay-Signature</code>
-            header computed with HMAC-SHA256 over timestamp and JSON body.
+            <strong>HMAC Request Authentication:</strong> Webhooks include a <code>Streampay-Signature</code>
+            header computed with HMAC-SHA256 over the timestamp and exact raw request body.
           </li>
           <li>
             <strong>Exponential Backoff:</strong> Failures are retried using <code>delay(n) = min(32s, 1s * 2^n) +/- 20% jitter</code>

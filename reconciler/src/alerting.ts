@@ -1,0 +1,288 @@
+//! Structured logging and webhook dispatch for the dual-read reconciliation service.
+
+import { createHttpAgent } from "./http.js";
+import type { DivergenceRecord, WebhookPayload } from "./types.js";
+
+export interface AlertingConfig {
+  webhookUrl?: string;
+  consistencyWindowMs: number;
+  logLevel: "DEBUG" | "INFO" | "WARN" | "ERROR";
+  serviceName: string;
+  environment: string;
+  reconcilerId: string;
+}
+
+export interface WebhookDispatchResult {
+  success: boolean;
+  status?: number;
+  message?: string;
+  durationMs: number;
+}
+
+export interface ReconcilerAlertingMetrics {
+  roundingWithinToleranceCount: number;
+  realDivergenceCount: number;
+  webhooksDispatchedCount: number;
+  webhooksFailedCount: number;
+}
+
+export class AlertingService {
+  private config: AlertingConfig;
+  private webhookUrl?: string;
+  private httpAgent = createHttpAgent();
+  private metrics: ReconcilerAlertingMetrics = {
+    roundingWithinToleranceCount: 0,
+    realDivergenceCount: 0,
+    webhooksDispatchedCount: 0,
+    webhooksFailedCount: 0,
+  };
+
+  constructor(config: AlertingConfig) {
+    this.config = config;
+    this.webhookUrl = config.webhookUrl;
+  }
+
+  /**
+   * Record a rounding within epsilon event in metrics without paging/webhook dispatch.
+   */
+  recordRounding(d: DivergenceRecord): void {
+    this.metrics.roundingWithinToleranceCount++;
+    this.log("INFO", `Rounding tolerance within epsilon detected for stream ${d.streamId}`, {
+      streamId: d.streamId,
+      classification: d.classification,
+      delta: d.delta,
+      toleranceEpsilon: d.toleranceEpsilon,
+      checkType: d.checkType,
+    });
+  }
+
+  /**
+   * Get current metrics snapshot.
+   */
+  getMetrics(): ReconcilerAlertingMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics counters (useful between test runs or audit cycles).
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      roundingWithinToleranceCount: 0,
+      realDivergenceCount: 0,
+      webhooksDispatchedCount: 0,
+      webhooksFailedCount: 0,
+    };
+  }
+
+  /**
+   * Emit a structured JSON log entry.
+   */
+  log(level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string, details: Record<string, unknown> = {}): void {
+    if (!this.shouldLog(level)) return;
+
+    const entry = {
+      timestamp: new Date().toISOString(),
+      service: this.config.serviceName,
+      level,
+      message,
+      details,
+    };
+
+    // Write to stderr for log collection (e.g., docker logs)
+    process.stderr.write(JSON.stringify(entry) + "\n");
+  }
+
+  /**
+   * Dispatch a divergence alert to the webhook target.
+   * Only pages on real divergences (suppresses webhooks for rounding within epsilon).
+   */
+  async dispatchWebhook(d: DivergenceRecord): Promise<WebhookDispatchResult> {
+    const start = Date.now();
+
+    // Guard: Suppress paging/webhook dispatch for rounding within tolerance epsilon
+    if (d.classification === "rounding_within_epsilon") {
+      this.recordRounding(d);
+      return {
+        success: true,
+        message: "Suppressed: rounding within epsilon",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    this.metrics.realDivergenceCount++;
+    const payload = this.buildWebhookPayload(d);
+    const payloadStr = JSON.stringify(payload);
+
+    this.log("WARN", `Webhook dispatch initiated for stream ${d.streamId}`, {
+      payloadSize: payloadStr.length,
+      checkType: d.checkType,
+      severity: d.severity,
+      classification: d.classification,
+    });
+
+    if (!this.webhookUrl) {
+      this.log("WARN", "No WEBHOOK_URL configured — skipping dispatch");
+      return { success: false, message: "No webhook URL configured", durationMs: Date.now() - start };
+    }
+
+    try {
+      const response = await this.httpAgent.post(this.webhookUrl, payloadStr, {
+        "Content-Type": "application/json",
+        "User-Agent": `streampay-reconciler/${this.config.reconcilerId}`,
+      });
+
+      const success = response.status >= 200 && response.status < 300;
+      if (success) {
+        this.metrics.webhooksDispatchedCount++;
+      } else {
+        this.metrics.webhooksFailedCount++;
+      }
+
+      this.log(success ? "INFO" : "WARN", `Webhook dispatch ${success ? "succeeded" : "failed"}`, {
+        status: response.status,
+        durationMs: Date.now() - start,
+        streamId: d.streamId,
+      });
+
+      let responseMessage: string | undefined;
+      if (typeof response.data === "object" && response.data !== null && "message" in response.data) {
+        const msg = (response.data as { message: unknown }).message;
+        if (typeof msg === "string") {
+          responseMessage = msg;
+        }
+      }
+
+      return {
+        success,
+        status: response.status,
+        message: responseMessage,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      this.metrics.webhooksFailedCount++;
+      const message = err instanceof Error ? err.message : String(err);
+      this.log("WARN", `Webhook dispatch failed: ${message}`, {
+        durationMs: Date.now() - start,
+        streamId: d.streamId,
+        error: message,
+      });
+
+      return { success: false, message, durationMs: Date.now() - start };
+    }
+  }
+
+  /**
+   * Dispatch a three-way diagnosis with its layer attribution and evidence.
+   */
+  async dispatchDiagnosis(
+    diagnosis: {
+      recordId?: string;
+      severity?: string;
+      detectedAt?: string;
+      checkType?: string;
+      disagreeingPairs?: string[];
+      suspectedLayer?: string;
+      owner?: string;
+      confidence?: string;
+      evidence?: unknown;
+    },
+    report: { generatedAt?: string; asOfLedger?: number | null; mode?: string; caveats?: string[] }
+  ): Promise<WebhookDispatchResult> {
+    const start = Date.now();
+    const payload = {
+      alert: {
+        type: "reconciliation_diagnosis",
+        severity: diagnosis.severity,
+        timestamp: diagnosis.detectedAt ?? report.generatedAt,
+        source: "reconciler",
+        data: {
+          recordId: diagnosis.recordId,
+          divergenceType: diagnosis.checkType,
+          disagreeingPairs: diagnosis.disagreeingPairs,
+          suspectedLayer: diagnosis.suspectedLayer,
+          owner: diagnosis.owner,
+          confidence: diagnosis.confidence,
+          asOfLedger: report.asOfLedger,
+          mode: report.mode,
+          caveats: report.caveats,
+          evidence: diagnosis.evidence,
+        },
+      },
+      metadata: {
+        version: "2.0.0",
+        environment: this.config.environment,
+        reconcilerId: this.config.reconcilerId,
+      },
+    };
+
+    if (!this.webhookUrl) {
+      this.log("WARN", "No WEBHOOK_URL configured — diagnosis not dispatched", {
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+      });
+      return { success: false, message: "No webhook URL configured", durationMs: Date.now() - start };
+    }
+
+    try {
+      const response = await this.httpAgent.post(this.webhookUrl, JSON.stringify(payload), {
+        "Content-Type": "application/json",
+        "User-Agent": `streampay-reconciler/${this.config.reconcilerId}`,
+      });
+      const success = response.status >= 200 && response.status < 300;
+      this.log(success ? "INFO" : "WARN", `Diagnosis webhook ${success ? "succeeded" : "failed"}`, {
+        status: response.status,
+        recordId: diagnosis.recordId,
+        suspectedLayer: diagnosis.suspectedLayer,
+        durationMs: Date.now() - start,
+      });
+      return {
+        success,
+        status: response.status,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log("WARN", `Diagnosis webhook failed: ${message}`, {
+        recordId: diagnosis.recordId,
+        durationMs: Date.now() - start,
+      });
+      return { success: false, message, durationMs: Date.now() - start };
+    }
+  }
+
+  /**
+   * Build a structured webhook payload for the indexer dashboard.
+   */
+  private buildWebhookPayload(d: DivergenceRecord): WebhookPayload {
+    return {
+      alert: {
+        type: "stream_divergence",
+        severity: d.severity,
+        timestamp: d.detectedAt,
+        source: "reconciler",
+        data: {
+          streamId: d.streamId,
+          divergenceType: d.checkType,
+          classification: d.classification,
+          delta: d.delta,
+          toleranceEpsilon: d.toleranceEpsilon,
+          horizonState: d.indexedValue,
+          sorobanState: d.onChainValue,
+          lagMs: d.horizonLagMs ?? d.sorobanLagMs ?? 0,
+          consequence: d.checkType === "missing_record" ? "index_corruption" : "balance_mismatch",
+        },
+      },
+      metadata: {
+        version: "1.0.0",
+        environment: this.config.environment,
+        reconcilerId: this.config.reconcilerId,
+      },
+    };
+  }
+
+  private shouldLog(level: "DEBUG" | "INFO" | "WARN" | "ERROR"): boolean {
+    const order: Record<string, number> = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+    return order[level] >= order[this.config.logLevel];
+  }
+}

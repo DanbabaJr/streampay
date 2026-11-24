@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -94,6 +95,53 @@ class ConformanceVectorTest(unittest.TestCase):
                 error = expected["result"].get("error")
                 if error is not None:
                     self.assertEqual(self.catalog.get(error["code"]), error["name"])
+
+
+class FingerprintCarrierTest(unittest.TestCase):
+    """`generate.py` owns the spec digest stamped into hand-written packages."""
+
+    def test_committed_carrier_carries_the_current_fingerprint(self) -> None:
+        fingerprint = guard.FINGERPRINT_PATH.read_text(encoding="utf-8").strip()
+        for path in generate.FINGERPRINT_CARRIERS:
+            with self.subTest(carrier=path):
+                expected = f'SPEC_FINGERPRINT = "{fingerprint}"'
+                self.assertIn(expected, path.read_text(encoding="utf-8"))
+
+    def test_carriers_is_a_no_op_on_the_committed_tree(self) -> None:
+        fingerprint = guard.FINGERPRINT_PATH.read_text(encoding="utf-8").strip()
+        for path, stamped in generate.carriers(fingerprint).items():
+            self.assertEqual(stamped, path.read_text(encoding="utf-8"))
+
+    def test_carriers_rewrites_a_stale_stamp(self) -> None:
+        digest = "a" * 64
+        stale = "b" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            carrier = Path(tmp) / "_generated.py"
+            carrier.write_text(
+                '"""Hand-written."""\n' + f'SPEC_FINGERPRINT = "{stale}"\nVALUE = 1\n',
+                encoding="utf-8",
+            )
+            original = generate.FINGERPRINT_CARRIERS
+            try:
+                generate.FINGERPRINT_CARRIERS = (carrier,)
+                stamped = generate.carriers(digest)[carrier]
+            finally:
+                generate.FINGERPRINT_CARRIERS = original
+        self.assertIn(f'SPEC_FINGERPRINT = "{digest}"', stamped)
+        self.assertNotIn(stale, stamped)
+        self.assertIn("VALUE = 1", stamped, "only the stamp may change")
+
+    def test_carriers_rejects_a_carrier_without_the_constant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            carrier = Path(tmp) / "_generated.py"
+            carrier.write_text('SPEC_FINGERPRINT = "not-a-digest"\n', encoding="utf-8")
+            original = generate.FINGERPRINT_CARRIERS
+            try:
+                generate.FINGERPRINT_CARRIERS = (carrier,)
+                with self.assertRaises(ValueError):
+                    generate.carriers("a" * 64)
+            finally:
+                generate.FINGERPRINT_CARRIERS = original
 
 
 if __name__ == "__main__":

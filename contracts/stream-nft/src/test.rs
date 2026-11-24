@@ -105,16 +105,24 @@ impl TestFixture {
     }
 
     fn create_stream(&self, duration: u64, cancelable: bool) -> u64 {
+        self.create_stream_for(&self.recipient, duration, cancelable)
+    }
+
+    fn create_stream_for(&self, recipient: &Address, duration: u64, cancelable: bool) -> u64 {
         let now = self.env.ledger().timestamp();
         self.core_client.create_stream(
             &self.sender,
-            &self.recipient,
+            recipient,
             &self.token,
             &DEPOSIT,
             &now,
             &(now + duration),
             &cancelable,
         )
+    }
+
+    fn fund_sender(&self, extra_amount: i128) {
+        StellarAssetClient::new(&self.env, &self.token).mint(&self.sender, &extra_amount);
     }
 
     fn deploy_nft(&self, stream_id: u64) -> (Address, StreamNftClient<'static>) {
@@ -485,4 +493,367 @@ fn test_burn_from_with_operator_allowance() {
     // Operator burns NFT via burn_from
     nft.burn_from(&operator, &f.recipient, &1);
     assert_eq!(nft.try_owner().unwrap_err().unwrap(), NftError::TokenBurned);
+}
+
+// -----------------------------------------------------------------------------
+// Property Tests: Token Supply & Stream-Linkage Invariants
+// -----------------------------------------------------------------------------
+
+mod proptest_invariants {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::BTreeSet;
+    use std::vec::Vec;
+
+    const NUM_ACTORS: usize = 4;
+    const MAX_STREAMS: usize = 4;
+
+    #[derive(Clone, Debug)]
+    enum Op {
+        Mint { slot: usize, actor: usize },
+        Transfer { slot: usize, from: usize, to: usize },
+        Burn { slot: usize, actor: usize },
+        CancelAndFinalize { slot: usize },
+        FinalizeWhileActive { slot: usize },
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum TokenState {
+        Unminted,
+        Minted(usize),
+        Burned,
+    }
+
+    struct Slot {
+        stream_id: u64,
+        initial_recipient: usize,
+        nft: StreamNftClient<'static>,
+        state: TokenState,
+        stream_cancelled: bool,
+    }
+
+    fn op_strategy() -> impl Strategy<Value = Op> {
+        prop_oneof![
+            3 => (0..MAX_STREAMS, 0..NUM_ACTORS)
+                .prop_map(|(slot, actor)| Op::Mint { slot, actor }),
+            4 => (0..MAX_STREAMS, 0..NUM_ACTORS, 0..NUM_ACTORS)
+                .prop_map(|(slot, from, to)| Op::Transfer { slot, from, to }),
+            2 => (0..MAX_STREAMS, 0..NUM_ACTORS)
+                .prop_map(|(slot, actor)| Op::Burn { slot, actor }),
+            1 => (0..MAX_STREAMS)
+                .prop_map(|slot| Op::CancelAndFinalize { slot }),
+            1 => (0..MAX_STREAMS)
+                .prop_map(|slot| Op::FinalizeWhileActive { slot }),
+        ]
+    }
+
+    fn assert_invariants(f: &TestFixture, slots: &[Slot], actors: &[Address]) {
+        let mut total_supply: i128 = 0;
+        let mut live_linked_tokens: usize = 0;
+        let mut seen_live_stream_ids: BTreeSet<u64> = BTreeSet::new();
+
+        for slot in slots {
+            // Every companion NFT remains bound to its exact stream and core contract.
+            assert_eq!(slot.nft.stream_id(), slot.stream_id);
+            assert_eq!(slot.nft.core_contract(), f.core_address);
+
+            // Underlying stream reference in core is never orphaned or corrupted.
+            let stream = f.core_client.get_stream(&slot.stream_id);
+            assert_eq!(stream.recipient, actors[slot.initial_recipient]);
+
+            let mut slot_supply: i128 = 0;
+            for (idx, actor) in actors.iter().enumerate() {
+                let bal = slot.nft.balance(actor);
+                match slot.state {
+                    TokenState::Minted(owner) if owner == idx => {
+                        assert_eq!(bal, 1, "owner must hold balance 1");
+                    }
+                    _ => {
+                        assert_eq!(bal, 0, "non-owner or non-live token must hold balance 0");
+                    }
+                }
+                slot_supply += bal;
+            }
+
+            match slot.state {
+                TokenState::Minted(owner) => {
+                    assert_eq!(slot.nft.owner(), actors[owner]);
+                    assert_eq!(slot_supply, 1);
+                    assert!(
+                        seen_live_stream_ids.insert(slot.stream_id),
+                        "each minted token must map to a unique stream"
+                    );
+                    live_linked_tokens += 1;
+                }
+                TokenState::Unminted => {
+                    assert_eq!(
+                        slot.nft.try_owner().unwrap_err().unwrap(),
+                        NftError::NotMinted
+                    );
+                    assert_eq!(slot_supply, 0);
+                }
+                TokenState::Burned => {
+                    assert_eq!(
+                        slot.nft.try_owner().unwrap_err().unwrap(),
+                        NftError::TokenBurned
+                    );
+                    assert_eq!(slot_supply, 0);
+                }
+            }
+
+            total_supply += slot_supply;
+        }
+
+        // Total supply across all actors and tokens always equals the count of live linked tokens.
+        assert_eq!(total_supply, live_linked_tokens as i128);
+        assert_eq!(seen_live_stream_ids.len(), live_linked_tokens);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 32,
+            ..ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_supply_and_linkage_invariants_under_random_ops(
+            num_streams in 1usize..=MAX_STREAMS,
+            ops in prop::collection::vec(op_strategy(), 1..=30),
+        ) {
+            let f = TestFixture::setup();
+            f.fund_sender((MAX_STREAMS as i128) * DEPOSIT);
+
+            let mut actors = Vec::with_capacity(NUM_ACTORS);
+            actors.push(f.recipient.clone());
+            for _ in 1..NUM_ACTORS {
+                actors.push(Address::generate(&f.env));
+            }
+
+            let mut slots = Vec::with_capacity(num_streams);
+            for i in 0..num_streams {
+                let initial_recipient = i % NUM_ACTORS;
+                let stream_id = f.create_stream_for(&actors[initial_recipient], 10 * DAY, true);
+                let (_nft_addr, nft) = f.deploy_nft(stream_id);
+                slots.push(Slot {
+                    stream_id,
+                    initial_recipient,
+                    nft,
+                    state: TokenState::Unminted,
+                    stream_cancelled: false,
+                });
+            }
+
+            assert_invariants(&f, &slots, &actors);
+
+            for op in ops {
+                match op {
+                    Op::Mint { slot, actor } => {
+                        let s = &mut slots[slot % num_streams];
+                        let res = s.nft.try_mint(&actors[actor]);
+                        match s.state {
+                            TokenState::Burned => {
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::TokenBurned);
+                            }
+                            TokenState::Minted(_) => {
+                                // Double-mint for the same stream must return AlreadyMinted.
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::AlreadyMinted);
+                            }
+                            TokenState::Unminted => {
+                                if s.stream_cancelled {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::StreamNotActive
+                                    );
+                                } else if actor != s.initial_recipient {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::NotAuthorized
+                                    );
+                                } else {
+                                    prop_assert!(res.is_ok());
+                                    s.state = TokenState::Minted(actor);
+                                }
+                            }
+                        }
+                    }
+                    Op::Transfer { slot, from, to } => {
+                        let s = &mut slots[slot % num_streams];
+                        let res = s.nft.try_transfer(&actors[from], &actors[to], &1);
+                        match s.state {
+                            TokenState::Burned => {
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::TokenBurned);
+                            }
+                            TokenState::Unminted => {
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::NotMinted);
+                            }
+                            TokenState::Minted(owner) => {
+                                if from != owner {
+                                    // Transfer by non-owner must return NotAuthorized.
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::NotAuthorized
+                                    );
+                                } else {
+                                    prop_assert!(res.is_ok());
+                                    s.state = TokenState::Minted(to);
+                                }
+                            }
+                        }
+                    }
+                    Op::Burn { slot, actor } => {
+                        let s = &mut slots[slot % num_streams];
+                        let res = s.nft.try_burn(&actors[actor], &1);
+                        match s.state {
+                            TokenState::Burned => {
+                                // Burn of an already-burned (non-existent) token returns TokenBurned.
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::TokenBurned);
+                            }
+                            TokenState::Unminted => {
+                                // Burn of an unminted (non-existent) token returns NotMinted.
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::NotMinted);
+                            }
+                            TokenState::Minted(owner) => {
+                                if actor != owner {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::NotAuthorized
+                                    );
+                                } else {
+                                    prop_assert!(res.is_ok());
+                                    s.state = TokenState::Burned;
+                                }
+                            }
+                        }
+                    }
+                    Op::CancelAndFinalize { slot } => {
+                        let s = &mut slots[slot % num_streams];
+                        if !s.stream_cancelled {
+                            f.core_client.cancel_stream(&f.sender, &s.stream_id);
+                            s.stream_cancelled = true;
+                        }
+                        let res = s.nft.try_finalize_and_burn();
+                        match s.state {
+                            TokenState::Burned => {
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::TokenBurned);
+                            }
+                            TokenState::Unminted => {
+                                prop_assert_eq!(res.unwrap_err().unwrap(), NftError::NotMinted);
+                            }
+                            TokenState::Minted(_) => {
+                                prop_assert!(res.is_ok());
+                                s.state = TokenState::Burned;
+                            }
+                        }
+                    }
+                    Op::FinalizeWhileActive { slot } => {
+                        let s = &mut slots[slot % num_streams];
+                        if !s.stream_cancelled {
+                            let res = s.nft.try_finalize_and_burn();
+                            match s.state {
+                                TokenState::Burned => {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::TokenBurned
+                                    );
+                                }
+                                TokenState::Unminted => {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::NotMinted
+                                    );
+                                }
+                                TokenState::Minted(_) => {
+                                    prop_assert_eq!(
+                                        res.unwrap_err().unwrap(),
+                                        NftError::StreamNotFinalized
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                assert_invariants(&f, &slots, &actors);
+            }
+        }
+
+        #[test]
+        fn prop_negative_paths_return_registered_errors(
+            non_owner_offset in 1usize..NUM_ACTORS,
+            target_idx in 0usize..NUM_ACTORS,
+        ) {
+            let f = TestFixture::setup();
+            let mut actors = Vec::with_capacity(NUM_ACTORS);
+            actors.push(f.recipient.clone());
+            for _ in 1..NUM_ACTORS {
+                actors.push(Address::generate(&f.env));
+            }
+
+            let stream_id = f.create_stream(10 * DAY, true);
+            let (_nft_addr, nft) = f.deploy_nft(stream_id);
+
+            let owner = &actors[0];
+            let non_owner = &actors[non_owner_offset];
+            let target = &actors[target_idx];
+
+            // Burn of a non-existent (unminted) token must return NotMinted.
+            prop_assert_eq!(
+                nft.try_burn(owner, &1).unwrap_err().unwrap(),
+                NftError::NotMinted
+            );
+            // Transfer of an unminted token must return NotMinted.
+            prop_assert_eq!(
+                nft.try_transfer(owner, target, &1).unwrap_err().unwrap(),
+                NftError::NotMinted
+            );
+
+            // Mint once to the stream recipient.
+            nft.mint(owner);
+
+            // Double-mint for the same stream must return AlreadyMinted.
+            prop_assert_eq!(
+                nft.try_mint(owner).unwrap_err().unwrap(),
+                NftError::AlreadyMinted
+            );
+            prop_assert_eq!(
+                nft.try_mint(non_owner).unwrap_err().unwrap(),
+                NftError::AlreadyMinted
+            );
+
+            // Transfer by non-owner must return NotAuthorized and preserve owner/link.
+            prop_assert_eq!(
+                nft.try_transfer(non_owner, target, &1).unwrap_err().unwrap(),
+                NftError::NotAuthorized
+            );
+            prop_assert_eq!(nft.owner(), owner.clone());
+            prop_assert_eq!(nft.stream_id(), stream_id);
+
+            // Burn by non-owner must return NotAuthorized.
+            prop_assert_eq!(
+                nft.try_burn(non_owner, &1).unwrap_err().unwrap(),
+                NftError::NotAuthorized
+            );
+
+            // Owner burns the token.
+            nft.burn(owner, &1);
+
+            // Burn of a now non-existent (burned) token must return TokenBurned.
+            prop_assert_eq!(
+                nft.try_burn(owner, &1).unwrap_err().unwrap(),
+                NftError::TokenBurned
+            );
+            // Re-mint after burn must return TokenBurned.
+            prop_assert_eq!(
+                nft.try_mint(owner).unwrap_err().unwrap(),
+                NftError::TokenBurned
+            );
+            // Transfer after burn must return TokenBurned.
+            prop_assert_eq!(
+                nft.try_transfer(owner, target, &1).unwrap_err().unwrap(),
+                NftError::TokenBurned
+            );
+            // Underlying stream reference remains intact.
+            prop_assert_eq!(f.core_client.get_stream(&stream_id).recipient, owner.clone());
+        }
+    }
 }

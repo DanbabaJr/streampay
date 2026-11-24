@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://streampay.local/schemas/ttl-dry-run-report.schema.json",
+  "title": "StreamPay TTL Sentinel Dry-Run Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractId",
+    "atLedger",
+    "dryRun",
+    "assumptions",
+    "entries",
+    "healthy",
+    "estimatedTotalStroops",
+    "transactions"
+  ],
+  "properties": {
+    "contractId": { "type": "string", "minLength": 1 },
+    "atLedger": { "type": "integer", "minimum": 0 },
+    "dryRun": { "type": "boolean", "const": true },
+    "assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feeModel",
+        "feePer1KbStroops",
+        "rentConstantsDocumentation"
+      ],
+      "properties": {
+        "feeModel": { "type": "string" },
+        "feePer1KbStroops": { "type": "string", "pattern": "^[0-9]+$" },
+        "rentConstantsDocumentation": {
+          "type": "string",
+          "const": "docs/FOOTPRINT.md"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "cls",
+          "currentTtlLedgers",
+          "requiredTtlLedgers",
+          "estimatedRentStroops"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "cls": {
+            "type": "string",
+            "enum": ["stream", "index", "counter", "instance", "code"]
+          },
+          "currentTtlLedgers": { "type": "integer", "minimum": 0 },
+          "requiredTtlLedgers": { "type": "integer", "minimum": 1 },
+          "estimatedRentStroops": { "type": "string", "pattern": "^[0-9]+$" }
+        }
+      }
+    },
+    "healthy": { "type": "integer", "minimum": 0 },
+    "estimatedTotalStroops": { "type": "string", "pattern": "^[0-9]+$" },
+    "transactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "ledgerKeys",
+          "extendTo",
+          "estimatedRentStroops"
+        ],
+        "properties": {
+          "operation": { "type": "string", "const": "ExtendFootprintTTL" },
+          "ledgerKeys": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "extendTo": { "type": "integer", "minimum": 1 },
+          "estimatedRentStroops": { "type": "string", "pattern": "^[0-9]+$" }
+        }
+      }
+    }
+  }
+}

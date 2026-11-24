@@ -6,6 +6,56 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
+## v1.0.6 — 2026-11-24 (`main` repair #697: session-key, commit-reveal and insurance surfaces withdrawn)
+
+Eight registry entries disappear (entry count 70 → 62): `AgentAuthorized` and
+`AgentRevoked` (added in v1.0.5 by #660), plus `PolicyViolation`, `PowerAccrued`,
+`PremiumAccrued`, `SenderPolicyRevoked`, `SenderPolicySet` and `VoteCast` (added
+by #626, whose registry regeneration landed without a changelog entry — recorded
+here so the count is auditable).
+
+A third surface is withdrawn without any registry change: #677's commit-reveal
+claims emitted `ClaimCommitted`, `ClaimRevealed` and `ClaimExpired`, but `main`'s
+registry never carried those entries, so deleting `commit_claim`, `reveal_claim`,
+`expire_reveal` and `get_claim_commitment` removes shapes that were never
+published.
+
+All three withdrawals share one reason: the tree they produced measured 140,693
+bytes of contract code, past Soroban's 131,072-byte limit, so no build of `main`
+containing them could be deployed and nothing shipped ever emitted these events.
+#626 additionally drained the insurance pool on an unauthenticated path. Each
+removal carries a grant in [removals.json](removals.json); `v0.2.0`/`v0.3.0` hold
+none of these shapes, so no v1 → v2 coexistence is needed. Re-landing any of
+these designs needs its own contract — see
+[docs/WASM_SIZE.md](../../docs/WASM_SIZE.md).
+
+## v1.0.5 — 2026-11-21 (session-key delegation, #660)
+
+> Superseded by v1.0.6: these two events were withdrawn with the delegated-agent
+> entrypoints that emitted them.
+
+Two additive events; no existing event changed shape (entry count 62 → 64).
+Both carry the positional topics `stream_id:u64` and `agent:Address`:
+
+- `AgentAuthorized`: added event (data `max_per_period`, `max_per_stream`, `period_duration`, `expires_at`) — emitted by `authorize_agent` when a recipient delegates withdrawal rights to a session key under explicit caps and an expiry.
+- `AgentRevoked`: added event (data `revoked_by`) — emitted by `revoke_agent` when the recipient withdraws that delegation.
+
+## v1.0.4 — 2026-11-20 (receivables advances, release conditions, stream templates and callback hooks, #620)
+
+Eleven additive events; no existing event changed shape (entry count 51 → 62).
+
+- `AdvanceDrawn`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `fee`, `repayment_bps`) — emitted when `draw_advance` lends against a recipient's unaccrued stream value.
+- `AdvanceRepaid`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `remaining_owed`) — emitted when `repay_advance` settles part or all of an outstanding advance.
+- `AdvanceLiquidated`: added event (topic `stream_id:u64`, data `recipient`, `lender`, `amount`, `remaining_unpaid`) — emitted when a cancellation intercepts the refund to settle an advance that outlived its stream.
+- `ConditionRegistered`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when `register_condition` attaches an oracle-attested release predicate to a stream.
+- `ConditionMet`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when quorum attestations satisfy a registered condition and the release gate opens.
+- `ConditionExpired`: added event (topic `stream_id:u64`, data `condition_id`) — emitted when a condition passes its horizon unmet and stops gating withdrawals.
+- `TemplateApproved`: added event (topic `template_id:u32`, data `version`, `token`, `duration`) — emitted when an admin approves a template revision for instantiation.
+- `TemplateInstantiated`: added event (topic `template_id:u32`, data `version`, `stream_id`, `sender`, `recipient`, `deposit`) — emitted when `instantiate_template` opens a stream from an approved template, recording the lineage edge.
+- `HookRegistered`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`, `selector`) — emitted when a stream attaches a post-action callback to an event class.
+- `HookInvoked`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`) — emitted after the hook-bearing action's state is committed and the callback ran successfully.
+- `HookFailed`: added event (topic `stream_id:u64`, data `event_class`, `callback_contract`, `error_code`) — emitted when a callback traps; the guarded action's fate follows the hook's failure policy.
+
 ## v1.0.3 — 2026-10-25 (stream pause / resume, issue #24)
 
 Two additive events; no existing event changed shape (entry count 49 → 51).

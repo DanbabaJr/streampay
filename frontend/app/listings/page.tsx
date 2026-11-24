@@ -9,6 +9,8 @@ import type {
   ListingStatus,
 } from "@/lib/discovery/types";
 import { fetchDiscoveryListings } from "@/lib/discovery/client";
+import { useT } from "@/lib/i18n/provider";
+import EmptyState from "@/components/EmptyState";
 
 const RATE_BUCKET_LABELS: Record<RateBucket, string> = {
   RATE_MICRO: "< 10 / day (Micro)",
@@ -27,6 +29,7 @@ const DURATION_BUCKET_LABELS: Record<DurationBucket, string> = {
 };
 
 export default function DiscoveryBrowsePage() {
+  const t = useT();
   const [listings, setListings] = useState<PublicListingView[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
@@ -208,12 +211,11 @@ export default function DiscoveryBrowsePage() {
         </div>
       ) : listings.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "40px" }}>
-          <h3>No Listings Found</h3>
-          <p className="muted">
-            {includeLowAnonymity
-              ? "No streams match the selected filters."
-              : `No streams match the current filters that meet the ${kThreshold}-anonymity threshold. Enable "Show low-anonymity streams" above to inspect rare streams.`}
-          </p>
+          <EmptyState
+            title={t("empty.listings.title")}
+            body={t("empty.listings.body")}
+            action={{ href: "/", label: t("empty.listings.action") }}
+          />
         </div>
       ) : (
         <>

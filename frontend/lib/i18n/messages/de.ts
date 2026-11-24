@@ -32,8 +32,30 @@ export const de: Record<MessageKey, string> = {
   "chrome.apiDocs": "API-Doku ↗",
   "chrome.simulatorLink": "Accrual-Simulator →",
 
+  "settings.navigation": "Einstellungen",
+  "settings.title": "Einstellungen",
+  "settings.description": "Verwalte Benachrichtigungen, Webhooks und Telemetrie im Browser.",
+  "settings.notifications": "Benachrichtigungen",
+  "settings.webhooks": "Webhook-Endpunkte",
+  "settings.telemetry": "Telemetrie",
+  "telemetry.title": "Telemetrie und Tracing",
+  "telemetry.description": "Lege fest, ob dieser Browser Diagnose-Traces exportiert. Die Auswahl gilt sofort und wird auf diesem Gerät gespeichert.",
+  "telemetry.scope": "Diese Einstellung steuert browserseitige Traces und Transaktionskorrelationsanfragen. Serverseitiges Tracing wird durch die Bereitstellung konfiguriert.",
+  "telemetry.statusEnabled": "Telemetrie ist aktiviert.",
+  "telemetry.statusDisabled": "Telemetrie ist deaktiviert.",
+  "telemetry.toggleLabel": "Diagnose-Telemetrie erlauben",
+  "telemetry.toggleHelp": "Wenn deaktiviert, exportiert dieser Browser keine Spans und Transaktionskorrelationsdaten mehr.",
+  "telemetry.collectedTitle": "Enthaltene Telemetriedaten",
+  "telemetry.spans": "Trace-Spans können Vorgangsnamen und -typen, Erfolgs- oder Fehlerstatus, Zeitstempel und Dauer, generierte Trace- und Span-IDs, Eltern- und Link-Beziehungen, Dienstname und -version der App, Ereignisnamen sowie bereinigte Attribute enthalten.",
+  "telemetry.correlation": "Nach einer Transaktion können Korrelationsdaten deren Transaktions-Hash, Trace-Kontext und optionale Stream-ID enthalten. Sie werden an den konfigurierten Indexer gesendet, damit ein späteres Ledger-Ereignis mit dem Browser-Trace verknüpft werden kann.",
+  "telemetry.destinations": "Abgeschlossene Spans werden an den über NEXT_PUBLIC_OTEL_EXPORTER_OTLP_ENDPOINT konfigurierten OTLP-HTTP-Collector gesendet (Standard: http://localhost:4318/v1/traces). Korrelationsdaten gehen an den über NEXT_PUBLIC_INDEXER_URL konfigurierten Indexer (Standard: http://localhost:8787).",
+  "telemetry.privacyTitle": "Filter und Grenzen",
+  "telemetry.privacy": "Telemetrieattribute lassen Felder mit den Namen amount, balance, deposit oder withdrawn aus. Adressfelder werden auf ein 8-stelliges Präfix gekürzt; Webhook-URLs werden auf ihren Ursprung reduziert; bei E-Mail-Adressen bleibt nur die Domain sichtbar; Telegram-IDs zeigen nur die letzten vier Zeichen. Muster geheimer Schlüssel und Bearer-Tokens werden in Fehlermeldungen unkenntlich gemacht. Andere Diagnosenamen und Fehlerdetails können weiterhin enthalten sein. Gib dort keine vertraulichen Informationen ein.",
+  "telemetry.storage": "Diese Auswahl wird in localStorage unter streampay:telemetryConsent gespeichert. Ohne gespeicherte Auswahl bleibt Telemetrie wie zuvor standardmäßig aktiviert.",
+
   "home.kicker": "SOROBAN · STELLAR",
   "home.title": "⚡ StreamPay",
+  "home.settings": "Einstellungen",
   "home.browse": "Verzeichnis durchsuchen →",
   "home.unitsWord": "Einheiten",
   "home.tagline":
@@ -62,6 +84,19 @@ export const de: Record<MessageKey, string> = {
   "home.walletMissing": "Freighter nicht erkannt — Erweiterung installieren und neu laden.",
   "home.walletNoAddress": "Freighter hat keine Adresse zurückgegeben.",
   "home.walletFailed": "Wallet-Verbindung fehlgeschlagen: {reason}",
+
+  "empty.dashboard.title": "Noch keine Streams",
+  "empty.dashboard.body":
+    "Deine Zahlungs-Streams erscheinen hier. Erstelle oben deinen ersten Stream oder stöbere im Verzeichnis.",
+  "empty.dashboard.action": "Verzeichnis durchsuchen",
+  "empty.listings.title": "Keine Listings gefunden",
+  "empty.listings.body":
+    "Noch keine öffentlichen Streams passen zu den aktuellen Filtern. Listings bleiben verborgen, bis genügend Streams dieselben Bänder teilen — aktiviere oben „Streams mit geringer Anonymität anzeigen“ für seltene Fälle.",
+  "empty.listings.action": "Stream erstellen",
+  "empty.analytics.title": "Keine Streams zur Analyse",
+  "empty.analytics.body":
+    "Gib oben eine Stellar-Adresse ein oder erstelle deinen ersten Stream, um Akkumulationsverlauf und Ertragsprognosen zu sehen.",
+  "empty.analytics.action": "Stream erstellen",
 
   "pay.loading.title": "Zahlungslink wird geprüft",
   "pay.loading.body":
@@ -185,4 +220,62 @@ export const de: Record<MessageKey, string> = {
   "form.amountTooPrecise":
     "Dieses Token hat höchstens {decimals, number} Nachkommastellen — der eingegebene Betrag müsste gerundet werden.",
   "form.amountInvalid": "Das ist kein lesbarer Betrag.",
+  "form.recipientRequired": "Gib eine Empfängeradresse ein.",
+  "form.recipientInvalid": "Gib eine gültige Stellar-Adresse ein (G… mit gültiger Prüfsumme).",
+  "form.tokenRequired": "Gib eine Token-Vertrags-ID ein.",
+  "form.tokenInvalid": "Gib eine gültige Token-Vertrags-ID ein (C… mit gültiger Prüfsumme).",
+  "form.durationInvalid": "Gib eine Laufzeit in Tagen größer als null ein (bis zu 36.500 Tagen).",
+  "form.durationTooLong": "Die Laufzeit überschreitet das Protokollmaximum von {max, number} Sekunden.",
+  "form.depositTooSmallForDuration":
+    "Die Einzahlung ist für diese Laufzeit zu klein — mindestens {min} sind nötig, damit der Stream anwächst.",
+  "form.depositTooLarge":
+    "Die Einzahlung ist für diese Laufzeit zu groß — reduziere die Einzahlung oder verkürze die Laufzeit.",
+  "form.depositTransferFailed":
+    "Die Einzahlung konnte nicht abgebucht werden — prüfe Guthaben und Token-Freigabe für Einzahlung plus Gebühr.",
+  "form.recipientPayoutFailed":
+    "Der Empfänger konnte nicht ausgezahlt werden — prüfe, ob die Adresse eine gültige Trustline hat und autorisiert ist.",
+  "form.assetNotAllowed": "Dieses Token steht nicht auf der Zulassungsliste der Governance-Richtlinie.",
+  "form.batchEmpty": "Füge mindestens eine CSV-Zeile hinzu.",
+  "form.batchTooLarge": "Die Charge hat zu viele Zeilen (maximal {max, number}).",
+  "form.batchRowIssue": "Zeile {row, number}: {detail}",
+
+  "notFound.notFound": "Nicht gefunden",
+  "notFound.badRequest": "Anfrageproblem",
+  "notFound.stream.title": "Stream nicht gefunden",
+  "notFound.stream.lookedFor": "Wir haben nach der Stream-ID in dieser URL gesucht.",
+  "notFound.stream.why":
+    "Auf diesem Netzwerk gibt es keinen Stream mit dieser ID. Er wurde möglicherweise nie erstellt, oder der Link ist unvollständig.",
+  "notFound.stream.next":
+    "Prüfe die Stream-ID oder kehre zur Übersicht zurück und öffne den Stream aus deiner Liste.",
+  "notFound.stream.malformedTitle": "Ungültige Stream-ID",
+  "notFound.stream.malformedBody":
+    "„{id}“ ist keine gültige Stream-ID. Stream-IDs sind ganze Zahlen.",
+  "notFound.address.title": "Adresse nicht gefunden",
+  "notFound.address.lookedFor": "Wir haben nach der Stellar-Adresse in dieser URL gesucht.",
+  "notFound.address.why":
+    "Diese Adresse hat auf diesem Netzwerk noch keine Zahlungs-Streams erstellt oder empfangen.",
+  "notFound.address.next":
+    "Prüfe die Adresse auf Tippfehler oder beginne in der Übersicht mit deinen eigenen Streams.",
+  "notFound.address.malformedTitle": "Ungültige Adresse",
+  "notFound.address.malformedBody":
+    "„{address}“ ist keine gültige Stellar-Adresse. Sie muss ein 56-stelliger öffentlicher Schlüssel sein, der mit G beginnt.",
+  "notFound.pay.title": "Zahlungslink nicht gefunden",
+  "notFound.pay.lookedFor": "Wir haben nach der Zahlungsreferenz in diesem Link gesucht.",
+  "notFound.pay.why":
+    "Dieser Link ist unbekannt. Möglicherweise wurde er falsch eingegeben oder abgeschnitten.",
+  "notFound.pay.next":
+    "Bitte den Zahler, den Link erneut zu senden, oder öffne die Übersicht.",
+  "notFound.pay.malformedTitle": "Ungültiger Zahlungslink",
+  "notFound.pay.malformedBody": "Dieser Zahlungslink ist fehlerhaft oder beschädigt.",
+
+  "share.heading": "Diesen Zahlungslink teilen",
+  "share.body":
+    "Scanne den QR-Code oder kopiere den Link. Die Referenz wird in deinem Browser erzeugt und nie an Dritte gesendet.",
+  "share.qrLabel": "QR-Code für diesen Zahlungslink",
+  "share.copy": "Link kopieren",
+  "share.copyLabel": "Zahlungslink in die Zwischenablage kopieren",
+  "share.copied": "Zahlungslink in die Zwischenablage kopiert.",
+  "share.copiedButton": "Kopiert!",
+  "share.copyFailed":
+    "Der Link konnte nicht kopiert werden. Markiere ihn und kopiere ihn manuell.",
 };

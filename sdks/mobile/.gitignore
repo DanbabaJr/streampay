@@ -1,0 +1,3 @@
+# Standalone crate (not a workspace member): the lockfile is resolved per consumer.
+Cargo.lock
+/target

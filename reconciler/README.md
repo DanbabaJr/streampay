@@ -1,8 +1,14 @@
-# StreamPay Dual-Read Reconciliation Service
+# StreamPay Reconciliation Service
 
-Dual-read reconciliation service that compares stream states from **Horizon** (classic-bridge effects) against **Soroban RPC** contract state, accounts for consistency lag windows, and emits structured logs and webhooks on state divergence to detect index corruption or RPC failure.
+Pinned **three-way** reconciliation service. It reads the same stream set from
+**Soroban RPC**, **Horizon**, and the **indexer projection**, aligns them to one
+as-of ledger, applies rounding and ledger-lag tolerance, and attributes every
+divergence to a layer so it routes to the right owner. Missing or stale
+sources degrade the report with caveats; they never produce a false clean bill.
 
-Integrates with the **Issue #2 indexer dashboard withdrawal panel** via webhook dispatch.
+It also emits governance-gated **heal proposals**: typed, dry-run previewed,
+timelocked and scoped, with fail-closed execution. Integrates with the
+**Issue #2 indexer dashboard withdrawal panel** via webhook dispatch.
 
 ---
 
@@ -34,10 +40,74 @@ Integrates with the **Issue #2 indexer dashboard withdrawal panel** via webhook 
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| Horizon Reader | `src/readers/horizon.js` | Polls Horizon API for classic-bridge effects related to StreamPay streams |
-| Soroban RPC Reader | `src/readers/soroban.js` | Queries Soroban RPC `getContractData` for current contract storage state |
-| Reconciliation Engine | `src/engine/diff.js` | Compares both sources, applies consistency lag window, detects divergences |
-| Alerting Service | `src/alerting.js` | Structured JSON logging + webhook dispatch to indexer dashboard |
+| Horizon Reader | `src/readers/horizon.ts` | Polls Horizon API for classic-bridge effects and stream state |
+| Soroban RPC Reader | `src/readers/soroban.ts` | Queries Soroban RPC `getContractData` for current contract storage state |
+| Projection Reader | `src/readers/projection.js` | Reads the indexer's `/health` and `/streams/:id` projection |
+| Pinned source adapters | `src/sources/pinned.js` | Collects one aligned snapshot per source; failures become `available:false` |
+| Tolerance + as-of | `src/engine/tolerance.js` | Rounding (absolute/ppm), status normalization, as-of alignment, ledger pinning |
+| Three-way engine | `src/engine/threeway.js` | Pairwise comparison, layer attribution, confidence, dedup/flap suppression |
+| Legacy diff engine | `src/engine/diff.ts` | Two-way consistency-window comparison used by `runCycle` |
+| Suppression | `src/engine/suppression.js` | Cooldown dedup and recurring-flap suppression |
+| Alerting Service | `src/alerting.ts` | Structured JSON logging + diagnosis webhook dispatch to the indexer dashboard |
+| Heal proposals | `src/heal/proposals.js` | Typed proposals, governance approvals, timelock/TTL/veto, idempotent scoped execution |
+| Dry-run + merkle | `src/heal/dryrun.js`, `src/heal/merkle.js` | Exact change preview and before/after state roots |
+
+## Three-way reconciliation
+
+One cycle reads the configured `STREAM_IDS` from all three sources at a pinned
+ledger, excludes sources that are unavailable or farther behind than
+`AS_OF_MAX_LAG_LEDGERS`, and compares every present pair:
+
+| Disagreeing pair | Suspected layer | Routed owner |
+|---|---|---|
+| rpc↔horizon | `chain_read_rpc` / `chain_read_horizon` (whichever is odd) | `rpc-operator` / `horizon-operator` |
+| rpc↔projection | `projection` when the chain sources agree, else the odd chain read | `indexer-projection` / chain operator |
+| horizon↔projection | `projection` when the chain sources agree, else the odd chain read | `indexer-projection` / chain operator |
+| missing record while the other two agree | `ingestion` when only the projection lacks it; a chain-read layer otherwise | `indexer-ingest` / chain operator |
+| all three differ | `unknown` | `on-call-triage` |
+
+Each diagnosis carries the record id, disagreeing pairs, suspected layer,
+owner, confidence, as-of ledger, mode, tolerance, per-source evidence and the
+rule that fired. The report (`schema: streampay-reconciliation-report/v1`)
+contains `mode` (`three_way`, `degraded_two_way`, `insufficient_sources`),
+`coverage`, `caveats`, `verdict` (`clean`, `clean_degraded`, `divergent`,
+`insufficient_coverage`), summary counters and suppressed diagnoses.
+
+**No false clean bill.** A clean verdict requires all three sources available,
+aligned and compared. A missing source degrades to two-way with a caveat; fewer
+than two aligned sources produces `insufficient_coverage`, `clean: false`, and
+an explicit `unavailableReason`. `degraded_two_way` disagreements cannot be
+attributed to the missing source, so their confidence is capped at `low`.
+
+Supported tolerance knobs: `ROUNDING_TOLERANCE_ABSOLUTE`/`PPM` on 7-decimal
+amounts, `AS_OF_MAX_LAG_LEDGERS` for ledger lag, and status vocabulary
+normalization (`Active`/`active`, `Cancelled`/`canceled`, `Paused`/`paused`).
+Identical diagnoses are deduplicated for `SUPPRESSION_COOLDOWN_MS` and a
+diagnosis that recurs `FLAP_THRESHOLD` times is suppressed as flapping until it
+clears; agreement on a stream clears its suppression state.
+
+## Governance-gated heal proposals
+
+A divergence whose evidence identifies the projection as the wrong layer
+produces a typed proposal. Each proposal contains:
+
+* the diagnosis id, stream scope, tolerance used, and the exact evidence
+  targets (the chain-backed record wins over the projection);
+* a **dry-run preview** listing every record that would change and the
+  resulting merkle state root (`beforeRoot`/`afterRoot`/`previewHash`);
+* `governance`: required signatures, timelock (`executableAt`), expiry, veto
+  state, and the approving governance action.
+
+Execution is **fail-closed**: an unapproved, vetoed, expired, forged,
+duplicate-signature or unauthorized approval never executes; `HEAL_SIGNERS`
+must list the trusted ed25519 public keys (PEM) for each approver, and a
+malformed value aborts startup. The timelock must have elapsed. Execution is
+scoped to the preview (never a blanket rebuild), checkpointed per stream so a
+partial failure resumes without rewriting already-committed records, idempotent
+on re-execution, and rejects a stale preview (`STALE_PREVIEW`) when the
+projection moved after the dry run. It writes before/after roots and the
+approving governance action to the audit log and de-duplicates repeated runs.
+`HEAL_MAX_SCOPE` and `HEAL_MAX_LEDGER_RANGE` bound proposal scope.
 
 ---
 
@@ -59,6 +129,20 @@ Create a `.env` file in `reconciler/` (copy from `.env.example`):
 | `RECONCILER_ID` | No | `primary-001` | Unique instance identifier for multi-instance deployments |
 | `CONTRACT_ID` | No | — | StreamPay Soroban contract ID |
 | `STREAM_IDS` | No | — | Comma-separated stream IDs to monitor |
+| `INDEXER_URL` | No | — | Indexer API base URL; its projection is the third source |
+| `INDEXER_API_TOKEN` | No | — | Optional bearer token for the indexer API |
+| `AS_OF_MAX_LAG_LEDGERS` | No | `5` | Maximum ledger lag for a source to join the pinned comparison |
+| `ROUNDING_TOLERANCE_ABSOLUTE` | No | `0` | Absolute amount tolerance in stroops (7-decimal tokens) |
+| `ROUNDING_TOLERANCE_PPM` | No | `0` | Relative amount tolerance in parts per million |
+| `SUPPRESSION_COOLDOWN_MS` | No | `300000` | Dedup window for an identical diagnosis |
+| `FLAP_THRESHOLD` | No | `3` | Recurrences before a diagnosis is suppressed as flapping |
+| `HEAL_PROPOSALS_ENABLED` | No | `true` | Generate and execute governance-gated heal proposals |
+| `HEAL_TIMELOCK_MS` | No | `86400000` | Delay between approval and earliest execution |
+| `HEAL_TTL_MS` | No | `172800000` | Proposal expiry after creation |
+| `HEAL_REQUIRED_SIGNATURES` | No | `2` | Distinct trusted approvals required |
+| `HEAL_SIGNERS` | No | `[]` | JSON array/object of approver names to ed25519 PEM public keys |
+| `HEAL_MAX_SCOPE` | No | `25` | Maximum stream records in one proposal |
+| `HEAL_MAX_LEDGER_RANGE` | No | `1000` | Maximum as-of ledger range covered by a proposal |
 
 ---
 
@@ -134,6 +218,11 @@ Webhooks are dispatched to `WEBHOOK_URL` when a **critical** divergence is detec
 
 This feeds into the **Issue #2 indexer dashboard withdrawal panel** for operator visibility.
 
+Three-way cycles also dispatch `type: "reconciliation_diagnosis"` alerts with
+`recordId`, `disagreeingPairs`, `suspectedLayer`, `owner`, `confidence`,
+`asOfLedger`, `mode`, `caveats` and the per-source evidence, so the dashboard
+can route by owner instead of paging every divergence to on-call.
+
 ---
 
 ## Setup Commands
@@ -178,6 +267,26 @@ docker compose down
 ---
 
 ## Testing
+
+### Fixture tests (`tests/threeway.test.js`, `tests/heal.test.js`)
+
+Run without external services:
+
+```bash
+npm run test:fixtures
+```
+
+The three-way suite covers one fixture per pairwise class (RPC↔Horizon,
+RPC↔projection, Horizon↔projection), missing-record attribution, all-three
+disagreement, rounding tolerance, within-lag results, stale/missing sources
+(`degraded_two_way` and `insufficient_coverage`), cooldown dedup and flapping.
+
+The heal suite covers proposal generation with dry run, dedup, chain-read
+fail-closed behaviour, unapproved/timelock/forged/duplicate/unauthorized/
+expired/veto rejection, scoped execution reproducing the dry-run root, audit
+before/after roots, governance action logging, idempotent re-execution, stale
+preview rejection, tampered approval re-verification, partial-failure resume
+and scope violations.
 
 ### Unit Tests (`tests/diff.test.js`)
 
