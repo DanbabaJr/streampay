@@ -22,6 +22,18 @@ name: Fuzz Gate
 
 on:
   pull_request:
+    # Everything these targets fuzz lives in the contract crate, and a build
+    # break is either in `fuzz/` itself or in the workspace dependency graph. A
+    # pull request that touches none of them cannot make `cargo fuzz build` fail
+    # or a replayed seed diverge, so it does not wait 30 minutes for a verdict it
+    # could not change. `nightly-fuzz.yml` and `fuzz.yml` are unfiltered: they are
+    # the scheduled sweep that catches what a path filter could hide.
+    paths:
+      - "contracts/**"
+      - "fuzz/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/fuzz-gate.yml"
   push:
     branches: [main]
   workflow_dispatch:

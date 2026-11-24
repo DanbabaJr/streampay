@@ -1,5 +1,20 @@
 name: CI
 
+# Six checks, not thirteen. GitHub reports one check run per job, so the only
+# way to shorten the review surface is to move steps into a shared job rather
+# than rename it — and the only thing a merge costs is the independent red: a
+# step that used to fail alone now shares a check with the steps around it.
+# Where that independence was the point, the moved steps carry
+# `if: ${{ always() && !cancelled() }}` so they still run after an earlier
+# failure in the same job, and a provenance banner names the check they came
+# from. `.github/ci-gates.json` records the same migration in its `moved`
+# section, and scripts/check_ci_integrity.py --base proves against the merge
+# base that every relocated step still runs and nothing was quietly dropped.
+#
+# Storybook stays separate for a hard reason rather than a taste one: its
+# baselines are only comparable inside the pinned Playwright image, and a job
+# can declare exactly one `container:`.
+
 on:
   push:
     branches: [main]
@@ -14,7 +29,7 @@ env:
 
 jobs:
   contract:
-    name: Contract — test / fmt / clippy / wasm
+    name: Contract — build, tests, wasm, devcontainer toolchain
     runs-on: ubuntu-latest
     env:
       # The upgrade-replay test needs the built in-development wasm to compare
@@ -70,6 +85,7 @@ jobs:
       # so the very next interface addition must be #441's split, mechanically.
       # Recorded in full in docs/WASM_SIZE.md ("Gate decision — #620").
       WASM_SIZE_BUDGET_KB: 127
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -299,58 +315,58 @@ jobs:
           path: target/wasm32v1-none/release/streampay_contract.wasm
           if-no-files-found: error
 
-  event-registry:
-    name: Event registry — schema / compatibility / codegen gates
-    runs-on: ubuntu-latest
-    steps:
-      # fetch-depth 0: the compatibility checker diffs the registry against the
-      # PR base commit, which must be present in the checkout.
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      # ------------------------------------------------------------------
+      # devcontainer toolchain (was the `devcontainer-verify` check)
+      # ------------------------------------------------------------------
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain (mirrors devcontainer feature)
+        if: ${{ always() && !cancelled() }}
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
 
       - name: Cache cargo
+        if: ${{ always() && !cancelled() }}
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-devcontainer-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-devcontainer-
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
+      # Pin must stay in sync with STELLAR_CLI_VERSION in devcontainer.json
+      # and the version used in the contract / release jobs above.
+      - name: Install stellar-cli v28.1.0
+        if: ${{ always() && !cancelled() }}
+        run: bash scripts/install_stellar_cli.sh
 
-      # The registry (`schemas/events/`), the per-event JSON Schemas, the event
-      # catalogue and the TypeScript types the indexer and frontend import are
-      # all generated from the `#[contractevent]` structs. This is the same
-      # script contributors run locally (`npm run generated:events` /
-      # `generated:check`): regenerate in place, then fail on any drift —
-      # including artifacts a new event just created but nobody committed.
-      - name: Event registry artifacts are up to date
-        run: bash scripts/check_generated.sh events
+      - name: Wasm build (devcontainer path)
+        if: ${{ always() && !cancelled() }}
+        working-directory: contracts/streaming-payments
+        # Every step in this block carries `if: ${{ always() && !cancelled() }}`
+        # so it keeps running when the job stopped earlier at a formatting
+        # complaint. That is what made this an independent check rather than
+        # extra steps in the job above: it skips fmt, clippy and tests, so a red
+        # here means "the contract does not even compile" instead of "rustfmt
+        # disagreed". The one-check-per-job boundary is the only thing that
+        # moved; the isolation the check existed for is carried by the condition.
+        run: |
+          if ! stellar contract build; then
+            echo "::error::The contract does not compile. This block runs no fmt/clippy/test steps, so unlike the steps above it isolates a genuine build error — usually a duplicate StreamError discriminant (E0081), a surface.rs Branch arm that was not extended, or an entrypoint signature change. Reproduce with 'cargo check -p streampay-contract --all-targets' and 'bash scripts/check_error_codes.sh'."
+            exit 1
+          fi
 
-      # Additive-only gate (issue #213): removals or type changes against the
-      # PR base fail the build; additions must be recorded in
-      # schemas/events/CHANGELOG.md. The in-crate pin test and the publish-site
-      # gate (both part of `cargo test`) prove the registry describes the code;
-      # this gate owns the wire-compatibility verdict for consumers.
-      - name: Event compatibility check against the base
-        if: github.event_name == 'pull_request'
-        run: node scripts/event_compat_check.mjs --base "${{ github.event.pull_request.base.sha }}"
-
-      # Unit tests for the gate itself, including the seeded break demo
-      # (renaming an event field turns the checker red with a clear diff).
-      - name: Compatibility checker tests
-        run: node --test scripts/event_compat_check.test.mjs
+      - name: Assert wasm artifact is present and non-empty
+        if: ${{ always() && !cancelled() }}
+        run: |
+          wasm=target/wasm32v1-none/release/streampay_contract.wasm
+          [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
+          echo "OK: $(ls -sh "$wasm")"
 
   frontend:
-    name: Frontend — lint / typecheck / tests / build / audit
+    name: Frontend — lint / typecheck / tests / build / audit / CLI parity
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -495,6 +511,192 @@ jobs:
         run: |
           echo "::error::npm audit rejected a production dependency. Check whether the flagged package came from YOUR diff (git diff main -- frontend/package.json frontend/package-lock.json). If it did, upgrade it. If it did not, main already carries the advisory: merge main, run 'npm audit fix' (never '--force'), and if the advisory has no upstream fix say so in the PR body and ask a maintainer to add an overrides pin or an audit allow-list entry in a separate PR."
 
+      # ------------------------------------------------------------------
+      # CLI parity (was the `cli-parity` check)
+      # ------------------------------------------------------------------
+
+
+      - name: Install CLI dependencies
+        working-directory: tools/streampay-cli
+        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
+
+      - name: CLI tests including parity fixtures
+        working-directory: tools/streampay-cli
+        run: npm test
+
+      # `npm run typecheck` is intentionally not gated here yet: it surfaces
+      # pre-existing cli.ts debt (diagnostic-event/footprint decoding against
+      # the SDK 17 xdr renames, noUncheckedIndexedAccess in the arg parser)
+      # that needs an RPC-backed follow-up before it can be fixed safely.
+
+  data-plane:
+    name: Data plane — events, indexer, reconciler, TTL, perf, benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+
+      # ------------------------------------------------------------------
+      # event registry — the first job to own these steps stays the owner
+      # ------------------------------------------------------------------
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The registry (`schemas/events/`), the per-event JSON Schemas, the event
+      # catalogue and the TypeScript types the indexer and frontend import are
+      # all generated from the `#[contractevent]` structs. This is the same
+      # script contributors run locally (`npm run generated:events` /
+      # `generated:check`): regenerate in place, then fail on any drift —
+      # including artifacts a new event just created but nobody committed.
+      - name: Event registry artifacts are up to date
+        run: bash scripts/check_generated.sh events
+
+      # Additive-only gate (issue #213): removals or type changes against the
+      # PR base fail the build; additions must be recorded in
+      # schemas/events/CHANGELOG.md. The in-crate pin test and the publish-site
+      # gate (both part of `cargo test`) prove the registry describes the code;
+      # this gate owns the wire-compatibility verdict for consumers.
+      - name: Event compatibility check against the base
+        if: github.event_name == 'pull_request'
+        run: node scripts/event_compat_check.mjs --base "${{ github.event.pull_request.base.sha }}"
+
+      # Unit tests for the gate itself, including the seeded break demo
+      # (renaming an event field turns the checker red with a clear diff).
+      - name: Compatibility checker tests
+        run: node --test scripts/event_compat_check.test.mjs
+
+      # ------------------------------------------------------------------
+      # indexer (was the `indexer` check)
+      # ------------------------------------------------------------------
+
+
+      - name: Install dependencies
+        working-directory: indexer
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: indexer
+        run: npm run typecheck
+
+      - name: Tests
+        working-directory: indexer
+        run: npm test
+
+      - name: Dependency audit
+        working-directory: indexer
+        run: npm audit --omit=dev --audit-level=high
+
+      # ------------------------------------------------------------------
+      # reconciler (was the `reconciler` check)
+      # ------------------------------------------------------------------
+
+
+      - name: Install dependencies
+        working-directory: reconciler
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: reconciler
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: reconciler
+        run: npm run build
+
+      - name: Tests
+        working-directory: reconciler
+        run: npm test
+
+      - name: Soak tests
+        working-directory: reconciler
+        run: npm run soak
+
+      # ------------------------------------------------------------------
+      # ttl-sentinel (was the `ttl-sentinel` check)
+      # ------------------------------------------------------------------
+
+
+      - name: Install dependencies
+        working-directory: infra/ttl-sentinel
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: infra/ttl-sentinel
+        run: npm run typecheck
+
+      # Offline suite: fast-forwards a fake chain ledger-by-ledger to assert
+      # alert timing against the real storage cliffs, plus the rent model and
+      # the constants-sync check against contracts/streaming-payments.
+      - name: Unit + fast-forward ledger tests
+        working-directory: infra/ttl-sentinel
+        run: npm test
+
+      - name: Dependency audit
+        working-directory: infra/ttl-sentinel
+        # Production deps only (the Stellar SDK), matching the frontend job.
+        run: npm audit --omit=dev --audit-level=high
+
+      # ------------------------------------------------------------------
+      # perf-budgets (was the `perf-budgets` check)
+      # ------------------------------------------------------------------
+
+
+      - name: Install indexer dependencies
+        working-directory: indexer
+        run: npm ci
+
+      - name: Build indexer
+        working-directory: indexer
+        run: npm run build
+
+      - name: Check performance budgets (3-run median & bounds)
+        run: node perf/harness/check_budgets.mjs
+
+      - name: Seeded regression defense test
+        run: node --test perf/test/seeded_regression.test.mjs
+
+      - name: Lint runbook command freshness
+        run: ./scripts/lint_runbook_commands.sh
+
+      # The human-facing error catalog (docs/errors.md, one page per code, and
+      # frontend/lib/errors.ts) is generated from the contract's error surface.
+      # Delegated to the shared script so this gate, the contract-job gate and
+      # `npm run generated:check` cannot drift apart, and so a *newly added*
+      # code whose page was never committed also fails (plain `git diff`
+      # cannot see untracked files).
+      - name: Error catalog is up to date
+        run: bash scripts/check_generated.sh catalog
+
+      # ------------------------------------------------------------------
+      # benchmarks (was the `benchmarks` check)
+      # ------------------------------------------------------------------
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+
+      - name: Benchmark freshness & regression check
+        run: npm run benchmark:verify
+
   storybook-visual:
     name: Storybook — build / visual regression
     runs-on: ubuntu-latest
@@ -580,118 +782,6 @@ jobs:
         run: |
           echo "::error::A story no longer matches its baseline (or has none). Download the 'visual-diffs' artifact: each failed story has <id>-expected.png, <id>-actual.png and <id>-diff.png. If the change is unintended, fix the component. If it is intended, take the re-rendered set from the 'visual-baselines-linux' artifact (or run: bash frontend/scripts/visual-baselines.sh), unpack it into frontend/visual/__screenshots__/linux/, look at every changed PNG, and commit them with a note in the PR saying which stories changed and why. See docs/STORYBOOK.md."
 
-  ttl-sentinel:
-    name: TTL sentinel — typecheck / tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra/ttl-sentinel
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: infra/ttl-sentinel/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      # Offline suite: fast-forwards a fake chain ledger-by-ledger to assert
-      # alert timing against the real storage cliffs, plus the rent model and
-      # the constants-sync check against contracts/streaming-payments.
-      - name: Unit + fast-forward ledger tests
-        run: npm test
-
-      - name: Dependency audit
-        # Production deps only (the Stellar SDK), matching the frontend job.
-        run: npm audit --omit=dev --audit-level=high
-
-  indexer:
-    name: Indexer — test / typecheck / audit
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: indexer
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: indexer/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Tests
-        run: npm test
-
-      - name: Dependency audit
-        run: npm audit --omit=dev --audit-level=high
-
-  reconciler:
-    name: Reconciler — test / typecheck
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: reconciler
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: reconciler/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Tests
-        run: npm test
-
-      - name: Soak tests
-        run: npm run soak
-
-  cli-parity:
-    name: CLI — client parity smoke
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tools/streampay-cli
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: Install CLI dependencies
-        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
-
-      - name: CLI tests including parity fixtures
-        run: npm test
-
-      # `npm run typecheck` is intentionally not gated here yet: it surfaces
-      # pre-existing cli.ts debt (diagnostic-event/footprint decoding against
-      # the SDK 17 xdr renames, noUncheckedIndexedAccess in the arg parser)
-      # that needs an RPC-backed follow-up before it can be fixed safely.
-
   supply-chain:
     name: Security — advisories / licenses
     runs-on: ubuntu-latest
@@ -766,108 +856,3 @@ jobs:
       # Binary fixtures are reported by git as `-text` and are not flagged.
       - name: Tracked files are stored with LF
         run: bash scripts/check_line_endings.sh
-
-  devcontainer-verify:
-    name: Devcontainer — wasm build smoke test
-    runs-on: ubuntu-latest
-    # Verify that the wasm build works inside the exact toolchain the
-    # devcontainer ships, using the same pinned stellar-cli version.
-    # This job catches any drift between the container setup and the contract
-    # build requirements before a contributor hits it locally.
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain (mirrors devcontainer feature)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32v1-none
-
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-devcontainer-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-devcontainer-
-
-      # Pin must stay in sync with STELLAR_CLI_VERSION in devcontainer.json
-      # and the version used in the contract / release jobs above.
-      - name: Install stellar-cli v28.1.0
-        run: bash scripts/install_stellar_cli.sh
-
-      - name: Wasm build (devcontainer path)
-        working-directory: contracts/streaming-payments
-        # Deliberately *not* chained on the contract job: this one skips fmt,
-        # clippy and tests, so it is the check that says "the contract does not
-        # even compile" when the contract job stopped earlier at a formatting
-        # complaint. Explain that distinction, because the two reds otherwise
-        # look like one unexplained failure and a second unrelated one.
-        run: |
-          if ! stellar contract build; then
-            echo "::error::The contract does not compile. This job runs no fmt/clippy/test steps, so unlike the Contract job it isolates a genuine build error — usually a duplicate StreamError discriminant (E0081), a surface.rs Branch arm that was not extended, or an entrypoint signature change. Reproduce with 'cargo check -p streampay-contract --all-targets' and 'bash scripts/check_error_codes.sh'."
-            exit 1
-          fi
-
-      - name: Assert wasm artifact is present and non-empty
-        run: |
-          wasm=target/wasm32v1-none/release/streampay_contract.wasm
-          [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
-          echo "OK: $(ls -sh "$wasm")"
-
-  perf-budgets:
-    name: Perf budgets — bounds on indexer, RPC reads & frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: Install indexer dependencies
-        working-directory: indexer
-        run: npm ci
-
-      - name: Build indexer
-        working-directory: indexer
-        run: npm run build
-
-      - name: Check performance budgets (3-run median & bounds)
-        run: node perf/harness/check_budgets.mjs
-
-      - name: Seeded regression defense test
-        run: node --test perf/test/seeded_regression.test.mjs
-
-      - name: Lint runbook command freshness
-        run: ./scripts/lint_runbook_commands.sh
-
-      # The human-facing error catalog (docs/errors.md, one page per code, and
-      # frontend/lib/errors.ts) is generated from the contract's error surface.
-      # Delegated to the shared script so this gate, the contract-job gate and
-      # `npm run generated:check` cannot drift apart, and so a *newly added*
-      # code whose page was never committed also fails (plain `git diff`
-      # cannot see untracked files).
-      - name: Error catalog is up to date
-        run: bash scripts/check_generated.sh catalog
-
-  benchmarks:
-    name: Benchmarks — protocol comparison & regression defense
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32v1-none
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: Benchmark freshness & regression check
-        run: npm run benchmark:verify
-
-

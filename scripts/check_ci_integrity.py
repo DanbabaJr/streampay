@@ -41,7 +41,12 @@ What it checks
   gates      every named step that existed in --base still exists in the same
              job here, plus everything listed in the must_have inventory of
              .github/ci-gates.json. Retiring a gate is allowed, but only by
-             recording it under "retired" with a reason, in the open.
+             recording it under "retired" with a reason, in the open. A job
+             that is *re-homed* - folded into another job because the check
+             surface is being consolidated, not because the gate is unwanted -
+             is recorded under "moved" with its destination and a reason, which
+             is checked the same way: every named step it had must be running in
+             the destination job here.
   encoding   no tracked text file is committed as UTF-16, with a UTF-8 BOM, or
              containing any C0 control byte (0x00-0x1F) other than tab and LF,
              or a CR that is not part of a CRLF pair
@@ -64,6 +69,7 @@ import argparse
 import collections.abc
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -104,7 +110,7 @@ SKIP_DIRS = {".git", "node_modules", "target", ".next", "dist", "build",
              "coverage", ".venv", "venv", "__pycache__", ".cargo"}
 WORKFLOW_DIR = ".github/workflows"
 GATES_FILE = ".github/ci-gates.json"
-ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "gates", "encoding")
+ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "paths", "gates", "encoding")
 
 
 class DupKeyLoader(yaml.SafeLoader):
@@ -301,6 +307,26 @@ def check_workflows(root, ref=None):
                     if "with" in step and not has_uses:
                         problems.append(("steps", rel, 0,
                                          f"{where} ({label}): has with: but no uses: to pass it to"))
+                    if "working-directory" in step and has_uses and not has_run:
+                        # Measured, not inferred. Probe run 45373317235 (a step
+                        # with uses:, no run:, and working-directory:) gives a
+                        # run named after the file path with 0 jobs and no logs -
+                        # GitHub refuses to load the workflow. Its control, probe
+                        # run 45373319494 (the same directory set with job-level
+                        # `defaults: run: working-directory:`), loads and runs.
+                        # So the job-level form is fine and the step-level form
+                        # is not. PyYAML accepts both, so nothing else here
+                        # notices. A workflow that silently produces no checks is
+                        # worse than one that fails loudly: every gate reads green
+                        # because no gate ran.
+                        problems.append((
+                            "steps", rel, 0,
+                            f"{where} ({label}): has working-directory: on a step with uses: and no run:. "
+                            "GitHub refuses to load the whole workflow file, so the run gets 0 jobs and the "
+                            "pull request shows no checks at all. `working-directory` belongs to run: steps; "
+                            "pass the destination to the action instead (actions/checkout uses `with: "
+                            "path:`) or set it job-wide with `defaults: run: working-directory:`.",
+                        ))
                     if has_uses:
                         ref_text = str(step["uses"])
                         if ref_text.startswith("./"):
@@ -342,6 +368,114 @@ def check_workflows(root, ref=None):
 # ---------------------------------------------------------------------------
 # required gates
 # ---------------------------------------------------------------------------
+
+def tracked_paths(root, ref=None):
+    """Every tracked path in the checkout, no extension filter."""
+    names = None
+    if ref:
+        proc = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref], cwd=root,
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode == 0:
+            names = proc.stdout.splitlines()
+    if names is None:
+        proc = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        if proc.returncode == 0 and proc.stdout.strip():
+            names = proc.stdout.split("\0")
+    if names is None:  # not a git checkout: walk instead
+        names = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            names.extend(os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/")
+                         for n in filenames)
+    return {n for n in names if n}
+
+
+def filter_prefix(pattern):
+    """The glob-free leading path of a paths: pattern, or "" if it has none.
+
+    GitHub's filter grammar here is * (within one path segment), ** , ? and a
+    bracket class, so the first occurrence of any of those ends the literal
+    part. "" means the pattern is not anchored to a directory that could be
+    shown to exist or not exist, so nothing may be concluded from it.
+    """
+    if pattern.startswith("$"):  # an expression, not a path
+        return ""
+    head = re.split(r"[*?\[]", pattern.lstrip("!"))[0]
+    head = head[2:] if head.startswith("./") else head
+    return head.rstrip("/")
+
+
+def can_match(paths, prefix):
+    if not prefix or prefix == ".":
+        return True
+    if prefix in paths:
+        return True
+    return any(name.startswith(prefix + "/") for name in paths)
+
+
+def line_of(text, needle):
+    for number, line in enumerate(text.splitlines(), 1):
+        if needle in line:
+            return number
+    return 0
+
+
+def check_path_filters(root, ref=None):
+    """paths: / paths-ignore: entries that no file in the repo can satisfy.
+
+    A dead filter is the quiet twin of the parse rejection: the job does not
+    fail, it never runs, and the pull request reads green because the only
+    evidence that the gate exists is an absent check. infra.yml carried
+    "deploy/**" for a directory that has never existed in this repository's
+    history (git log --all -- deploy is empty), so its IaC proof silently
+    stopped running on any PR that did not also touch infra/ or digests/.
+    """
+    problems = []
+    files = list_workflows(root, ref)
+    if files is None:
+        return [("paths", WORKFLOW_DIR, 0,
+                 f"could not list workflows at ref {ref}, so no filter could be judged")]
+    if not files:
+        return problems
+    paths = tracked_paths(root, ref)
+    for rel in files:
+        text = read_any(root, ref, rel)
+        if text is None:
+            continue
+        docs, parse_error, _ = parse_yaml(text)
+        if parse_error:
+            continue  # the parse rule already covers this file
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            triggers = doc.get("on", doc.get(True))
+            if not isinstance(triggers, dict):
+                continue
+            for event, config in triggers.items():
+                if not isinstance(config, dict):
+                    continue
+                for key in ("paths", "paths-ignore"):
+                    patterns = config.get(key)
+                    if not isinstance(patterns, list):
+                        continue
+                    for pattern in patterns:
+                        if not isinstance(pattern, str):
+                            continue
+                        prefix = filter_prefix(pattern)
+                        if can_match(paths, prefix):
+                            continue
+                        problems.append((
+                            "paths", rel, line_of(text, pattern),
+                            f"{event}.{key} pattern {pattern!r} can never match: nothing named "
+                            f"{prefix!r} exists in the repository. A job gated only by this pattern "
+                            "does not fail, it silently never runs -- which reads as green. Create the "
+                            "path, drop the pattern, or (if the directory was renamed) fix every "
+                            "workflow still filtering on the old name.",
+                        ))
+    return problems
+
 
 def load_inventory(root, ref=None):
     text = read_any(root, ref, GATES_FILE)
@@ -386,6 +520,50 @@ def gate_problems(root, base=None):
             steps_cache[rel] = (None, None) if text is None else named_steps_per_job(text)
         return steps_cache[rel]
 
+    # "moved": a job folded into another job, with its steps still expected to
+    # run there. Consolidating the check surface is a legitimate change; the
+    # point of this gate is that a gate cannot quietly vanish, and a move is
+    # only a move if the destination really carries everything. A PR that
+    # invents a destination is caught by the existence test below, and one that
+    # moves a job and drops a step on the way is caught exactly as a deletion
+    # would be.
+    moved = {}
+    for inv in (inventory_base, inventory_here):
+        for workflow, jobs in (inv.get("moved") or {}).items():
+            key = os.path.basename(workflow)
+            for old_job, entry in (jobs or {}).items():
+                dest = entry.get("to") if isinstance(entry, dict) else entry
+                reason = entry.get("reason") if isinstance(entry, dict) else ""
+                if not dest:
+                    problems.append(("gates", GATES_FILE, 0,
+                                     f"moved entry '{key}' / '{old_job}' names no destination job. "
+                                     "Record where the steps went, in the open."))
+                    continue
+                if not str(reason or "").strip():
+                    problems.append(("gates", GATES_FILE, 0,
+                                     f"moved entry '{key}' / '{old_job}' -> '{dest}' has no reason. "
+                                     "A move needs the same justification a retirement does."))
+                moved.setdefault(key, {})[old_job] = str(dest)
+    for key, pairs in moved.items():
+        for old_job, dest in pairs.items():
+            if old_job == dest:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' points at itself"))
+            elif dest in pairs:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' -> '{dest}', which is itself a move. "
+                                 "Chains are not followed: point at the job that runs the steps now."))
+            present, _ = steps_here(f"{WORKFLOW_DIR}/{key}")
+            if present is not None and dest not in present:
+                problems.append(("gates", GATES_FILE, 0,
+                                 f"moved entry '{key}' / '{old_job}' -> '{dest}', but no job '{dest}' "
+                                 "exists in this branch's workflow. The steps went nowhere."))
+
+    def home(key, job_id, present):
+        """The job a base job's steps must be found in here, after any move."""
+        dest = moved.get(key, {}).get(job_id, job_id)
+        return dest, dest in present
+
     # 1. must_have: the curated floor. The inventory itself is read from --base,
     #    so a pull request cannot lower it; the steps are verified here.
     for workflow, jobs in (inventory_base.get("must_have") or {}).items():
@@ -399,18 +577,24 @@ def gate_problems(root, base=None):
             problems.append(("gates", workflow, 0,
                              f"cannot verify the required steps, the workflow does not parse: {parse_error}"))
             continue
-        allowed = retired.get(os.path.basename(workflow), {})
+        key = os.path.basename(workflow)
+        allowed = retired.get(key, {})
         for job_id, names in (jobs or {}).items():
+            dest, dest_present = home(key, job_id, present)
             for name in names:
                 if name in allowed.get(job_id, set()):
                     continue
-                if job_id not in present:
+                if not dest_present:
                     problems.append(("gates", workflow, 0,
-                                     f"job '{job_id}' is gone, so its required step '{name}' cannot run"))
-                elif name.strip() not in present[job_id]:
+                                     f"job '{job_id}' is gone, so its required step '{name}' cannot run"
+                                     + (f" (it is recorded as moved to '{dest}', which does not exist)"
+                                        if dest != job_id else "")))
+                elif name.strip() not in present[dest]:
                     problems.append((
                         "gates", workflow, 0,
-                        f"job '{job_id}' no longer runs the required step '{name}'. A removed gate cannot "
+                        f"job '{dest}' no longer runs the required step '{name}'"
+                        + (f" it took over from '{job_id}'" if dest != job_id else "")
+                        + ". A removed gate cannot "
                         "fail, so the PR that removed it stays green. Restore the step, or retire it in "
                         f"{GATES_FILE} under \"retired\" with a reason.",
                     ))
@@ -435,19 +619,23 @@ def gate_problems(root, base=None):
             workflow = rel.split("/")[-1]
             for job_id, names in base_jobs.items():
                 allowed = retired.get(workflow, {}).get(job_id, set())
+                dest, _ = home(workflow, job_id, head_jobs)
                 # Only compare against the merge base, so steps main added after
                 # this branch forked are never blamed on the branch.
                 for name in names:
                     if name in allowed:
                         continue
-                    if job_id not in head_jobs:
+                    if dest not in head_jobs:
                         problems.append(("gates", rel, 0,
-                                         f"job '{job_id}' existed at the merge base and is gone"))
-                    elif name not in head_jobs[job_id]:
+                                         f"job '{job_id}' existed at the merge base and is gone"
+                                         + (f", and its recorded move to '{dest}' does not exist here"
+                                            if dest != job_id else "")))
+                    elif name not in head_jobs[dest]:
                         problems.append((
                             "gates", rel, 0,
-                            f"job '{job_id}' dropped the step '{name}' that existed at the merge base. "
-                            f"Deleted gates do not fail -- they disappear. Restore it, or retire it in "
+                            f"job '{dest}' dropped the step '{name}' that existed at the merge base"
+                            + (f" (taken over from '{job_id}')" if dest != job_id else "")
+                            + ". Deleted gates do not fail -- they disappear. Restore it, or retire it in "
                             f"{GATES_FILE} with a reason.",
                         ))
     return problems
@@ -601,17 +789,41 @@ FIXTURES = {
         "      - name: bare\n        with:\n          foo: bar\n"
         "      - name: branch\n        uses: some/action@main\n"
         "      - name: lost\n        uses: ./does-not-exist\n"
+        # Probe run 45373317235: this step makes GitHub refuse to load the file,
+        # so the workflow reports zero checks instead of a failure.
+        "      - name: wd-on-uses\n        uses: actions/checkout@v7\n"
+        "        working-directory: frontend\n"
         "  b:\n    runs-on: ubuntu-latest\n    needs: nonexistent\n    steps:\n      - run: echo x\n"
         # Prefix stripping must not make the detector blind: the checkout dir is
         # real, the action inside it is not.
         "  c:\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - name: checkout into head-repo\n        uses: actions/checkout@v7\n"
         "        with:\n          path: head-repo\n"
-        "      - name: lost under the checkout dir\n        uses: ./head-repo/.github/actions/nope\n",
+        "      - name: lost under the checkout dir\n        uses: ./head-repo/.github/actions/nope\n"
+        # Probe run 45373319494: the job-level spelling of the same thing loads
+        # and runs, so the detector has to stay quiet about it. A rule that fires
+        # on legal YAML is a rule that keeps CI permanently red.
+        "  d:\n    runs-on: ubuntu-latest\n"
+        "    defaults:\n      run:\n        working-directory: frontend\n"
+        "    steps:\n"
+        "      - name: defaults control uses\n        uses: actions/checkout@v7\n"
+        "      - name: defaults control run\n        run: pwd\n",
     ),
     "triggers": (
         "notriggers.yml",
         "name: x\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    ),
+    # Dead path filters, the shape infra.yml carried as "deploy/**" for a
+    # directory no commit in this repository has ever had. Two of the five
+    # pull_request patterns below are legal and must stay quiet, so this fixture
+    # pins the rule in both directions like every other one here.
+    "paths": (
+        "deadfilter.yml",
+        "name: dead\n'on':\n  pull_request:\n    paths:\n      - \"deploy/**\"\n"
+        "      - \"infra/**\"\n      - \"**/*.md\"\n      - \"scripts/nope.py\"\n"
+        "      - \".github/workflows/deadfilter.yml\"\n"
+        "  push:\n    paths-ignore:\n      - \"docs/**\"\n"
+        "jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo x\n",
     ),
 }
 
@@ -654,20 +866,51 @@ def self_test():
         if not ok:
             failures.append("work-tree workflow listing returned nothing")
         kinds = {kind for kind, _, _, _ in problems}
-        for rule in FIXTURES:
-            if rule not in kinds:
-                failures.append(f"{rule} detector reported nothing on its own fixture")
         messages = " || ".join(message for _, _, _, message in problems)
         if "does not resolve" not in messages:
             failures.append("steps detector did not report a local action path that does not resolve")
         if "head-repo/.github/actions/nope" not in messages:
             failures.append("steps detector stopped reporting a local action that is missing under a "
                             "`with: path:` checkout directory")
+        wd = [message for _, rel, _, message in problems
+              if "working-directory" in message and rel.endswith("shape.yml")]
+        if not any("wd-on-uses" in message for message in wd):
+            failures.append("steps detector no longer reports working-directory: on a uses:/run-less step, "
+                            "the construct that makes GitHub load nothing (probe run 45373317235)")
+        if any("defaults control" in message for message in wd):
+            failures.append("steps detector reported the job-level `defaults: run: working-directory:` "
+                            "control, which GitHub loads and runs (probe run 45373319494) - a rule that "
+                            "fires on legal YAML keeps CI permanently red")
         # A detector that fires on everything would keep CI permanently red, so
         # a valid workflow has to come back clean.
         for kind, rel, _, message in problems:
             if rel.endswith(VALID_WORKFLOW[0]) or rel.endswith(VALID_SUBDIR_WORKFLOW[0]):
                 failures.append(f"false positive on the valid fixture {rel}: [{kind}] {message}")
+
+        # paths: only the infra/ directory and the fixture's own workflow file
+        # exist here, which is what makes the other four patterns dead.
+        os.makedirs(os.path.join(tmp, "infra"))
+        with open(os.path.join(tmp, "infra", "main.tf"), "w", encoding="utf-8", newline="") as handle:
+            handle.write("resource \"null_resource\" \"fixture\" {}\n")
+        path_problems = check_path_filters(tmp)
+        reported = " || ".join(message for _, _, _, message in path_problems)
+        for pattern in ("deploy/**", "scripts/nope.py", "docs/**"):
+            if pattern not in reported:
+                failures.append(f"paths detector no longer reports the dead pattern {pattern!r} "
+                                "(deploy/** is the one infra.yml shipped with)")
+        for pattern in ("infra/**", "**/*.md", ".github/workflows/deadfilter.yml"):
+            if pattern in reported:
+                failures.append(f"paths detector reported the satisfiable pattern {pattern!r} - a rule "
+                                "that fires on a working filter keeps CI red for the wrong reason")
+        for kind, rel, _, message in path_problems:
+            if rel.endswith(VALID_WORKFLOW[0]) or rel.endswith(VALID_SUBDIR_WORKFLOW[0]):
+                failures.append(f"false positive from the paths detector on {rel}: {message}")
+        kinds = kinds | {kind for kind, _, _, _ in path_problems}
+        # Every fixture in the table has to be caught by the detector it is
+        # named for; a fixture nobody fires on means the rule is decorative.
+        for rule in FIXTURES:
+            if rule not in kinds:
+                failures.append(f"{rule} detector reported nothing on its own fixture")
 
         # gates: a step present at the base and absent here must be reported, a
         # step that is still present must not be, and a documented retirement is
@@ -712,6 +955,70 @@ def self_test():
                 failures.append("gates detector complained about a step the PR added")
             if [m for m in found if "Retired step" in m]:
                 failures.append("gates detector reported a step that ci-gates.json retires on purpose")
+
+        # gates/moved: consolidating the check surface re-homes a job's steps in
+        # another job. That has to be allowed, or the gate would block every
+        # honest cleanup - and a step lost on the way still has to be reported,
+        # or "moved" is just a deletion loophole.
+        mrepo = os.path.join(tmp, "moved-repo")
+        os.makedirs(mrepo)
+        mrun = lambda *a: subprocess.run(a, cwd=mrepo, capture_output=True, text=True,
+                                         encoding="utf-8", errors="replace")
+        mrun("git", "init", "-q")
+        mrun("git", "config", "user.email", "self-test@example.invalid")
+        mrun("git", "config", "user.name", "self-test")
+        MOVE_BASE_YML = (
+            "name: x\n'on': push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Kept step\n        run: echo x\n"
+            "  b:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Relocated step\n        run: echo y\n"
+            "      - name: Dropped step\n        run: echo z\n"
+        )
+        MOVE_HEAD_YML = (
+            "name: x\n'on': push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Kept step\n        run: echo x\n"
+            "      - name: Relocated step\n        run: echo y\n"
+        )
+        MOVE_BASE_INV = {"version": 1,
+                         "must_have": {"gate-ci.yml": {"b": ["Relocated step", "Dropped step"]}},
+                         "retired": {}}
+        MOVE_HEAD_INV = {"version": 1,
+                         "must_have": MOVE_BASE_INV["must_have"],
+                         "retired": {},
+                         "moved": {"gate-ci.yml": {
+                             "b": {"to": "a", "reason": "self-test fixture: folded into a"},
+                             "c": {"to": "ghost", "reason": "self-test fixture: destination is not there"},
+                             "d": {"to": "a"},
+                         }}}
+
+        def commit_files(repo, run, files, message):
+            for rel, body in files:
+                path = os.path.join(repo, rel.replace("/", os.sep))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(body)
+            run("git", "add", "-A")
+            run("git", "commit", "-qm", message)
+
+        wf_dir = f"{WORKFLOW_DIR}/gate-ci.yml"
+        commit_files(mrepo, mrun, [(wf_dir, MOVE_BASE_YML),
+                                   (GATES_FILE, json.dumps(MOVE_BASE_INV))], "base")
+        commit_files(mrepo, mrun, [(wf_dir, MOVE_HEAD_YML),
+                                   (GATES_FILE, json.dumps(MOVE_HEAD_INV))], "head")
+        mbase = mrun("git", "rev-parse", "HEAD~1").stdout.strip()
+        if not mbase:
+            failures.append("self-test could not build a base commit for the moved-job check")
+        else:
+            found = [message for _, _, _, message in gate_problems(mrepo, mbase)]
+            if [m for m in found if "Relocated step" in m]:
+                failures.append("gates detector reported a step whose job moved and carried it over: "
+                                + " || ".join(m for m in found if "Relocated step" in m))
+            if not [m for m in found if "Dropped step" in m]:
+                failures.append("gates detector let a step vanish behind a recorded job move")
+            if not [m for m in found if "ghost" in m]:
+                failures.append("gates detector accepted a move to a destination job that does not exist")
+            if not [m for m in found if "'d' -> 'a' has no reason" in m]:
+                failures.append("gates detector accepted a move recorded without a reason")
 
         # encoding: UTF-16 and a UTF-8 BOM must both be reported.
         with open(os.path.join(repo, "notes.md"), "wb") as handle:
@@ -764,7 +1071,8 @@ def self_test():
             print(f"SELF-TEST FAIL: {message}")
         return 1
     print(f"self-test: {len(FIXTURES) + 2} detectors each fired on their own fixture and stayed "
-          "quiet on a valid one; retired/added steps are handled. The checker is capable of failing.")
+          "quiet on a valid one; retired, added and relocated steps are handled. The checker is "
+          "capable of failing.")
     return 0
 
 
@@ -814,6 +1122,8 @@ def main(argv=None):
         problems += [p for p in found if p[0] in workflow_rules]
     if "gates" in rules:
         problems += gate_problems(root, base)
+    if "paths" in rules:
+        problems += check_path_filters(root)
     if "encoding" in rules:
         problems += check_encodings(root, base)
 

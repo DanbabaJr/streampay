@@ -59,7 +59,7 @@ jobs:
         run: node --test scripts/check_merge_integrity.test.mjs
 
       - name: Workflows parse and every step is well-formed
-        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps
+        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps,paths
 
       - name: Resolve the comparison base
         id: base
@@ -135,8 +135,20 @@ jobs:
             replacing it. Locally PyYAML keeps the last value and says nothing;
             GitHub's parser refuses the file. Replace the line, do not add one.
           - `[steps]` A step carries both `run:` and `uses:`, or neither, or a
-            `with:` with nothing to pass it to. Also a `needs:` pointing at a job
-            that does not exist, and an action referenced by `@main` / `@master`.
+            `with:` with nothing to pass it to. Also `working-directory:` on a
+            step that has `uses:` and no `run:` -- GitHub refuses the file for
+            that one, so the pull request shows **no checks at all** rather than
+            a red one; the same directory set job-wide with
+            `defaults: run: working-directory:` is legal. Also a `needs:` pointing
+            at a job that does not exist, and an action referenced by
+            `@main` / `@master`.
+          - `[paths]` A `paths:` / `paths-ignore:` entry that no file in the
+            repository can match -- `"deploy/**"` for a `deploy/` directory that
+            has never existed, or a file renamed out from under the filter. The
+            job it gates does not fail, it silently never runs, and the pull
+            request reads green because the only evidence the gate exists is an
+            absent check. Patterns with no literal prefix (`**/*.md`) and paths a
+            PR adds itself are left alone; create the path or drop the pattern.
           - `[gates]` A named CI step that existed at the merge base, or that
             `.github/ci-gates.json` lists as required, is no longer in the
             workflow. A deleted gate cannot fail -- it simply stops running, and
