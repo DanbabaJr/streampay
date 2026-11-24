@@ -18,6 +18,7 @@ import { GrpcIndexerServer } from "./grpc/server.js";
 import { loadRotationConfig, rpcAuthHeaders } from "./secrets/config.js";
 import { WebhookKeyRotation } from "./secrets/rotation.js";
 import { registerGraphQLRoutes, type GraphQLHandlerOptions } from "./graphql/index.js";
+import { TimeTravelError, TimeTravelService, type TimeTravelPolicy } from "./history/time-travel.js";
 import { WasmPluginHost } from "./wasm/host.js";
 import { PluginDispatcher } from "./wasm/dispatcher.js";
 import type { DecodedEvent, EventValue, Stream } from "./types.js";
@@ -84,6 +85,16 @@ export interface WasmOptions {
   dispatcher: PluginDispatcher;
 }
 
+/**
+ * Time-travel / as-of read options (issue #577). When absent, the default
+ * retention window and cost budget apply and addresses are not redacted —
+ * the current REST default.
+ */
+export interface HistoryOptions {
+  policy?: Partial<TimeTravelPolicy>;
+  redactAddresses?: boolean;
+}
+
 export function createApp(
   store: StreamStore,
   dispatcher?: WebhookDispatcher,
@@ -94,6 +105,7 @@ export function createApp(
   proofConfig?: ProofConfig,
   graphqlOptions?: GraphQLHandlerOptions,
   wasmOptions?: WasmOptions,
+  historyOptions?: HistoryOptions,
 ): express.Express {
   const app = express();
   app.use(express.json());
@@ -378,6 +390,60 @@ export function createApp(
       signer: proofConfig.signer,
     });
     return res.json(proof);
+  });
+
+  // GET /streams/:id/as-of?ledger=<seq> — time-travel read (#577): the
+  // record the projection held at that ledger, the journal events that
+  // produce it, and a Merkle proof a client can verify without trusting
+  // this endpoint. Expired history is 410, an over-budget fold is 413 —
+  // never a silently partial answer.
+  const timeTravel = new TimeTravelService(store, historyOptions?.policy);
+  const historyRedaction = (): boolean =>
+    historyOptions?.redactAddresses ?? process.env.REDACT_ADDRESSES === "1";
+  const parseAsOfLedger = (req: express.Request, res: express.Response): number | undefined => {
+    const raw = req.query.ledger;
+    if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+      res.status(400).json({ error: "ledger query parameter must be a non-negative integer ledger sequence", code: "invalid_ledger" });
+      return undefined;
+    }
+    return Number(raw);
+  };
+  const sendTimeTravelError = (res: express.Response, err: unknown): void => {
+    if (err instanceof TimeTravelError) {
+      const status = err.code === "history_expired" ? 410 : err.code === "cost_budget_exceeded" ? 413 : 400;
+      res.status(status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  };
+
+  app.get("/streams/:id/as-of", (req, res) => {
+    if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: "stream id must be an unsigned integer" });
+    const ledger = parseAsOfLedger(req, res);
+    if (ledger === undefined) return;
+    try {
+      const result = timeTravel.getStreamAsOf(req.params.id, ledger, { redact: historyRedaction() });
+      return result
+        ? res.json(result)
+        : res.status(404).json({ error: `stream ${req.params.id} has no state at ledger ${ledger}` });
+    } catch (err) {
+      return sendTimeTravelError(res, err);
+    }
+  });
+
+  // GET /address/:addr/as-of?ledger=<seq> — the address's whole portfolio
+  // reconstructed at that ledger, each stream with its own proof (#577).
+  app.get("/address/:addr/as-of", (req, res) => {
+    if (!/^[GCB][A-Z2-7]{55}$/.test(req.params.addr)) {
+      return res.status(400).json({ error: "invalid Stellar address" });
+    }
+    const ledger = parseAsOfLedger(req, res);
+    if (ledger === undefined) return;
+    try {
+      return res.json(timeTravel.getPortfolioAsOf(req.params.addr, ledger, { redact: historyRedaction() }));
+    } catch (err) {
+      return sendTimeTravelError(res, err);
+    }
   });
 
   // GET /streams/:id/events?after=<seq>&limit=<n> — transactional-outbox replay.

@@ -163,6 +163,9 @@ export class StreamStore extends EventEmitter {
    */
   projectEvent(event: DecodedEvent): { duplicate: boolean; projectionSkipped: boolean } {
     return this.db.transaction(() => this.ingestWithinTransaction(event, event.pagingToken, "project"))();
+  }
+
+  /**
    * Replaces one stream row with a journal-derived fold (#583). The same
    * monotonic guard as ingestion applies, so a fold of the whole journal can
    * only move the projection forward to the state the journal implies.
@@ -445,6 +448,26 @@ export class StreamStore extends EventEmitter {
       try { parsed = JSON.parse(row.payload); } catch {}
       return { ...row, payload: parsed };
     });
+  }
+
+  /**
+   * Journal rows for one stream at or below `asOfLedger`, in journal order
+   * (#577). The `(stream_id, ledger)` index bounds the read to the stream's
+   * own history — an as-of query never rescans the chain or the whole
+   * journal. Same row shape as `getStreamHistory`.
+   */
+  getStreamEventsUpTo(streamId: string, asOfLedger: number): Array<{ id: string; stream_id: string; event_type: string; ledger: number; ledger_closed_at: string; tx_hash?: string | null; trace_id?: string | null; span_id?: string | null; payload: unknown }> {
+    return (this.db.prepare("SELECT id, stream_id, name as event_type, ledger, ledger_closed_at, tx_hash, trace_id, span_id, payload FROM events WHERE stream_id = ? AND ledger <= ? ORDER BY ledger ASC, id ASC").all(streamId, asOfLedger) as Array<{ id: string; stream_id: string; event_type: string; ledger: number; ledger_closed_at: string; tx_hash: string | null; trace_id: string | null; span_id: string | null; payload: string }>).map((row) => {
+      let parsed = row.payload;
+      try { parsed = JSON.parse(row.payload); } catch {}
+      return { ...row, payload: parsed };
+    });
+  }
+
+  /** First ledger present in the journal, or `undefined` when it is empty. */
+  journalFloorLedger(): number | undefined {
+    const row = this.db.prepare("SELECT MIN(ledger) AS min_ledger FROM events").get() as { min_ledger: number | null };
+    return row.min_ledger === null ? undefined : Number(row.min_ledger);
   }
 
   getEventsAfter(
