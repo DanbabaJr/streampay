@@ -129,13 +129,24 @@ jobs:
             echo "tracking issue #$ISSUE"
           fi
           { echo "$MARKER"; echo; cat "$FILE"; } > "$RUNNER_TEMP/comment.md"
+          # `gh api -f body=@file` does not read the file: `-f` is the raw-field
+          # form, and only `-F`/`--input` expand `@`. The first run therefore
+          # posted the literal path as the report. Build the JSON body so there
+          # is no quoting question left, and read the comment back to prove it.
+          python3 -c 'import json,sys; print(json.dumps({"body": open(sys.argv[1], encoding="utf-8").read()}))' \
+            "$RUNNER_TEMP/comment.md" > "$RUNNER_TEMP/comment.json"
           EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments?per_page=100" \
             --jq '[.[] | select(.body | contains("<!-- merge-preview-report -->"))][0].id // empty')
           if [ -n "$EXISTING" ]; then
             echo "updating comment $EXISTING"
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" \
-              -f body=@"$RUNNER_TEMP/comment.md" --jq .html_url
+            URL=$(gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" \
+              --input "$RUNNER_TEMP/comment.json" --jq .html_url)
           else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
-              -f body=@"$RUNNER_TEMP/comment.md" --jq .html_url
+            URL=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
+              --input "$RUNNER_TEMP/comment.json" --jq .html_url)
           fi
+          POSTED=$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$(basename "$URL")" --jq .body)
+          case "$POSTED" in
+            *"## Merge preview"*) echo "published: $URL" ;;
+            *) echo "::error::the tracking comment does not contain the report (got $(printf '%s' "$POSTED" | head -c 80))"; exit 1 ;;
+          esac

@@ -70,6 +70,8 @@ SUMMARY="${GITHUB_STEP_SUMMARY:-}"
 SCRATCH_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 WT="$SCRATCH_ROOT/merge-preview-tree"
 BRANCH="merge-preview"
+PREVIEW_NAME="merge-preview"
+PREVIEW_EMAIL="merge-preview@users.noreply.github.com"
 
 log() { printf '%s\n' "$*"; }
 
@@ -106,6 +108,9 @@ rm -rf "$WT"
 git -C "$REPO_ROOT" worktree add --detach "$WT" "$BASE_REF" >/dev/null 2>&1 || {
   echo "merge_preview: could not create scratch worktree" >&2; exit 2; }
 git -C "$WT" checkout -q -B "$BRANCH" "$BASE_REF" || { echo "merge_preview: checkout failed" >&2; exit 2; }
+# Pin the baseline id now: later steps commit into this branch, and the report
+# has to name the commit the fleet was measured against, not the overlay.
+BASE_SHA=$(git -C "$WT" rev-parse --short HEAD)
 cleanup() {
   [ -n "${KEEP_TREE:-}" ] && { echo "preview tree kept at $WT ($BRANCH)"; return; }
   git -C "$REPO_ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true
@@ -118,6 +123,16 @@ trap cleanup EXIT
 # copied in: a first run, before the collision gate is on main, would otherwise
 # report every merge as breaking simply because the file did not exist yet.
 cp -a "$REPO_ROOT/scripts/." "$WT/scripts/" 2>/dev/null || true
+# `git merge` refuses to start while the tree is dirty, and the overlay just
+# made it dirty whenever this revision of scripts/ differs from the baseline.
+# Commit it: the gate files stay, the tree is clean again, and a PR that edits
+# scripts/ is measured as a real content conflict instead of an unrelated
+# "would be overwritten by merge" refusal that blames the PR for the harness.
+git -C "$WT" add -A scripts >/dev/null 2>&1 || true
+if ! git -C "$WT" diff --cached --quiet >/dev/null 2>&1; then
+  git -C "$WT" -c user.name="$PREVIEW_NAME" -c user.email="$PREVIEW_EMAIL" \
+    commit -q -m "preview: harness scripts" >/dev/null 2>&1 || true
+fi
 
 # --- 3. gates --------------------------------------------------------------
 # Every gate's findings are collected as text, not just an exit code. A preview
@@ -132,13 +147,13 @@ gate_findings() {
   } | sort
 }
 
-declare -a MERGED=() CONFLICTED=() BROKEN=()
+declare -a MERGED=() CONFLICTED=() BROKEN=() ERRORED=()
 BASELINE=$(gate_findings)
 log "Baseline findings: $(printf '%s\n' "$BASELINE" | grep -c . ) line(s)"
 
 {
   printf '%s\n' "## Merge preview" ""
-  printf '%s\n' "Baseline \`$BASE_REF\` ($(git -C "$WT" rev-parse --short HEAD)), $(printf '%s\n' "$PR_LIST" | wc -w) open PRs, merged in ascending order into one tree."
+  printf '%s\n' "Baseline \`$BASE_REF\` ($BASE_SHA), $(printf '%s\n' "$PR_LIST" | wc -w) open PRs, merged in ascending order into one tree."
   printf '%s\n' "Baseline gate findings: $(printf '%s\n' "$BASELINE" | grep -c . ) (pre-existing, not attributed to any PR)."
   printf '%s\n' ""
 } > "$REPORT"
@@ -153,10 +168,25 @@ for n in $PR_LIST; do
     continue
   fi
   TITLE=$(git -C "$REPO_ROOT" log -1 --format=%s "$REF" | cut -c1-80)
-  if ! git -C "$WT" merge -q --no-ff --no-edit -m "preview: merge #$n" "$REF" >/dev/null 2>&1; then
+  # A merge is a commit, so it needs an identity. CI clones have none, and the
+  # failure that produces is not a conflict - it is `git merge` refusing to
+  # start. Passing `-c` keeps that identity out of the repository config the
+  # scratch tree shares with its parent checkout.
+  MERGE_LOG="$SCRATCH_ROOT/merge-preview-$n.log"
+  if ! git -C "$WT" -c user.name="$PREVIEW_NAME" -c user.email="$PREVIEW_EMAIL" \
+       merge -q --no-ff --no-edit -m "preview: merge #$n" "$REF" >"$MERGE_LOG" 2>&1; then
     git -C "$WT" merge --abort >/dev/null 2>&1
-    CONFLICTED+=("$n")
-    printf -- '- **#%s** — *conflicts* (`%s`)\n' "$n" "$TITLE" >> "$REPORT"
+    if grep -qE 'CONFLICT|Automatic merge failed' "$MERGE_LOG"; then
+      CONFLICTED+=("$n")
+      printf -- '- **#%s** — *conflicts* (`%s`)\n' "$n" "$TITLE" >> "$REPORT"
+    else
+      # Say so out loud: a run where every PR "conflicts" in two seconds is a
+      # broken preview, not a broken fleet, and that is only visible if the
+      # report distinguishes the two.
+      ERRORED+=("$n")
+      printf -- '- **#%s** — *merge did not run* (`%s`): `%s`\n' "$n" "$TITLE" \
+        "$(grep -v '^[[:space:]]*$' "$MERGE_LOG" | head -1 | cut -c1-160)" >> "$REPORT"
+    fi
     continue
   fi
   MERGED+=("$n")
@@ -209,11 +239,14 @@ fi
   printf -- '- merged cleanly: %s\n' "${#MERGED[@]}"
   printf -- '- conflicting: %s\n' "${#CONFLICTED[@]}"
   printf -- '- broke the union: %s\n' "${#BROKEN[@]}"
-  if [ ${#CONFLICTED[@]} -eq 0 ] && [ ${#BROKEN[@]} -eq 0 ]; then
+  if [ ${#ERRORED[@]} -gt 0 ]; then
+    printf -- '- **did not merge at all: %s (%s)** — this preview is not a verdict on those PRs\n' "${#ERRORED[@]}" "${ERRORED[*]}"
+  fi
+  if [ ${#CONFLICTED[@]} -eq 0 ] && [ ${#BROKEN[@]} -eq 0 ] && [ ${#ERRORED[@]} -eq 0 ]; then
     printf '%s\n' "- the whole set can be merged back to back without leaving main broken"
   fi
 } >> "$REPORT"
 
 [ -n "$SUMMARY" ] && cat "$REPORT" >> "$SUMMARY"
-log "Report written to $REPORT (${#MERGED[@]} merged, ${#CONFLICTED[@]} conflicted, ${#BROKEN[@]} breaking)"
+log "Report written to $REPORT (${#MERGED[@]} merged, ${#CONFLICTED[@]} conflicted, ${#BROKEN[@]} breaking, ${#ERRORED[@]} not attempted)"
 exit 0
