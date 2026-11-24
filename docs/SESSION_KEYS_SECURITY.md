@@ -2,9 +2,10 @@
 
 > **Status: design record, not shipped surface.** The entrypoints described here
 > (`authorize_agent`, `revoke_agent`, `withdraw_delegated`, `agent_status`) were
-> merged in #677 and reverted in #697: together with the commit-reveal surface
-> they pushed the contract Wasm to 140,693 B, past Soroban's 131,072 B code
-> limit, so the build could not be deployed at all. Error codes 126–129 stay
+> merged in #660, duplicated by #677 and reverted in #697: together with the
+> commit-reveal surface they pushed the contract Wasm to 140,693 B, past
+> Soroban's 131,072 B code limit, so the build could not be deployed at all.
+> Error codes 126–129 stay
 > reserved and are listed in `surface.rs::RETIRED_CODES`; re-landing this design
 > needs its own contract, per `docs/WASM_SIZE.md`.
 
