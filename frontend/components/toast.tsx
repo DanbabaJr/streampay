@@ -1,20 +1,9 @@
 "use client";
 
 /**
- * Toast notification system — WCAG 2.1 AA compliant
- *
- * Focus management spec:
- *  - Error toasts (role="alert", aria-live="assertive"): focus moves to the
- *    toast container when a new error appears, so keyboard users are aware.
- *    Focus is returned to the previously focused element when dismissed.
- *  - Success/info toasts (role="status", aria-live="polite"): announced
- *    without interrupting focus; the close button is reachable via Tab.
- *
- * Live-region spec:
- *  - The outer ToastContainer carries aria-live="polite" for success/info.
- *  - Error ToastItems additionally carry role="alert" which forces assertive
- *    announcement regardless of the container's live-region politeness.
- *  - aria-atomic="true" on each item ensures the full message is read.
+ * Visual toasts stay navigable, while one atomic live region announces updates:
+ * info/success are polite and errors are assertive. Keeping live semantics off
+ * the toast items prevents the same message from being announced twice.
  */
 
 import React, {
@@ -24,16 +13,23 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import {
   type Toast,
+  type ToastAnnouncement,
   type ToastType,
   type ToastStore,
   createToastStore,
   defaultToastStore,
 } from "../lib/toast";
+import { useT } from "../lib/i18n/provider";
 
 export type { Toast, ToastType, ToastStore };
 export { createToastStore, defaultToastStore };
+
+export function announcementPoliteness(type: ToastType): "polite" | "assertive" {
+  return type === "error" ? "assertive" : "polite";
+}
 
 const ToastContext = createContext<ToastStore>(defaultToastStore);
 
@@ -45,7 +41,11 @@ export function ToastProvider({
   store?: ToastStore;
 }) {
   const currentStore = store ?? defaultToastStore;
+  const pathname = usePathname();
   const [toasts, setToasts] = useState<Toast[]>(() => currentStore.getToasts());
+  const [announcement, setAnnouncement] = useState<ToastAnnouncement>(() =>
+    currentStore.getAnnouncement()
+  );
 
   useEffect(() => {
     return currentStore.subscribe((updated) => {
@@ -53,10 +53,26 @@ export function ToastProvider({
     });
   }, [currentStore]);
 
+  useEffect(() => {
+    return currentStore.subscribeToAnnouncements(setAnnouncement);
+  }, [currentStore]);
+
+  useEffect(() => {
+    currentStore.clearAnnouncements();
+  }, [currentStore, pathname]);
+
   return (
     <ToastContext.Provider value={currentStore}>
       {children}
       <ToastContainer toasts={toasts} onDismiss={currentStore.removeToast} />
+      <div
+        className="sr-only"
+        data-live-region=""
+        aria-live={announcementPoliteness(announcement.type)}
+        aria-atomic="true"
+      >
+        {announcement.message}
+      </div>
     </ToastContext.Provider>
   );
 }
@@ -76,21 +92,11 @@ function ToastContainer({
   toasts: Toast[];
   onDismiss: (id: string) => void;
 }) {
+  const t = useT();
   if (toasts.length === 0) return null;
 
   return (
-    /*
-     * role="region" + aria-label gives the toast stack a named landmark so
-     * SR users can navigate to it. aria-live="polite" is a fallback for
-     * AT that don't honour per-item roles; individual error items use
-     * role="alert" which is implicitly assertive.
-     */
-    <div
-      className="toast-container"
-      role="region"
-      aria-label="Notifications"
-      aria-live="polite"
-    >
+    <div className="toast-container" role="region" aria-label={t("toast.region")}>
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
@@ -105,6 +111,7 @@ function ToastItem({
   toast: Toast;
   onDismiss: (id: string) => void;
 }) {
+  const t = useT();
   const itemRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<Element | null>(null);
   const isError = toast.type === "error";
@@ -155,35 +162,32 @@ function ToastItem({
     info: "ℹ",
   };
 
-  const iconLabels: Record<ToastType, string> = {
-    success: "Success",
-    error: "Error",
-    info: "Information",
+  const iconLabels: Record<
+    ToastType,
+    "toast.type.success" | "toast.type.error" | "toast.type.info"
+  > = {
+    success: "toast.type.success",
+    error: "toast.type.error",
+    info: "toast.type.info",
   };
 
   return (
     <div
       ref={itemRef}
       className={`toast-item toast-${toast.type}`}
-      // role="alert" for errors (assertive); role="status" for success/info (polite)
-      role={isError ? "alert" : "status"}
-      aria-live={isError ? "assertive" : "polite"}
-      aria-atomic="true"
-      // tabIndex allows focus to land here (needed for error focus management)
       tabIndex={isError ? -1 : undefined}
       onKeyDown={handleKeyDown}
     >
       <span className="toast-icon" aria-hidden="true">
         {icons[toast.type]}
       </span>
-      {/* Screen-reader-only type label prepended to message for non-visual context */}
-      <span className="sr-only">{iconLabels[toast.type]}: </span>
+      <span className="sr-only">{t(iconLabels[toast.type])}: </span>
       <div className="toast-message">{toast.message}</div>
       <button
         type="button"
         className="toast-close"
         onClick={handleDismiss}
-        aria-label={`Dismiss ${toast.type} notification`}
+        aria-label={t("toast.dismiss", { type: toast.type })}
       >
         ×
       </button>

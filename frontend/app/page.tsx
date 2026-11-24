@@ -21,6 +21,10 @@ import { BATCH_CLAIM_ENABLED } from "@/lib/withdrawal";
 import { formatAmount } from "@/lib/format";
 import { loadStreamIds, saveStreamId } from "@/lib/storage";
 import { useStreamEvents, toStreamView } from "@/lib/useStreamEvents";
+import {
+  normalizeStreamStatus,
+  useStreamStatusAnnouncements,
+} from "@/lib/use-stream-status-announcements";
 import { useWallet } from "@/lib/wallet-context";
 import { useLocale } from "@/lib/i18n/provider";
 import StreamForm from "@/components/StreamForm";
@@ -37,6 +41,8 @@ export default function Home() {
   const [lookupId, setLookupId] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [claimAllLoading, setClaimAllLoading] = useState(false);
+
+  useStreamStatusAnnouncements(streams);
 
   async function onConnected(addr: string) {
     // Rehydrate the cached list (ids only; state is always read fresh).
@@ -108,32 +114,34 @@ export default function Home() {
       const res = await withdrawAllFromStreams(address, signTransaction);
       if (res.successfulStreamIds.length === 0) {
         if (res.failedStreams.length > 0) {
-          toast.info(
-            `No funds available to claim across ${res.failedStreams.length} stream(s).`
-          );
+          toast.info(t("home.noFundsClaimAll", { count: res.failedStreams.length }));
         } else {
-          toast.info("No claimable streams found.");
+          toast.info(t("home.noClaimableStreams"));
         }
       } else {
         const transferSummaries = await Promise.all(
-          res.transfers.map(async (t) => {
+          res.transfers.map(async (transfer) => {
             try {
-              const meta = await fetchAssetMeta(t.token);
-              return `${formatAmount(t.amount, meta.decimals)} ${meta.code}`;
+              const meta = await fetchAssetMeta(transfer.token);
+              return `${formatAmount(transfer.amount, meta.decimals)} ${meta.code}`;
             } catch {
-              return `${t.amount} units`;
+              return `${transfer.amount} units`;
             }
           })
         );
-        const transferText = transferSummaries.join(", ");
-        let msg = `Successfully claimed ${transferText} across ${res.successfulStreamIds.length} stream(s).`;
+        const messages = [
+          t("home.claimAllSuccess", {
+            amounts: transferSummaries.join(", "),
+            count: res.successfulStreamIds.length,
+          }),
+        ];
         if (res.failedStreams.length > 0) {
-          msg += ` (${res.failedStreams.length} skipped or non-claimable)`;
+          messages.push(t("home.claimAllSkipped", { count: res.failedStreams.length }));
         }
         if (res.nextOffset !== null) {
-          msg += ` Note: More streams remain (continuation offset ${res.nextOffset}). Click "Claim all" again to process the next page.`;
+          messages.push(t("home.claimAllMore", { offset: res.nextOffset }));
         }
-        toast.success(msg);
+        toast.success(messages.join(" "));
         await Promise.all(
           res.successfulStreamIds.map((id) => refresh(id).catch(() => null))
         );
@@ -164,11 +172,23 @@ export default function Home() {
           void refresh(event.streamId);
         }
         if (address) saveStreamId(address, event.streamId);
-        toast.info(`⚡ Live update: Stream #${event.streamId} created.`);
+        toast.info(t("home.created", { id: event.streamId }));
       } else if (event.stream) {
         const view = toStreamView(event.stream);
         setStreams((prev) => prev.map((s) => (s.id === view.id ? view : s)));
-        toast.info(`⚡ Live update: Stream #${event.streamId} (${event.eventType}).`);
+        const status = normalizeStreamStatus(view.status);
+        const statusKey = `stream-status:${view.id}:${status}`;
+        if (event.eventType === "stream_cancelled") {
+          toast.info(t("home.cancelled", { id: view.id }), undefined, statusKey);
+        } else if (event.eventType === "stream_paused" || event.eventType === "stream_resumed") {
+          toast.info(
+            t("home.statusChanged", { id: view.id, status }),
+            undefined,
+            statusKey
+          );
+        } else {
+          toast.info(t("home.streamEvent", { id: view.id, event: event.eventType }));
+        }
       } else {
         void refresh(event.streamId);
       }
@@ -561,7 +581,11 @@ export default function Home() {
           onCancel={async (id) => {
             try {
               await cancelStream(address, id, signTransaction);
-              toast.success(t("home.cancelled", { id }));
+              toast.success(
+                t("home.cancelled", { id }),
+                undefined,
+                `stream-status:${id}:cancelled`
+              );
               await refresh(id);
             } catch (e) {
               toast.error(describeError(e));

@@ -32,6 +32,13 @@ export const de: Record<MessageKey, string> = {
   "chrome.apiDocs": "API-Doku ↗",
   "chrome.simulatorLink": "Accrual-Simulator →",
 
+  "toast.region": "Benachrichtigungen",
+  "toast.type.success": "Erfolg",
+  "toast.type.error": "Fehler",
+  "toast.type.info": "Hinweis",
+  "toast.dismiss":
+    "{type, select, success {Erfolgs-} error {Fehler-} other {Informations-}}Benachrichtigung schließen",
+
   "settings.navigation": "Einstellungen",
   "settings.title": "Einstellungen",
   "settings.description": "Verwalte Benachrichtigungen, Webhooks und Telemetrie im Browser.",
@@ -77,10 +84,55 @@ export const de: Record<MessageKey, string> = {
   "home.created": "Stream #{id} erstellt.",
   "home.batchCreated":
     "{count, plural, one {# Stream} other {# Streams}} erstellt: {ids}.",
+  "home.noFundsClaimAll":
+    "In {count, plural, one {# Stream} other {# Streams}} ist kein Guthaben zum Abheben verfügbar.",
+  "home.noClaimableStreams": "Keine abhebbaren Streams gefunden.",
+  "home.claimAllSuccess":
+    "{amounts} aus {count, plural, one {# Stream} other {# Streams}} erfolgreich abgehoben.",
+  "home.claimAllSkipped":
+    "{count, plural, one {# Stream wurde} other {# Streams wurden}} übersprungen oder war nicht abhebbar.",
+  "home.claimAllMore":
+    "Weitere Streams sind verfügbar (Fortsetzungsoffset {offset, number}). Wähle erneut „Alle abheben“, um die nächste Seite zu verarbeiten.",
   "home.withdrew": "{amount} aus Stream #{id} abgehoben.",
   "home.claimed": "{amount} aus Stream #{id} beansprucht.",
   "home.toppedUp": "Stream #{id} um {amount} aufgestockt.",
   "home.cancelled": "Stream #{id} storniert.",
+  "home.statusChanged":
+    "Stream #{id} ist jetzt {status, select, active {aktiv} cancelled {storniert} depleted {ausgeschöpft} completed {abgeschlossen} paused {pausiert} other {{status}}}.",
+  "home.streamEvent":
+    "Stream #{id}: {event, select, stream_created {erstellt} withdrawn {Mittel abgehoben} stream_cancelled {storniert} stream_topped_up {aufgestockt} stream_paused {pausiert} stream_resumed {fortgesetzt} other {aktualisiert}}.",
+  "stream.sponsorshipEnabled": "Gesponserte Abhebungen sind aktiviert.",
+  "stream.nothingAccrued": "Es ist noch nichts gutgeschrieben worden.",
+  "stream.sponsoredClaimed":
+    "{amount} abgehoben — die Gebühr wurde vom Sponsor bezahlt. Transaktion {txHash}.",
+  "stream.amountExceedsAvailable":
+    "Der Betrag überschreitet das verfügbare Guthaben ({amount}). Versuche „Maximal abheben“.",
+
+  "address.accrualUpdated":
+    "Akkumulierung aktualisiert. {count, plural, one {# aktiver Stream läuft} other {# aktive Streams laufen}}.",
+  "address.addressCopied": "Adresse in die Zwischenablage kopiert.",
+  "address.copyFailed": "Adresse konnte nicht kopiert werden. Markiere sie und kopiere sie manuell.",
+
+  "txBuilder.contractRequired": "Die Vertrags-ID ist erforderlich.",
+  "txBuilder.contractInvalid": "Die Vertrags-ID muss eine gültige Stellar-Vertragsadresse mit C... sein.",
+  "txBuilder.sourceRequired": "Das Quellkonto ist erforderlich.",
+  "txBuilder.sourceInvalid": "Das Quellkonto muss ein gültiges Stellar-Konto mit G... sein.",
+  "txBuilder.functionRequired": "Wähle einen Vertragseinstiegspunkt.",
+  "txBuilder.walletRequired": "Verbinde eine Wallet, bevor du eine Transaktion sendest.",
+  "txBuilder.sourceMismatch":
+    "Das Quellkonto muss mit der verbundenen Wallet übereinstimmen. Ändere das Quellkonto oder verwende die Adresse der verbundenen Wallet.",
+  "txBuilder.simulated": "{functionName} wurde gegen Testnet simuliert.",
+  "txBuilder.restoreRequired":
+    "Die Simulation erfordert eine Wiederherstellungspräambel, bevor dieser Aufruf gesendet werden kann. Stelle die archivierten Einträge zuerst wieder her.",
+  "txBuilder.simulationFailed": "Die Simulation ist fehlgeschlagen; die Transaktion wurde weder signiert noch gesendet.",
+  "txBuilder.executed": "{functionName} wurde an Testnet gesendet. Transaktion {hash}.",
+  "txBuilder.executionFailed":
+    "Die Transaktion wurde aufgenommen, ist aber on-chain fehlgeschlagen. Siehe Ergebnis-XDR unten.",
+
+  "passkey.registered": "Passkey registriert. P-256-Schlüssel x={key}… on-chain registriert.",
+  "passkey.notRegistered": "Für diese Adresse ist kein Passkey registriert. Registriere zuerst eines.",
+  "passkey.claimed": "Assertion on-chain verifiziert. Deine Stream-Auszahlung wurde verarbeitet.",
+
   "home.walletMissing": "Freighter nicht erkannt — Erweiterung installieren und neu laden.",
   "home.walletNoAddress": "Freighter hat keine Adresse zurückgegeben.",
   "home.walletFailed": "Wallet-Verbindung fehlgeschlagen: {reason}",

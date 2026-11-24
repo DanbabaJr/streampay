@@ -23,6 +23,8 @@ import {
   type StreamView,
 } from "@/lib/stellar";
 import { useStreamEvents } from "@/lib/useStreamEvents";
+import { useStreamStatusAnnouncements } from "@/lib/use-stream-status-announcements";
+import { useLocale } from "@/lib/i18n/provider";
 import {
   INITIAL_STATE,
   startLiveAccrual,
@@ -52,6 +54,7 @@ import { StreamDetailSkeleton } from "@/components/skeletons/StreamDetailSkeleto
 
 export default function StreamDetailClient() {
   const toast = useToast();
+  const { t } = useLocale();
   const { address, signTransaction } = useWallet();
   const params = useParams<{ id: string }>();
   const id = params?.id ?? "";
@@ -62,8 +65,6 @@ export default function StreamDetailClient() {
   const [amount, setAmount] = useState<string>("");
   const [isAmountDirty, setIsAmountDirty] = useState(false);
   const engineRef = useRef<LiveAccrual | null>(null);
-  const [status, setStatus] = useState<string>("");
-  const [error, setError] = useState<string>("");
   const [sponsor, setSponsor] = useState<SponsorView | null>(null);
   const [consentPub, setConsentPub] = useState<string>("");
   const [enrolledKey, setEnrolledKey] = useState<string | null>(null);
@@ -73,6 +74,8 @@ export default function StreamDetailClient() {
   const [shareRef, setShareRef] = useState<string | null>(null);
   const [discoveryModalOpen, setDiscoveryModalOpen] = useState<boolean>(false);
   const [refundTarget, setRefundTarget] = useState<string | null>(null);
+
+  useStreamStatusAnnouncements(stream ? [stream] : []);
 
   // Separate, non-fatal read: the routing only annotates the cancel card.
   useEffect(() => {
@@ -235,6 +238,8 @@ export default function StreamDetailClient() {
     return <StreamDetailSkeleton streamId={id} />;
   }
 
+  const streamId = stream.id;
+  const streamToken = stream.token;
   const deposit = BigInt(stream.deposit);
   const withdrawn = BigInt(stream.withdrawn);
   const progress =
@@ -256,11 +261,11 @@ export default function StreamDetailClient() {
     setSubmitting(true);
     try {
       if (max) {
-        const paid = await withdrawMaxFromStream(address, stream!.id, signTransaction);
+        const paid = await withdrawMaxFromStream(address, streamId, signTransaction);
         const paidStr = assetMeta
           ? `${formatAmount(paid, assetMeta.decimals)} ${assetMeta.code}`
           : `${paid} units`;
-        toast.success(`Claimed ${paidStr}.`);
+        toast.success(t("home.claimed", { amount: paidStr, id: streamId }));
         setAmount("");
         setIsAmountDirty(false);
       } else {
@@ -270,16 +275,15 @@ export default function StreamDetailClient() {
               ? `${formatAmount(available, assetMeta.decimals)} ${assetMeta.code}`
               : `${available?.toString()} units`;
           toast.error(
-            validation.error ||
-              `Amount exceeds the accrued balance (${availStr}). Try “Withdraw max”.`
+            validation.error || t("stream.amountExceedsAvailable", { amount: availStr })
           );
           return;
         }
-        await withdrawFromStream(address, stream!.id, validation.amount.toString(), signTransaction);
+        await withdrawFromStream(address, streamId, validation.amount.toString(), signTransaction);
         const withdrewStr = assetMeta
           ? `${formatAmount(validation.amount, assetMeta.decimals)} ${assetMeta.code}`
           : `${validation.amount} units`;
-        toast.success(`Successfully withdrew ${withdrewStr}.`);
+        toast.success(t("home.withdrew", { amount: withdrewStr, id: streamId }));
         setAmount("");
         setIsAmountDirty(false);
       }
@@ -294,15 +298,13 @@ export default function StreamDetailClient() {
 
   async function doEnableSponsorship() {
     if (!address || consentPub === "") return;
-    setError("");
-    setStatus("");
     setBusy(true);
     try {
       await enrollBeneficiary(address, consentPub, signTransaction);
-      setStatus("Consent key enrolled — you can now claim without paying gas.");
+      toast.success(t("stream.sponsorshipEnabled"));
       await loadSponsorship(address);
     } catch (e) {
-      setError(describeError(e));
+      toast.error(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -317,19 +319,17 @@ export default function StreamDetailClient() {
     const claimAmount =
       amount !== "" ? BigInt(amount) : (displayAvailable ?? available ?? 0n);
     if (claimAmount <= 0n) {
-      setError("Nothing has accrued yet.");
+      toast.error(t("stream.nothingAccrued"));
       return;
     }
-    setError("");
-    setStatus("");
     setBusy(true);
     try {
       const intent: ClaimIntent = {
         contractId: STREAMING_CONTRACT_ID,
         sponsor: SPONSOR_ADDRESS,
         beneficiary: address,
-        token: stream!.token,
-        streamId: stream!.id,
+        token: streamToken,
+        streamId: streamId,
         amount: claimAmount.toString(),
         nonce: nextNonce(`${SPONSOR_ADDRESS}:${address}`).toString(),
         deadline: intentDeadline(),
@@ -342,13 +342,16 @@ export default function StreamDetailClient() {
         intent,
         beneficiarySig,
       });
-      setStatus(
-        `Claimed ${claimAmount.toString()} units — gas paid by the sponsor. tx ${res.txHash}`
+      const claimedAmount = assetMeta
+        ? `${formatAmount(claimAmount, assetMeta.decimals)} ${assetMeta.code}`
+        : `${claimAmount} ${t("home.unitsWord")}`;
+      toast.success(
+        t("stream.sponsoredClaimed", { amount: claimedAmount, txHash: res.txHash })
       );
       setAmount("");
       await Promise.all([engineRef.current?.refresh(), loadSponsorship(address)]);
     } catch (e) {
-      setError(describeError(e));
+      toast.error(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -358,8 +361,12 @@ export default function StreamDetailClient() {
     if (!address) return;
     setSubmitting(true);
     try {
-      await cancelStream(address, stream!.id, signTransaction);
-      toast.success("Stream cancelled.");
+      await cancelStream(address, streamId, signTransaction);
+      toast.success(
+        t("home.cancelled", { id: streamId }),
+        undefined,
+        `stream-status:${streamId}:cancelled`
+      );
       await engineRef.current?.refresh();
     } catch (e) {
       toast.error(describeError(e));
@@ -410,16 +417,6 @@ export default function StreamDetailClient() {
       <h1>
         {stream.status === "Active" ? "⚡ Streaming" : `⏹ ${stream.status}`}
       </h1>
-      {error && (
-        <p className="err" role="alert">
-          {error}
-        </p>
-      )}
-      {status && (
-        <p className="muted" role="status">
-          {status}
-        </p>
-      )}
 
       <section className="card">
         <div className="row" style={{ alignItems: "center" }}>
@@ -564,9 +561,7 @@ export default function StreamDetailClient() {
             </button>
           </div>
           {!validation.valid && validation.error && (
-            <p className="err" role="alert">
-              {validation.error}
-            </p>
+            <p className="err">{validation.error}</p>
           )}
         </section>
       )}

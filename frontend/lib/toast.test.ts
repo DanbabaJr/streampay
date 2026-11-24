@@ -90,4 +90,61 @@ describe("Toast System", () => {
     assert.strictEqual(toasts[0].duration, 5000);
     assert.strictEqual(toasts[1].duration, 6000);
   });
+
+  it("publishes toast announcements with their severity", () => {
+    const store = createToastStore();
+    store.success("Created", 0);
+    assert.deepStrictEqual(store.getAnnouncement(), {
+      message: "Created",
+      type: "success",
+      key: "success\u0000Created",
+    });
+
+    store.error("Failed", 0);
+    assert.strictEqual(store.getAnnouncement().type, "error");
+    assert.strictEqual(store.getAnnouncement().message, "Failed");
+  });
+
+  it("dedupes identical consecutive announcements without dropping visual toasts", () => {
+    const store = createToastStore();
+    let announcementCount = 0;
+    store.subscribeToAnnouncements(() => announcementCount++);
+
+    store.info("Stream #1 is active.", 0);
+    store.info("Stream #1 is active.", 0);
+
+    assert.strictEqual(store.getToasts().length, 2);
+    assert.strictEqual(announcementCount, 1);
+    assert.strictEqual(store.getAnnouncement().message, "Stream #1 is active.");
+
+    store.info("Stream #2 is active.", 0);
+    store.info("Stream #1 is active.", 0);
+    assert.strictEqual(announcementCount, 3);
+  });
+
+  it("shares dedupe keys between action toasts and status announcements", () => {
+    const store = createToastStore();
+    store.success("Stream #1 cancelled.", 0, "stream-status:1:cancelled");
+    store.announce("Stream #1 cancelled.", "info", "stream-status:1:cancelled");
+
+    assert.strictEqual(store.getAnnouncement().type, "success");
+    assert.strictEqual(store.getAnnouncement().message, "Stream #1 cancelled.");
+  });
+
+  it("clears announcements and allows the same message after clearing", () => {
+    const store = createToastStore();
+    store.info("Loading complete", 0);
+    store.clearAnnouncements();
+
+    assert.deepStrictEqual(store.getAnnouncement(), {
+      message: "",
+      type: "info",
+      key: null,
+    });
+
+    store.info("Loading complete", 0);
+    assert.strictEqual(store.getAnnouncement().message, "Loading complete");
+    store.clear();
+    assert.strictEqual(store.getAnnouncement().message, "");
+  });
 });

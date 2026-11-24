@@ -7,6 +7,7 @@ import { encode as encodeQr } from "uqr";
 // LocaleProvider reads the router only to refresh after a locale switch.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {} }),
+  usePathname: () => "/pay/abc",
 }));
 
 import PaymentShareActions from "../components/PaymentShareActions";
@@ -140,6 +141,7 @@ describe("share actions markup", () => {
     expect(html).toContain('aria-label="Copy payment link to clipboard"');
     expect(html).toContain('role="img"');
     expect(html).toContain('aria-label="QR code for this payment link"');
-    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('data-live-region=""');
+    expect(html).toContain('aria-atomic="true"');
   });
 });

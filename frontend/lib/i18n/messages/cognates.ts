@@ -21,6 +21,8 @@ export const COGNATE_KEYS = [
   "pay.terminal.status",
   // "Webhooks" is the accepted borrowing in Spanish UI copy.
   "settings.webhooks",
+  // "Error" is the standard Spanish UI term.
+  "toast.type.error",
   // "Asset" is the word used in German UI copy, and "/s" is a unit symbol.
   "form.asset",
   "form.unitPerSecond",

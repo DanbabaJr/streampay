@@ -11,10 +11,14 @@
 
 import React, { useState } from "react";
 import { registerPasskey, loginWithPasskey, isPasskeyRegistered } from "../../lib/passkey";
+import { useToast } from "../../components/toast";
+import { useT } from "../../lib/i18n/provider";
 
 type Step = "idle" | "registering" | "registered" | "logging-in" | "claimed" | "error";
 
 export default function PasskeyPage() {
+  const toast = useToast();
+  const t = useT();
   const [owner, setOwner] = useState("");
   const [requireUV, setRequireUV] = useState(false);
   const [step, setStep] = useState<Step>("idle");
@@ -29,12 +33,14 @@ export default function PasskeyPage() {
       const result = await registerPasskey(owner.trim(), requireUV);
       setTxHash(result.txHash);
       setStep("registered");
-      setMessage(
-        `Passkey registered. P-256 key x=${result.x.slice(0, 8)}… registered on-chain.`
-      );
+      const status = t("passkey.registered", { key: result.x.slice(0, 8) });
+      setMessage(status);
+      toast.success(status);
     } catch (e) {
       setStep("error");
-      setMessage(e instanceof Error ? e.message : String(e));
+      const status = e instanceof Error ? e.message : String(e);
+      setMessage(status);
+      toast.error(status);
     }
   }
 
@@ -46,16 +52,22 @@ export default function PasskeyPage() {
       const registered = await isPasskeyRegistered(owner.trim());
       if (!registered) {
         setStep("error");
-        setMessage("No passkey registered for this address. Register first.");
+        const status = t("passkey.notRegistered");
+        setMessage(status);
+        toast.error(status);
         return;
       }
       const result = await loginWithPasskey(owner.trim());
       setTxHash(result.txHash);
       setStep("claimed");
-      setMessage("Assertion verified on-chain. Your stream claim has been processed.");
+      const status = t("passkey.claimed");
+      setMessage(status);
+      toast.success(status);
     } catch (e) {
       setStep("error");
-      setMessage(e instanceof Error ? e.message : String(e));
+      const status = e instanceof Error ? e.message : String(e);
+      setMessage(status);
+      toast.error(status);
     }
   }
 
@@ -142,7 +154,6 @@ export default function PasskeyPage() {
       {/* Status */}
       {message && (
         <div
-          role="status"
           style={{
             marginTop: "1.5rem",
             padding: "0.75rem 1rem",

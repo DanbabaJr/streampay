@@ -324,11 +324,13 @@ describe("Toast notifications", () => {
   test("success toast passes WCAG 2.1 AA", async () => {
     const html = withLayout(`
 <main class="wrap"><h1>StreamPay</h1></main>
-<div class="toast-container" role="region" aria-label="Notifications" aria-live="polite">
-  <div class="toast-item toast-success" role="status">
+<div class="sr-only" data-live-region aria-live="polite" aria-atomic="true">Stream #1 created successfully.</div>
+<div class="toast-container" role="region" aria-label="Notifications">
+  <div class="toast-item toast-success">
     <span class="toast-icon" aria-hidden="true">✓</span>
+    <span class="sr-only">Success: </span>
     <div class="toast-message">Stream #1 created successfully.</div>
-    <button type="button" class="toast-close" aria-label="Dismiss notification">×</button>
+    <button type="button" class="toast-close" aria-label="Dismiss success notification">×</button>
   </div>
 </div>`);
 
@@ -339,11 +341,13 @@ describe("Toast notifications", () => {
   test("error toast passes WCAG 2.1 AA", async () => {
     const html = withLayout(`
 <main class="wrap"><h1>StreamPay</h1></main>
-<div class="toast-container" role="region" aria-label="Notifications" aria-live="assertive">
-  <div class="toast-item toast-error" role="alert">
+<div class="sr-only" data-live-region aria-live="assertive" aria-atomic="true">Transaction failed. Check your wallet balance.</div>
+<div class="toast-container" role="region" aria-label="Notifications">
+  <div class="toast-item toast-error" tabindex="-1">
     <span class="toast-icon" aria-hidden="true">✕</span>
+    <span class="sr-only">Error: </span>
     <div class="toast-message">Transaction failed. Check your wallet balance.</div>
-    <button type="button" class="toast-close" aria-label="Dismiss notification">×</button>
+    <button type="button" class="toast-close" aria-label="Dismiss error notification">×</button>
   </div>
 </div>`);
 

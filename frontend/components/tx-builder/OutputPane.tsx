@@ -66,11 +66,11 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 export default function OutputPane({ output, error, busy }: OutputPaneProps) {
   return (
-    <section className="card" aria-live="polite" aria-busy={busy}>
+    <section className="card" aria-busy={busy}>
       <h2 style={{ marginTop: 0 }}>Output</h2>
       {busy && <p className="muted">Waiting for Soroban RPC…</p>}
       {error && (
-        <p className="err" role="alert">
+        <p className="err">
           {error}
         </p>
       )}
@@ -99,7 +99,7 @@ export default function OutputPane({ output, error, busy }: OutputPaneProps) {
 
           <h3>Simulation</h3>
           {!output.simulation.ok ? (
-            <p className="err" role="alert">
+            <p className="err">
               Simulation failed: {output.simulation.error}
             </p>
           ) : (
@@ -131,7 +131,7 @@ export default function OutputPane({ output, error, busy }: OutputPaneProps) {
                 />
               </div>
               {output.simulation.needsRestore && (
-                <p className="warn" role="alert">
+                <p className="warn">
                   Simulation requires a restore preamble before this call can be
                   submitted. Restore the archived entries first.
                 </p>

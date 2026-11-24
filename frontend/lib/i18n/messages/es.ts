@@ -38,6 +38,13 @@ export const es: Record<MessageKey, string> = {
   "chrome.apiDocs": "Documentación de API ↗",
   "chrome.simulatorLink": "Simulador de acumulación →",
 
+  "toast.region": "Notificaciones",
+  "toast.type.success": "Éxito",
+  "toast.type.error": "Error",
+  "toast.type.info": "Información",
+  "toast.dismiss":
+    "Cerrar notificación de {type, select, success {éxito} error {error} other {información}}",
+
   "settings.navigation": "Ajustes",
   "settings.title": "Ajustes",
   "settings.description": "Gestiona notificaciones, webhooks y preferencias de telemetría del navegador.",
@@ -83,10 +90,55 @@ export const es: Record<MessageKey, string> = {
   "home.created": "Stream #{id} creado.",
   "home.batchCreated":
     "{count, plural, one {# stream creado} other {# streams creados}}: {ids}.",
+  "home.noFundsClaimAll":
+    "No hay fondos disponibles para reclamar en {count, plural, one {# stream} other {# streams}}.",
+  "home.noClaimableStreams": "No se encontraron streams reclamables.",
+  "home.claimAllSuccess":
+    "Se reclamaron {amounts} de {count, plural, one {# stream} other {# streams}} correctamente.",
+  "home.claimAllSkipped":
+    "{count, plural, one {# stream fue} other {# streams fueron}} omitido o no era reclamable.",
+  "home.claimAllMore":
+    "Quedan más streams (desplazamiento de continuación {offset, number}). Selecciona «Reclamar todo» de nuevo para procesar la siguiente página.",
   "home.withdrew": "Se retiraron {amount} del stream #{id}.",
   "home.claimed": "Se reclamaron {amount} del stream #{id}.",
   "home.toppedUp": "Stream #{id} recargado con {amount}.",
   "home.cancelled": "Stream #{id} cancelado.",
+  "home.statusChanged":
+    "El stream #{id} ahora está {status, select, active {activo} cancelled {cancelado} depleted {agotado} completed {completado} paused {pausado} other {{status}}}.",
+  "home.streamEvent":
+    "Stream #{id}: {event, select, stream_created {creado} withdrawn {fondos retirados} stream_cancelled {cancelado} stream_topped_up {recargado} stream_paused {pausado} stream_resumed {reanudado} other {actualizado}}.",
+  "stream.sponsorshipEnabled": "Las reclamaciones patrocinadas están activadas.",
+  "stream.nothingAccrued": "Todavía no se ha acumulado nada.",
+  "stream.sponsoredClaimed":
+    "Se reclamaron {amount}; el patrocinador pagó la comisión. Transacción {txHash}.",
+  "stream.amountExceedsAvailable":
+    "El importe supera el saldo acumulado ({amount}). Prueba «Retirar máximo».",
+
+  "address.accrualUpdated":
+    "Acumulación actualizada. {count, plural, one {# stream activo continúa} other {# streams activos continúan}}.",
+  "address.addressCopied": "Dirección copiada al portapapeles.",
+  "address.copyFailed": "No se pudo copiar la dirección. Selecciónala y cópiala manualmente.",
+
+  "txBuilder.contractRequired": "La ID del contrato es obligatoria.",
+  "txBuilder.contractInvalid": "La ID del contrato debe ser una dirección de contrato Stellar válida que empiece por C...",
+  "txBuilder.sourceRequired": "La cuenta de origen es obligatoria.",
+  "txBuilder.sourceInvalid": "La cuenta de origen debe ser una cuenta Stellar válida que empiece por G...",
+  "txBuilder.functionRequired": "Selecciona un punto de entrada del contrato.",
+  "txBuilder.walletRequired": "Conecta una wallet antes de enviar una transacción.",
+  "txBuilder.sourceMismatch":
+    "La cuenta de origen debe coincidir con la wallet conectada. Cambia la cuenta de origen o usa la dirección de la wallet conectada.",
+  "txBuilder.simulated": "{functionName} se simuló en Testnet.",
+  "txBuilder.restoreRequired":
+    "La simulación requiere un preámbulo de restauración antes de enviar esta llamada. Restaura primero las entradas archivadas.",
+  "txBuilder.simulationFailed": "La simulación falló; la transacción no se firmó ni se envió.",
+  "txBuilder.executed": "{functionName} se envió a Testnet. Transacción {hash}.",
+  "txBuilder.executionFailed":
+    "La transacción se incluyó, pero falló en la cadena. Consulta el XDR del resultado a continuación.",
+
+  "passkey.registered": "Passkey registrada. Clave P-256 x={key}… registrada en la cadena.",
+  "passkey.notRegistered": "No hay una passkey registrada para esta dirección. Regístrala primero.",
+  "passkey.claimed": "Aserción verificada en la cadena. Tu retiro del stream se ha procesado.",
+
   "home.walletMissing": "Freighter no detectado: instala la extensión y vuelve a cargar.",
   "home.walletNoAddress": "Freighter no devolvió ninguna dirección.",
   "home.walletFailed": "Error al conectar la billetera: {reason}",
