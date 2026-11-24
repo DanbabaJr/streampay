@@ -133,7 +133,11 @@ jobs:
       - name: Display Report in CI Summary
         if: always()
         run: |
-          [ -f artifacts/wasm_diff_report.md ] && cat artifacts/wasm_diff_report.md >> $GITHUB_STEP_SUMMARY
+          if [ -f artifacts/wasm_diff_report.md ]; then
+            cat artifacts/wasm_diff_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No function-level diff report (base wasm was not built)." >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Record PR Number
         if: always() && github.event_name == 'pull_request'

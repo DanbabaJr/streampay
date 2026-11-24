@@ -148,20 +148,20 @@ pub use dispute::{
 };
 pub use errors::StreamError;
 pub use events::{
-    AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid,
-    BatchWithdrawSummary, BeneficiaryEnrolled, ConditionExpired, ConditionMet, ConditionRegistered,
-    ContractFrozenStateChanged, ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved,
-    FeeCharged, FeeWithdrawn, GovernanceActionExecuted, GovernanceActionProposed,
-    GovernanceActionSigned, GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked,
-    HookRegistered, OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback,
-    OracleTimeReported, OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted,
-    PolicyAssetQueued, PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed,
-    PolicyInitialized, RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled,
-    ScheduledIntentExpired, ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed,
-    SenderTransferred, SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated,
-    StreamCancelled, StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated,
-    StreamRefundTargetChanged, StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated,
-    TemplateApproved, TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
+    AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, BatchWithdrawSummary, BeneficiaryEnrolled,
+    ConditionExpired, ConditionMet, ConditionRegistered, ContractFrozenStateChanged,
+    ContractUpgraded, DisputeExpired, DisputeRaised, DisputeResolved, FeeCharged, FeeWithdrawn,
+    GovernanceActionExecuted, GovernanceActionProposed, GovernanceActionSigned,
+    GovernanceActionVetoed, GovernanceSignersSet, HookFailed, HookInvoked, HookRegistered,
+    OperatorKeyRotated, OracleConfigUpdated, OracleStaleFallback, OracleTimeReported,
+    OwnershipAccepted, OwnershipProposed, PolicyAssetExecuted, PolicyAssetQueued,
+    PolicyHandoffAccepted, PolicyHandoffCancelled, PolicyHandoffProposed, PolicyInitialized,
+    RateChangeAccepted, RateChangeProposed, ScheduledIntentCancelled, ScheduledIntentExpired,
+    ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
+    SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
+    StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
+    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
+    TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
     GovernanceAction, Proposal, DEFAULT_VETO_WINDOW_SECONDS, MAX_SIGNERS, MIN_VETO_WINDOW_SECONDS,
@@ -176,15 +176,15 @@ pub use sponsor::{PeriodSpend, SponsorConfig};
 // `streamed_at` is re-exported for the fuzz target and downstream rate
 // calculators: it is a pure function requiring no `Env`.
 pub use stream::{
-    streamed_amount_at_segments, streamed_at,
-    AssetTransfer, BatchEntry, ClaimFailure, MigrationStatus, OwnershipRole, PageBounds,
-    PendingOwnership, PendingRateChange, PendingSenderTransfer, PendingUpgrade, RateSegment,
-    SenderHistory, SenderTransferRecord, Stream, StreamStatus, StreamVersionReport,
-    VersionedStream, WithdrawAllResult, WithdrawEntry, WithdrawOutcome,
-    CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH, MAX_DURATION_SECONDS,
-    MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH, MIN_BATCH,
-    MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
-    STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2, TARGET_SCHEMA_VERSION,
+    streamed_amount_at_segments, streamed_at, AssetTransfer, BatchEntry, ClaimFailure,
+    MigrationStatus, OwnershipRole, PageBounds, PendingOwnership, PendingRateChange,
+    PendingSenderTransfer, PendingUpgrade, RateSegment, SenderHistory, SenderTransferRecord,
+    Stream, StreamStatus, StreamVersionReport, VersionedStream, WithdrawAllResult, WithdrawEntry,
+    WithdrawOutcome, CURRENT_STREAM_RECORD_VERSION, INITIAL_SCHEMA_VERSION, MAX_BATCH,
+    MAX_DURATION_SECONDS, MAX_MIGRATION_BATCH_SIZE, MAX_PAGE_SIZE, MAX_RATE_SEGMENTS,
+    MAX_WITHDRAW_BATCH, MIN_BATCH, MIN_UPGRADE_DELAY_SECONDS, OWNERSHIP_PROPOSAL_TTL_SECONDS,
+    RATE_PROPOSAL_TTL_SECONDS, STREAM_RECORD_VERSION_V1, STREAM_RECORD_VERSION_V2,
+    TARGET_SCHEMA_VERSION,
 };
 pub use treasury::{fee_amount, FeeScan, Treasury, TreasuryStatus, BPS_DENOMINATOR, MAX_FEE_BPS};
 
@@ -1600,7 +1600,6 @@ impl StreamingPayments {
         }
         Ok(amount)
     }
-
 
     #[cfg_attr(
         not(target_family = "wasm"),
@@ -5658,5 +5657,4 @@ impl StreamingPayments {
     pub fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook> {
         hooks::get_hook(&env, stream_id, event_class)
     }
-
 }
