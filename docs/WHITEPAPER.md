@@ -448,13 +448,13 @@ It also checks that every `[Cn]` cited in the text has a row, and that every row
 | C58 |   Payload-enum variant names and their payload types fold into the canonical shape, so variant order is wire-visible   | `contracts/streaming-payments/src/event_registry.rs:148` | `"{name}{{payload_enum:{}}}",` |
 | C59 |   Each event publishes a JSON Schema for its positional topics, not only its data fields   | `contracts/streaming-payments/src/event_registry.rs:813` | `let mut topic_properties = Map::new();` |
 | C60 |   The catalog indexes every event with its structural fingerprint   | `contracts/streaming-payments/src/event_registry.rs:859` | `"fingerprint": e.fingerprint(defs),` |
-| C61 |   Deleting a published event is a breaking change and fails the compatibility gate   | `scripts/event_compat_check.mjs:68` | `REMOVED event ${name}` |
-| C62 |   Deleting a positional topic is breaking   | `scripts/event_compat_check.mjs:83` | `REMOVED topic field ${name}.${t.name} (position ${i})` |
-| C63 |   Renaming a topic at a position is breaking, because topics are positional   | `scripts/event_compat_check.mjs:86` | `topic at position ${i} changed name` |
-| C64 |   Deleting a data field is breaking, because consumers decode it by name   | `scripts/event_compat_check.mjs:109` | `REMOVED data field ${name}.${field}: ${type}` |
-| C65 |   An added field is allowed only when the event changelog records it   | `scripts/event_compat_check.mjs:98` | `MISSING CHANGELOG: added topic ${name}.${t.name} must be recorded in` |
+| C61 |   Deleting a published event is a breaking change and fails the compatibility gate   | `scripts/event_compat_check.mjs:175` | `REMOVED event ${name}` |
+| C62 |   Deleting a positional topic is breaking   | `scripts/event_compat_check.mjs:192` | `REMOVED topic field ${name}.${t.name} (position ${i})` |
+| C63 |   Renaming a topic at a position is breaking, because topics are positional   | `scripts/event_compat_check.mjs:197` | `topic at position ${i} changed name` |
+| C64 |   Deleting a data field is breaking, because consumers decode it by name   | `scripts/event_compat_check.mjs:221` | `REMOVED data field ${name}.${field}: ${type}` |
+| C65 |   An added field is allowed only when the event changelog records it   | `scripts/event_compat_check.mjs:209` | `MISSING CHANGELOG: added topic ${name}.${t.name} must be recorded in` |
 | C66 |   The indexer refuses a governed event that omits a declared data field   | `indexer/src/decoder.ts:423` | `is missing registry data field(s):` |
 | C67 |   The indexed stream id comes only from a topic the registry declares as stream_id   | `indexer/src/decoder.ts:417` | `if (field.name === "stream_id") streamId = String(positional[i]);` |
 | C68 |   Events from another contract id are journalled without a stream claim   | `indexer/src/decoder.ts:439` | `if (!fromGovernedContract) {` |
-| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:305` | `if (event.streamId === null) {` |
+| C69 |   An event with no stream id writes no stream projection   | `indexer/src/store.ts:308` | `if (event.streamId === null) {` |
 <!-- claims:end -->
