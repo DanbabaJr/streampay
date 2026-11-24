@@ -1,5 +1,10 @@
 # Contract Wasm size (issue #58)
 
+**Current state: 129,742 bytes against a 131,072-byte protocol limit** — see
+[The wall](#the-wall-127-kb-is-not-a-budget-any-more-it-is-the-deploy-limit-bulk-merge--129742-b).
+Everything above that section is the history of how the gate got here, kept
+because each re-baseline records *why* the number moved, not just where it is.
+
 Goal: keep the deployed `streampay_contract.wasm` **below 60 KB** without any
 behavior change, so the contract stays cheap to deploy and close to the
 Soroban instruction/size comfort zone while the CI size budget
@@ -489,6 +494,64 @@ Probes before accepting the number:
 | `scripts/check_error_codes.sh` | Codes 1–125 contiguous and unique; #620 takes exactly 100–125. |
 | Function-level Wasm diff | 191 new functions, 0 removed, +37,887 B (unshaken build) — reviewed as part of the four modules' behavior surface; advisory `max_delta` raised to 40,960 B in the same commit as this decision. |
 | Storage layout | Additive side keys and new record types only; the schema-guard golden (`test_snapshots/schema_guard_test/schema_fingerprint_matches_stored.1.json`) was regenerated from the tree and the upgrade-replay test runs it. |
+
+## The wall: 127 KB is not a budget any more, it is the deploy limit (bulk merge → 129,742 B)
+
+`WASM_SIZE_BUDGET_KB` was set to 127 on the assumption that it was a rat-ratchet
+sitting *below* some larger deploy limit. It is not. Soroban's network
+hard limit on contract code is **131,072 bytes** (128 KiB), so 127 KB leaves
+1,024 B of protocol headroom and the 129,817 B that #620 measured had already
+spent all of it. The 231 B of "deliberate" headroom recorded above was not
+slack in the gate — it was slack in the *chain*, and the three contract PRs
+merged next spent it going the wrong way.
+
+The bulk merge put `main` at **140,693 B** (`b48a94be`, same pinned
+stellar-cli 28.1.0). That is 9,621 B over the protocol limit: not a failing
+size check, an **uninstallable contract**. Nothing about it could be fixed by
+editing `WASM_SIZE_BUDGET_KB`, which is exactly why the number had to stop
+being the only thing the job looked at.
+
+Withdrawn, in the order the size demanded:
+
+| PR | Surface removed | Why this one |
+|---|---|---|
+| #626 | drainable insurance pool (`deposit_insurance` …), never merged | Requested changes on 2026-11-21: the pool was payable by anyone and drainable by the first caller, and the accrual re-baseline it needed was unmeasured. It was refused before it could add bytes. |
+| #660 | delegated session keys: `authorize_agent`, `revoke_agent`, `withdraw_delegated`, `agent_status` | #677's entrypoints are built on this state, so neither can move out without taking the other. Session keys are the smaller of the two and the one with a superseded auth model (the contract already has `add_delegate`-style per-stream agents). |
+| #677 | commit-reveal claims: `commit_claim`, `reveal_claim`, `expire_reveal`, `get_claim_commitment`, `privacy_claims.rs` | 4 entrypoints + a stored commitment map + 4 error codes' worth of new state. Privacy on claims is a design question (a `Vec` of hashed commitments on instance storage is per-claim griefing surface), not a size question, so it goes back to being designed rather than shrinking in place. |
+
+What the tree is after the revert, measured by CI's own build (`Contract — test
+/ fmt / clippy / wasm`, "Wasm size budget check", commit `e7acae41`):
+
+| Quantity | Bytes | Against |
+|---|---|---|
+| Contract Wasm, canonical build | **129,742** | — |
+| Headroom under `WASM_SIZE_BUDGET_KB` = 127 (130,048 B) | **306 B** | the gate |
+| Headroom under the protocol limit (131,072 B) | **1,330 B** | the chain |
+
+So 127 KB is now the *last whole KB below the wall*, and the budget no longer
+has an honest next step: 128 KB (131,072 B) is the wall itself. Any addition of
+one entrypoint (~680 B measured at #426) fits under the protocol limit but not
+under this budget, which is intended. The pre-declared work that changes the
+answer is #441 — splitting the governance/ownership family into a second
+contract — and it is now a deployability requirement rather than hygiene: no
+further contract interface can be merged into a single-contract StreamPay.
+
+Error codes are **not** renumbered by a withdrawal, ever. Codes 126–129
+(`AgentNotAuthorized`, `AgentExpired`, `CapExceededPeriod`, `CapExceededStream`)
+and 2–3 (`NotStreamSender`, `NotStreamRecipient`) stay declared in
+`errors.rs` and move to `surface.rs::RETIRED_CODES`, so an integrator matching
+on 129 keeps getting a name that means what it meant, and every later code
+keeps its number. The catalog generator now reads that retirement list out of
+the contract itself, so a retired code can no longer be documented as
+"Active (Enforced)" — 129 codes, contiguous 1–129, 6 of them retired.
+
+Three gates were added so a size problem is caught as the thing it is:
+
+| Gate | What it does |
+|---|---|
+| `ci.yml` "Wasm size budget check" asserts `size > 131072` separately | Fails with *"This build cannot be deployed; the fix is to remove contract surface (see docs/WASM_SIZE.md), not to raise a budget."* Raising `WASM_SIZE_BUDGET_KB` can no longer hide an undeployable build, and the two failures read differently in the log. |
+| Size table in `$GITHUB_STEP_SUMMARY` | Prints measured bytes, budget and KB-to-wall headroom on every contract build, so the remaining budget is visible without reading a log. |
+| `upgrade_replay_preserves_every_record` builds before it runs (`scripts/release_gates.sh`) | The rehearsal boots the release-line records and then swaps in `target/wasm32v1-none/release/streampay_contract.wasm`. It used to run *before* the build, so a warm cargo cache let it replay another commit's bytes and report a phantom `140,796 B`. `STORAGE_GOLDEN_REQUIRE_WASM=1` makes a missing artifact a failure instead of a silent skip. |
 
 ## Categories investigated and rejected (with measurements)
 
