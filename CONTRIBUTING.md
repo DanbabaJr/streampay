@@ -192,7 +192,7 @@ both on every pull request:
   fail, so the checker compares the merge base against your branch and reports
   any named step that no job runs — unless `.github/ci-gates.json` records it
   under `retired` with a reason, in the same diff.
-- Independence survives as `if: always() && !cancelled()`. The devcontainer
+- Independence survives as `if: ${{ always() && !cancelled() }}`. The devcontainer
   build steps used to be a separate check so that a compile error still showed
   up when the job had already stopped at a formatting complaint; inside the
   Contract job they carry that condition and keep behaving the same way.

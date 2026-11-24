@@ -5,11 +5,11 @@ name: CI
 # than rename it — and the only thing a merge costs is the independent red: a
 # step that used to fail alone now shares a check with the steps around it.
 # Where that independence was the point, the moved steps carry
-# `if: always() && !cancelled()` so they still run after an earlier failure in
-# the same job, and a provenance banner names the check they came from.
-# `.github/ci-gates.json` records the same migration in its `moved` section,
-# and scripts/check_ci_integrity.py --base proves against the merge base that
-# every relocated step still runs and nothing was quietly dropped.
+# `if: ${{ always() && !cancelled() }}` so they still run after an earlier
+# failure in the same job, and a provenance banner names the check they came
+# from. `.github/ci-gates.json` records the same migration in its `moved`
+# section, and scripts/check_ci_integrity.py --base proves against the merge
+# base that every relocated step still runs and nothing was quietly dropped.
 #
 # Storybook stays separate for a hard reason rather than a taste one: its
 # baselines are only comparable inside the pinned Playwright image, and a job
@@ -320,13 +320,13 @@ jobs:
       # ------------------------------------------------------------------
 
       - name: Install Rust toolchain (mirrors devcontainer feature)
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() }}
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
 
       - name: Cache cargo
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() }}
         uses: actions/cache@v6
         with:
           path: |
@@ -339,19 +339,19 @@ jobs:
       # Pin must stay in sync with STELLAR_CLI_VERSION in devcontainer.json
       # and the version used in the contract / release jobs above.
       - name: Install stellar-cli v28.1.0
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() }}
         run: bash scripts/install_stellar_cli.sh
 
       - name: Wasm build (devcontainer path)
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() }}
         working-directory: contracts/streaming-payments
-        # Every step in this block carries `if: always() && !cancelled()` so it
-        # keeps running when the job stopped earlier at a formatting complaint.
-        # That is what made this an independent check rather than extra steps in
-        # the job above: it skips fmt, clippy and tests, so a red here means "the
-        # contract does not even compile" instead of "rustfmt disagreed". The
-        # one-check-per-job boundary is the only thing that moved; the isolation
-        # that the check existed for is preserved by the condition.
+        # Every step in this block carries `if: ${{ always() && !cancelled() }}`
+        # so it keeps running when the job stopped earlier at a formatting
+        # complaint. That is what made this an independent check rather than
+        # extra steps in the job above: it skips fmt, clippy and tests, so a red
+        # here means "the contract does not even compile" instead of "rustfmt
+        # disagreed". The one-check-per-job boundary is the only thing that
+        # moved; the isolation the check existed for is carried by the condition.
         run: |
           if ! stellar contract build; then
             echo "::error::The contract does not compile. This block runs no fmt/clippy/test steps, so unlike the steps above it isolates a genuine build error — usually a duplicate StreamError discriminant (E0081), a surface.rs Branch arm that was not extended, or an entrypoint signature change. Reproduce with 'cargo check -p streampay-contract --all-targets' and 'bash scripts/check_error_codes.sh'."
@@ -359,7 +359,7 @@ jobs:
           fi
 
       - name: Assert wasm artifact is present and non-empty
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() }}
         run: |
           wasm=target/wasm32v1-none/release/streampay_contract.wasm
           [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
@@ -373,33 +373,26 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
-        working-directory: frontend
 
       - uses: actions/setup-node@v7
-        working-directory: frontend
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
         run: npm ci
 
       - name: Install CLI dependencies for cross-client parity
-        working-directory: frontend
         run: npm install --prefix ../tools/streampay-cli --no-package-lock --ignore-scripts --no-audit --no-fund
 
       - name: Lint
-        working-directory: frontend
         run: npm run lint
 
       - name: Typecheck
-        working-directory: frontend
         run: npm run typecheck
 
       - name: Unit tests
-        working-directory: frontend
         # Both runners: `node --test` collects the *.test.ts suites (including the
         # sponsorship wire-parity vectors — frozen relay message XDR + digest,
         # shared with the Rust suite — on Node's type-stripping runner, the
@@ -417,7 +410,6 @@ jobs:
       # script regenerates *and* fails on any drift, and is the same command
       # contributors run locally.
       - name: Differential vectors are up to date
-        working-directory: frontend
         run: bash ../scripts/check_generated.sh vectors
 
       # OpenAPI freshness (issue #517): the runtime route
@@ -430,11 +422,9 @@ jobs:
       # CRLF copy of the committed spec must still pass it, so a gate that
       # silently stopped catching drift cannot stay green.
       - name: OpenAPI spec is up to date
-        working-directory: frontend
         run: bash ../scripts/check_generated.sh openapi --self-test
 
       - name: Differential tests (against shared vector corpus)
-        working-directory: frontend
         run: node --experimental-strip-types --test lib/oracle.test.ts
 
       # Network/contract indicator logic (issue #33): the wallet-vs-app network
@@ -442,10 +432,8 @@ jobs:
       # directions (mainnet wallet on a testnet dapp and vice versa) are
       # covered without a browser extension.
       - name: Network indicator tests
-        working-directory: frontend
         run: node --experimental-strip-types --test lib/network.test.ts
       - name: Client parity smoke tests
-        working-directory: frontend
         run: npm run test:parity
 
       # The scheduled testnet canary imports this tree's signing-free builders
@@ -463,7 +451,6 @@ jobs:
       # is one small, locked, script-free install of the canary's own tree. It runs
       # the forced-failure path, so it needs no network and no testnet credentials.
       - name: Testnet canary suite (imports the frontend builders)
-        working-directory: frontend
         run: |
           npm ci --prefix ../tools/canary --ignore-scripts --no-audit --no-fund
           cd ../tools/canary && npm test
@@ -476,7 +463,6 @@ jobs:
       # Uses Node's built-in test runner + mock timers; no browser needed.
       # -----------------------------------------------------------------------
       - name: Clock-skew property + live-accrual tests
-        working-directory: frontend
         run: >-
           node --experimental-strip-types --test
           lib/clock-skew.test.ts lib/live-accrual.test.ts
@@ -493,7 +479,6 @@ jobs:
       # frontend tests and completes in < 30 s.
       # -----------------------------------------------------------------------
       - name: Accessibility audit (axe WCAG 2.1 AA gate)
-        working-directory: frontend
         run: node --experimental-strip-types --test test/a11y.test.ts
 
       # Dedicated vitest step, deliberately not folded into the `npm test` above.
@@ -504,15 +489,12 @@ jobs:
       # suite has an owner: if it ever stops being collected, the job says which
       # runner went missing.
       - name: Scheduler + fee-series simulation (vitest)
-        working-directory: frontend
         run: npm run test:scheduler
 
       - name: Build
-        working-directory: frontend
         run: npm run build
 
       - name: Dependency audit
-        working-directory: frontend
         id: audit
         # Production deps only: dev-tooling advisories (e.g. braces in the
         # eslint chain) never ship to users and currently have no fix.
@@ -520,7 +502,6 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
       - name: Explain a dependency-audit failure
-        working-directory: frontend
         if: failure() && steps.audit.outcome == 'failure'
         # npm audit failures are frequently *not* the contributor's fault: a
         # fresh advisory in a transitive production dependency turns every open
@@ -730,21 +711,17 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
-        working-directory: frontend
 
       - uses: actions/setup-node@v7
-        working-directory: frontend
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
         run: npm ci
 
       - name: Playwright matches the container image
-        working-directory: frontend
         run: |
           expected="1.65.1"
           actual="$(node -p "require('@playwright/test/package.json').version")"
@@ -756,7 +733,6 @@ jobs:
       # Same Next 16 / React 19 the app builds with: the framework reads
       # next.config.ts and resolves the app's own node_modules.
       - name: Storybook build
-        working-directory: frontend
         run: npm run build-storybook
 
       # One full-page screenshot per story, compared with zero pixel tolerance
@@ -765,7 +741,6 @@ jobs:
       # comparison, and the injected clock must hold the live-accrual counter
       # still (frontend/visual/detector.visual.ts).
       - name: Visual regression (Playwright screenshot diff)
-        working-directory: frontend
         id: visual
         run: npx playwright test
 
@@ -774,7 +749,6 @@ jobs:
       # self-test's demo diff, so the artifact shows what a caught regression
       # looks like.
       - name: Upload visual diffs
-        working-directory: frontend
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -791,12 +765,10 @@ jobs:
       # and commits them deliberately. This is also how the first baseline for
       # a new story is produced without Docker.
       - name: Render candidate baselines
-        working-directory: frontend
         if: failure() && steps.visual.outcome == 'failure'
         run: npx playwright test stories.visual.ts --update-snapshots=changed
 
       - name: Upload candidate baselines
-        working-directory: frontend
         if: failure() && steps.visual.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
@@ -806,7 +778,6 @@ jobs:
           retention-days: 14
 
       - name: Explain a visual-regression failure
-        working-directory: frontend
         if: failure()
         run: |
           echo "::error::A story no longer matches its baseline (or has none). Download the 'visual-diffs' artifact: each failed story has <id>-expected.png, <id>-actual.png and <id>-diff.png. If the change is unintended, fix the component. If it is intended, take the re-rendered set from the 'visual-baselines-linux' artifact (or run: bash frontend/scripts/visual-baselines.sh), unpack it into frontend/visual/__screenshots__/linux/, look at every changed PNG, and commit them with a note in the PR saying which stories changed and why. See docs/STORYBOOK.md."

@@ -250,7 +250,7 @@
     "ci.yml": {
       "devcontainer-verify": {
         "to": "contract",
-        "reason": "Its whole purpose was a red that survives a formatting failure in the contract job, so that a compile error reads differently from a rustfmt complaint. The steps now run inside contract under `if: always() && !cancelled()`, which preserves that: they still execute when the job already failed at Format check or Clippy. One check instead of two, same diagnostic separation."
+        "reason": "Its whole purpose was a red that survives a formatting failure in the contract job, so that a compile error reads differently from a rustfmt complaint. The steps now run inside contract under `if: ${{ always() && !cancelled() }}`, which preserves that: they still execute when the job already failed at Format check or Clippy. One check instead of two, same diagnostic separation."
       },
       "cli-parity": {
         "to": "frontend",
