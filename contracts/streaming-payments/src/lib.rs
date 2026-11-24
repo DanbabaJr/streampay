@@ -119,6 +119,8 @@ mod schedule_test;
 mod schema_guard_test;
 pub(crate) mod sponsor;
 #[cfg(test)]
+mod sponsor_property_test;
+#[cfg(test)]
 mod sponsor_test;
 #[cfg(test)]
 mod storage_golden;

@@ -22,12 +22,12 @@ const DEPOSIT: i128 = 10_000_000_000;
 
 /// An out-of-band ed25519 signer: secret key to sign claims, public key to
 /// register/enroll.
-struct TestSigner {
+pub(crate) struct TestSigner {
     secret: SigningKey,
-    public_key: BytesN<32>,
+    pub(crate) public_key: BytesN<32>,
 }
 
-fn test_signer(env: &Env, seed: u8) -> TestSigner {
+pub(crate) fn test_signer(env: &Env, seed: u8) -> TestSigner {
     let secret = SigningKey::from_bytes(&[seed; 32]);
     TestSigner {
         public_key: BytesN::from_array(env, &secret.verifying_key().to_bytes()),
@@ -43,7 +43,7 @@ fn sign_digest(env: &Env, signer: &TestSigner, digest: &BytesN<32>) -> BytesN<64
 
 /// Nested result shape the generated client produces for a
 /// `Result<(), StreamError>` entry point.
-type RelayResult =
+pub(crate) type RelayResult =
     Result<Result<(), soroban_sdk::ConversionError>, Result<StreamError, soroban_sdk::InvokeError>>;
 
 /// Relays a claim for `f.recipient`, signed by both the sponsor operator and
@@ -59,11 +59,38 @@ fn relay_claim(
     nonce: u64,
     deadline: u64,
 ) -> RelayResult {
+    relay_claim_for(
+        f,
+        sponsor_addr,
+        &f.recipient,
+        op,
+        ben,
+        id,
+        amount,
+        nonce,
+        deadline,
+    )
+}
+
+/// [`relay_claim`] for an explicit `beneficiary`, so one sponsor can serve
+/// several recipients in the same ledger.
+#[allow(clippy::too_many_arguments)] // mirrors the relay surface
+pub(crate) fn relay_claim_for(
+    f: &Fixture,
+    sponsor_addr: &Address,
+    beneficiary: &Address,
+    op: &TestSigner,
+    ben: &TestSigner,
+    id: u64,
+    amount: i128,
+    nonce: u64,
+    deadline: u64,
+) -> RelayResult {
     let parts = sponsor::message(
         &f.env,
         &f.client.address,
         sponsor_addr,
-        &f.recipient,
+        beneficiary,
         &f.token,
         id,
         amount,
@@ -73,7 +100,7 @@ fn relay_claim(
     let digest = sponsor::signature_digest(&f.env, &parts);
     f.client.mock_all_auths().try_sponsored_withdraw(
         sponsor_addr,
-        &f.recipient,
+        beneficiary,
         &id,
         &amount,
         &nonce,
@@ -90,7 +117,7 @@ fn relay_rejection(res: RelayResult) -> StreamError {
 }
 
 /// Registers an active sponsor with `op` as its authorized operator.
-fn register_op(
+pub(crate) fn register_op(
     f: &Fixture,
     sponsor_addr: &Address,
     op: &TestSigner,
