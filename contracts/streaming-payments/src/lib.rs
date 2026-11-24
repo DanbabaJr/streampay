@@ -105,6 +105,8 @@ mod governance;
 #[cfg(test)]
 mod governance_test;
 pub mod hooks;
+#[cfg(test)]
+mod hostile_token_fuzz_test;
 pub mod oracle;
 mod policy;
 pub mod receivables;

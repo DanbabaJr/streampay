@@ -5,6 +5,8 @@
     "ci.yml": {
       "contract": [
         "Error codes and registry wiring are consistent",
+        "Cross-PR collision gate self-test",
+        "Cross-PR collision gate",
         "Install Rust toolchain",
         "Format check",
         "Clippy (deny warnings)",

@@ -86,6 +86,18 @@ jobs:
       - name: Error codes and registry wiring are consistent
         run: bash scripts/check_error_codes.sh
 
+      # Merge collisions are the failure shape this repo keeps having: two PRs
+      # that are each correct against main and wrong together. b48a94be carried
+      # two at once (19 `Branch::` arms no `enum Branch` declared, and #677
+      # re-landing #660's session keys under the same three method names,
+      # E0592), and every PR check said yes. These run in milliseconds with no
+      # toolchain, and name the file and line of both sides.
+      - name: Cross-PR collision gate self-test
+        run: python3 scripts/cross_pr_collision.py --self-test
+
+      - name: Cross-PR collision gate
+        run: python3 scripts/cross_pr_collision.py --root .
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

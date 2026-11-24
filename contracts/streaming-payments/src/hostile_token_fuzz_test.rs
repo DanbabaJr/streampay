@@ -35,12 +35,11 @@ use std::vec::Vec;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype,
     testutils::{Address as _, Ledger as _},
-    token::Client as TokenClient,
     Address, Env, MuxedAddress, String as SdkString,
 };
 
 use crate::test_client::StreamingPaymentsClient as Client;
-use crate::{StreamError, StreamStatus, StreamingPayments};
+use crate::StreamingPayments;
 
 // ---------------------------------------------------------------- Hostile Errors
 #[contracterror]
@@ -114,7 +113,7 @@ impl RevertingToken {
             .persistent()
             .set(&from_key, &(from_bal - amount));
 
-        let to_addr: Address = to.into();
+        let to_addr: Address = to.address();
         let to_key = RevertingKey::Balance(to_addr);
         let to_bal: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
         env.storage().persistent().set(&to_key, &(to_bal + amount));
@@ -237,7 +236,7 @@ impl PanickingToken {
             .persistent()
             .set(&from_key, &(from_bal - amount));
 
-        let to_addr: Address = to.into();
+        let to_addr: Address = to.address();
         let to_key = PanickingKey::Balance(to_addr);
         let to_bal: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
         env.storage().persistent().set(&to_key, &(to_bal + amount));
@@ -381,7 +380,7 @@ impl DoubleChargingToken {
             .persistent()
             .set(&from_key, &(from_bal - total_deduct));
 
-        let to_addr: Address = to.into();
+        let to_addr: Address = to.address();
         let to_key = DoubleChargeKey::Balance(to_addr);
         let to_bal: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
         env.storage().persistent().set(&to_key, &(to_bal + amount));
@@ -499,7 +498,7 @@ impl LyingBalanceToken {
             .persistent()
             .set(&from_key, &(from_bal - amount));
 
-        let to_addr: Address = to.into();
+        let to_addr: Address = to.address();
         let to_key = LyingKey::ActualBalance(to_addr);
         let to_bal: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
         env.storage().persistent().set(&to_key, &(to_bal + amount));
@@ -644,7 +643,7 @@ fn run_hostile_token_fuzz_session(seed: u64, steps: usize) {
     let mut tracked_streams: Vec<TrackedStream> = Vec::new();
     let mut charged_fees = [0i128; 4];
     let mut withdrawn_fees = [0i128; 4];
-    let mut fee_bps = 0u32;
+    let fee_bps = 0u32;
 
     for step in 0..steps {
         let ctx = format!("seed {seed:#x} step {step}");
@@ -737,8 +736,7 @@ fn run_hostile_token_fuzz_session(seed: u64, steps: usize) {
                     let s_idx = rng.below(tracked_streams.len() as u64) as usize;
                     if tracked_streams[s_idx].live {
                         let id = tracked_streams[s_idx].id;
-                        let now = env.ledger().timestamp();
-                        let avail = client.mock_all_auths().available(&id).unwrap_or(0);
+                        let avail = client.mock_all_auths().available(&id);
                         if avail > 0 {
                             let w_res = client.mock_all_auths().try_withdraw(&id, &avail);
                             if w_res.is_ok() && w_res.unwrap().is_ok() {
@@ -775,7 +773,7 @@ fn run_hostile_token_fuzz_session(seed: u64, steps: usize) {
                     let s_idx = rng.below(tracked_streams.len() as u64) as usize;
                     if tracked_streams[s_idx].live {
                         let id = tracked_streams[s_idx].id;
-                        let avail = client.mock_all_auths().available(&id).unwrap_or(0);
+                        let avail = client.mock_all_auths().available(&id);
                         let c_res = client.mock_all_auths().try_cancel_stream(&sender, &id);
                         if c_res.is_ok() && c_res.unwrap().is_ok() {
                             tracked_streams[s_idx].withdrawn += avail;
@@ -845,13 +843,28 @@ fn run_hostile_token_fuzz_session(seed: u64, steps: usize) {
 
             // Stored stream status invariant: withdrawn <= deposit
             for s in tracked_streams.iter().filter(|s| s.token_idx == ti) {
-                if let Ok(onchain_s) = client.get_stream(&s.id) {
+                if let Ok(Ok(onchain_s)) = client.try_get_stream(&s.id) {
                     assert!(
                         onchain_s.withdrawn <= onchain_s.deposit,
                         "{ctx}: stream {} withdrawn exceeds deposit ({} > {})",
                         s.id,
                         onchain_s.withdrawn,
                         onchain_s.deposit
+                    );
+                    assert_eq!(
+                        onchain_s.start_time, s.start,
+                        "{ctx}: stream {} start differs from the requested schedule",
+                        s.id
+                    );
+                    assert_eq!(
+                        onchain_s.end_time, s.end,
+                        "{ctx}: stream {} end differs from the requested schedule",
+                        s.id
+                    );
+                    assert_eq!(
+                        onchain_s.cancelable, s.cancelable,
+                        "{ctx}: stream {} cancelability differs from the requested flag",
+                        s.id
                     );
                 }
             }
