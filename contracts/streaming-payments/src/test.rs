@@ -1922,9 +1922,10 @@ fn streamed_at_handles_degenerate_inputs() {
 /// `deposit * elapsed` exceeds `u128` (revert, never wrap or saturate).
 #[test]
 fn streamed_at_boundary_matrix() {
+    type Row = (&'static str, i128, u64, u64, Result<i128, StreamError>);
     const M: u64 = u64::MAX;
     const OVF: Result<i128, StreamError> = Err(StreamError::MathOverflow);
-    let rows: [(&str, i128, u64, u64, Result<i128, StreamError>); 14] = [
+    let rows: [Row; 14] = [
         // Zero rate: nothing ever accrues.
         ("zero rate", 0, 10, 5, Ok(0)),
         // Non-positive deposits are treated as a zero rate, not an error.
