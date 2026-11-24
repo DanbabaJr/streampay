@@ -503,7 +503,7 @@ jobs:
     # must equal the @playwright/test version pinned in frontend/package.json
     # (checked below); bump both together and re-render the baselines.
     container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
     defaults:
       run:
         working-directory: frontend
@@ -521,7 +521,7 @@ jobs:
 
       - name: Playwright matches the container image
         run: |
-          expected="1.64.1"
+          expected="1.65.1"
           actual="$(node -p "require('@playwright/test/package.json').version")"
           if [ "$actual" != "$expected" ]; then
             echo "::error::@playwright/test is $actual but this job runs mcr.microsoft.com/playwright:v$expected-noble. Baselines are only comparable inside the image that rendered them: bump the container tag here and in frontend/scripts/visual-baselines.sh together with the package, then re-render the baselines (docs/STORYBOOK.md)."
