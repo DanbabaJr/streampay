@@ -24,8 +24,8 @@ function Trigger() {
 }
 
 /**
- * Toast notifications. Errors take focus (WCAG 2.4.3) and use `role="alert"`;
- * the others are polite.
+ * Toast notifications. Errors take focus (WCAG 2.4.3); the shared live region
+ * announces errors assertively and success/info politely.
  */
 const meta = {
   title: "Chrome/Toast",

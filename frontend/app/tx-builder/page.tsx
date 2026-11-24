@@ -37,6 +37,8 @@ import { defaultArgsForFunction, type TxValue } from "@/lib/tx-builder/values";
 import { summarizeExecution, summarizeSimulation } from "@/lib/tx-builder/report";
 import ArgField from "@/components/tx-builder/ArgField";
 import OutputPane, { type TxBuilderOutput } from "@/components/tx-builder/OutputPane";
+import { useToast } from "@/components/toast";
+import { useT } from "@/lib/i18n/provider";
 
 const SAFETY = assessSandboxSafety(APP_NETWORK_LABEL, SANDBOX_RPC_URL);
 const DEFAULT_FUNCTION = SPEC_FUNCTIONS.find((entry) => entry.name === "create_stream")?.name
@@ -98,6 +100,8 @@ export default function TxBuilderPage() {
 
 function TxBuilder() {
   const { address, signTransaction } = useWallet();
+  const toast = useToast();
+  const t = useT();
   const [contractId, setContractId] = useState(APP_CONTRACT_ID);
   const [source, setSource] = useState("");
   const [functionName, setFunctionName] = useState(DEFAULT_FUNCTION);
@@ -112,6 +116,11 @@ function TxBuilder() {
   // stays editable so a developer can simulate from another account. The
   // "Use wallet" button fills it without an effect (which would cascade renders).
   const fn = getFunctionSpec(functionName);
+
+  function reportError(message: string) {
+    setError(message);
+    toast.error(message);
+  }
 
   function selectFunction(nextName: string) {
     setFunctionName(nextName);
@@ -130,25 +139,25 @@ function TxBuilder() {
     const cleanContract = contractId.trim();
     const cleanSource = source.trim();
     if (!cleanContract) {
-      return { ok: false, error: "Contract ID is required." };
+      return { ok: false, error: t("txBuilder.contractRequired") };
     }
     if (!StrKey.isValidContract(cleanContract)) {
       return {
         ok: false,
-        error: "Contract ID must be a valid C... Stellar contract address.",
+        error: t("txBuilder.contractInvalid"),
       };
     }
     if (!cleanSource) {
-      return { ok: false, error: "Source account is required." };
+      return { ok: false, error: t("txBuilder.sourceRequired") };
     }
     if (!StrKey.isValidEd25519PublicKey(cleanSource)) {
       return {
         ok: false,
-        error: "Source account must be a valid G... Stellar account.",
+        error: t("txBuilder.sourceInvalid"),
       };
     }
     if (!fn) {
-      return { ok: false, error: "Select a contract entrypoint." };
+      return { ok: false, error: t("txBuilder.functionRequired") };
     }
     return { ok: true, contractId: cleanContract, source: cleanSource };
   }
@@ -160,7 +169,7 @@ function TxBuilder() {
     try {
       const checked = validateInputs();
       if (!checked.ok) {
-        setError(checked.error);
+        reportError(checked.error);
         return;
       }
       const server = new rpc.Server(SANDBOX_RPC_URL);
@@ -172,14 +181,23 @@ function TxBuilder() {
         values,
       });
       const simulation = await server.simulateTransaction(tx);
+      const summary = summarizeSimulation(simulation);
       setOutput({
         kind: "simulation",
         functionName,
         unsignedXdr: tx.toXDR(),
-        simulation: summarizeSimulation(simulation),
+        simulation: summary,
       });
+      if (!summary.ok) {
+        reportError(t("txBuilder.simulationFailed"));
+      } else {
+        toast.info(t("txBuilder.simulated", { functionName }));
+        if (summary.needsRestore) {
+          toast.error(t("txBuilder.restoreRequired"));
+        }
+      }
     } catch (cause) {
-      setError(describeError(cause));
+      reportError(describeError(cause));
     } finally {
       setBusy("idle");
     }
@@ -189,18 +207,16 @@ function TxBuilder() {
     setError(null);
     setOutput(null);
     if (!address) {
-      setError("Connect a wallet before submitting a transaction.");
+      reportError(t("txBuilder.walletRequired"));
       return;
     }
     const checked = validateInputs();
     if (!checked.ok) {
-      setError(checked.error);
+      reportError(checked.error);
       return;
     }
     if (checked.source !== address) {
-      setError(
-        "The source account must match the connected wallet. Change the source or use the connected wallet address.",
-      );
+      reportError(t("txBuilder.sourceMismatch"));
       return;
     }
 
@@ -225,7 +241,7 @@ function TxBuilder() {
           unsignedXdr: tx.toXDR(),
           simulation: summary,
         });
-        setError("Simulation failed; the transaction was not signed or submitted.");
+        reportError(t("txBuilder.simulationFailed"));
         return;
       }
 
@@ -251,19 +267,24 @@ function TxBuilder() {
         );
       }
 
+      const execution = summarizeExecution(result);
       setOutput({
         kind: "execution",
         functionName,
         unsignedXdr: tx.toXDR(),
         preparedXdr: ready.toXDR(),
         simulation: summary,
-        execution: summarizeExecution(result),
+        execution,
       });
       if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
-        setError("The transaction was included but failed on-chain. See the result XDR below.");
+        reportError(t("txBuilder.executionFailed"));
+      } else {
+        toast.success(
+          t("txBuilder.executed", { functionName, hash: execution.hash })
+        );
       }
     } catch (cause) {
-      setError(describeError(cause));
+      reportError(describeError(cause));
     } finally {
       setBusy("idle");
     }

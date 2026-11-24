@@ -31,6 +31,7 @@ import {
   type EmbedResponse,
 } from "@/lib/embed/widget-protocol";
 import type { StreamView } from "@/lib/stream-types";
+import { useToast } from "@/components/toast";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,6 +50,7 @@ function post(target: Window, origin: string, msg: EmbedResponse) {
 // ---------------------------------------------------------------------------
 
 function EmbedFrameInner() {
+  const toast = useToast();
   const params = useSearchParams();
   const streamId = params?.get("streamId") ?? "";
   const mode = params?.get("mode") ?? "read";
@@ -109,6 +111,7 @@ function EmbedFrameInner() {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
+        toast.error(message);
         post(window.parent, hostOrigin, {
           type: "streampay:error",
           widgetId,
@@ -120,7 +123,7 @@ function EmbedFrameInner() {
     return () => {
       cancelled = true;
     };
-  }, [streamId, widgetId, hostOrigin]);
+  }, [streamId, widgetId, hostOrigin, toast]);
 
   // ---------------------------------------------------------------------------
   // Handle inbound postMessage (host → guest).
@@ -195,8 +198,6 @@ function EmbedFrameInner() {
     >
       {error && (
         <p
-          role="alert"
-          aria-live="assertive"
           style={{ color: "var(--color-error, #c0392b)" }}
         >
           {error}
@@ -205,7 +206,6 @@ function EmbedFrameInner() {
 
       {!stream && !error && (
         <p
-          role="status"
           aria-busy="true"
           aria-label="Loading stream"
           style={{ color: "var(--color-muted, #666)" }}
@@ -299,7 +299,6 @@ export default function EmbedFrame() {
     <Suspense
       fallback={
         <p
-          role="status"
           aria-busy="true"
           aria-label="Loading stream"
           style={{ fontFamily: "system-ui, sans-serif", padding: "12px 16px" }}

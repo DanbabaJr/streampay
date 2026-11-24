@@ -40,6 +40,13 @@ export const en = {
   "chrome.apiDocs": "API Docs ↗",
   "chrome.simulatorLink": "Accrual Simulator →",
 
+  "toast.region": "Notifications",
+  "toast.type.success": "Success",
+  "toast.type.error": "Error",
+  "toast.type.info": "Information",
+  "toast.dismiss":
+    "Dismiss {type, select, success {success} error {error} other {information}} notification",
+
   "settings.navigation": "Settings",
   "settings.title": "Settings",
   "settings.description": "Manage notifications, webhooks, and browser telemetry preferences.",
@@ -85,10 +92,55 @@ export const en = {
   "home.created": "Stream #{id} created.",
   "home.batchCreated":
     "{count, plural, one {# stream} other {# streams}} created: {ids}.",
+  "home.noFundsClaimAll":
+    "No funds available to claim across {count, plural, one {# stream} other {# streams}}.",
+  "home.noClaimableStreams": "No claimable streams found.",
+  "home.claimAllSuccess":
+    "Successfully claimed {amounts} across {count, plural, one {# stream} other {# streams}}.",
+  "home.claimAllSkipped":
+    "{count, plural, one {# stream was} other {# streams were}} skipped or non-claimable.",
+  "home.claimAllMore":
+    "More streams remain (continuation offset {offset, number}). Select “Claim all” again to process the next page.",
   "home.withdrew": "Withdrew {amount} from stream #{id}.",
   "home.claimed": "Claimed {amount} from stream #{id}.",
   "home.toppedUp": "Topped up stream #{id} by {amount}.",
   "home.cancelled": "Stream #{id} cancelled.",
+  "home.statusChanged":
+    "Stream #{id} is now {status, select, active {active} cancelled {cancelled} depleted {depleted} completed {completed} paused {paused} other {{status}}}.",
+  "home.streamEvent":
+    "Stream #{id}: {event, select, stream_created {created} withdrawn {funds withdrawn} stream_cancelled {cancelled} stream_topped_up {topped up} stream_paused {paused} stream_resumed {resumed} other {updated}}.",
+  "stream.sponsorshipEnabled": "Sponsored claims are enabled.",
+  "stream.nothingAccrued": "Nothing has accrued yet.",
+  "stream.sponsoredClaimed":
+    "Claimed {amount} — gas paid by the sponsor. Transaction {txHash}.",
+  "stream.amountExceedsAvailable":
+    "The amount exceeds the accrued balance ({amount}). Try “Withdraw max”.",
+
+  "address.accrualUpdated":
+    "Accrual updated. {count, plural, one {# active stream is} other {# active streams are}} ticking.",
+  "address.addressCopied": "Address copied to clipboard.",
+  "address.copyFailed": "Could not copy the address. Select it and copy manually.",
+
+  "txBuilder.contractRequired": "Contract ID is required.",
+  "txBuilder.contractInvalid": "Contract ID must be a valid C... Stellar contract address.",
+  "txBuilder.sourceRequired": "Source account is required.",
+  "txBuilder.sourceInvalid": "Source account must be a valid G... Stellar account.",
+  "txBuilder.functionRequired": "Select a contract entrypoint.",
+  "txBuilder.walletRequired": "Connect a wallet before submitting a transaction.",
+  "txBuilder.sourceMismatch":
+    "The source account must match the connected wallet. Change the source or use the connected wallet address.",
+  "txBuilder.simulated": "{functionName} was simulated against Testnet.",
+  "txBuilder.restoreRequired":
+    "Simulation requires a restore preamble before this call can be submitted. Restore the archived entries first.",
+  "txBuilder.simulationFailed": "Simulation failed; the transaction was not signed or submitted.",
+  "txBuilder.executed": "{functionName} was submitted to Testnet. Transaction {hash}.",
+  "txBuilder.executionFailed":
+    "The transaction was included but failed on-chain. See the result XDR below.",
+
+  "passkey.registered": "Passkey registered. P-256 key x={key}… registered on-chain.",
+  "passkey.notRegistered": "No passkey registered for this address. Register first.",
+  "passkey.claimed": "Assertion verified on-chain. Your stream claim has been processed.",
+
   "home.walletMissing": "Freighter not detected — install the extension and reload.",
   "home.walletNoAddress": "no address returned from Freighter.",
   "home.walletFailed": "Wallet connection failed: {reason}",

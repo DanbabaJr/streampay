@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useWallet } from "@/lib/wallet-context";
 import WalletModal from "@/components/WalletModal";
 import PaymentShareActions from "@/components/PaymentShareActions";
+import { useToast } from "@/components/toast";
 import { PaymentLinkResolution } from "@/app/actions";
 import { verifyRecipientBinding } from "@/lib/payment-link";
 import {
@@ -31,6 +32,7 @@ export default function PaymentLinkClient({
   initialResolution: PaymentLinkResolution;
 }) {
   const { t, formatAmount, locale } = useLocale();
+  const toast = useToast();
 
   const [resolution] = useState<PaymentLinkResolution | null>(
     initialResolution
@@ -84,7 +86,9 @@ export default function PaymentLinkClient({
     if (!resolution?.stream || !resolution.decoded) return;
 
     if (isRecipientMatch === false) {
-      setClaimError(t("pay.error.bindingMismatch"));
+      const message = t("pay.error.bindingMismatch");
+      setClaimError(message);
+      toast.error(message);
       return;
     }
 
@@ -97,8 +101,11 @@ export default function PaymentLinkClient({
         signTransaction
       );
       setReceipt(resultReceipt);
+      toast.success(t("pay.receipt.body"));
     } catch (err: unknown) {
-      setClaimError(describeError(err));
+      const message = describeError(err);
+      setClaimError(message);
+      toast.error(message);
     } finally {
       setClaiming(false);
     }
@@ -379,7 +386,6 @@ export default function PaymentLinkClient({
           {/* Error Alert */}
           {claimError && (
             <div
-              role="alert"
               className="p-4 mb-6 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-1"
             >
               <div className="font-semibold flex items-center gap-1.5">

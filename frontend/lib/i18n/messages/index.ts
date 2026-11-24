@@ -41,15 +41,28 @@ export interface MessageParams {
   "chrome.contractAria": { contractId: string };
   "chrome.walletOnNetwork": { network: string };
   "chrome.appSignsFor": { network: string };
+  "toast.dismiss": { type: string };
   "home.connectedAs": { address: string };
   "home.discovered": { count: number };
   "home.streamLoaded": { id: StreamId };
   "home.created": { id: StreamId };
   "home.batchCreated": { count: number; ids: string };
+  "home.noFundsClaimAll": { count: number };
+  "home.claimAllSuccess": { amounts: string; count: number };
+  "home.claimAllSkipped": { count: number };
+  "home.claimAllMore": { offset: number };
   "home.withdrew": { amount: string; id: StreamId };
   "home.claimed": { amount: string; id: StreamId };
   "home.toppedUp": { amount: string; id: StreamId };
   "home.cancelled": { id: StreamId };
+  "home.statusChanged": { id: StreamId; status: string };
+  "home.streamEvent": { id: StreamId; event: string };
+  "stream.sponsoredClaimed": { amount: string; txHash: string };
+  "stream.amountExceedsAvailable": { amount: string };
+  "address.accrualUpdated": { count: number };
+  "txBuilder.simulated": { functionName: string };
+  "txBuilder.executed": { functionName: string; hash: string };
+  "passkey.registered": { key: string };
   "home.walletFailed": { reason: string };
   "pay.invoice.title": { id: StreamId };
   "pay.invoice.progress": { percent: string };
@@ -101,15 +114,28 @@ export const MESSAGE_SAMPLES: { [K in keyof MessageParams]: MessageParams[K] } =
   "chrome.contractAria": { contractId: "CAAP5FRQ…AB4D" },
   "chrome.walletOnNetwork": { network: "Public Network (mainnet)" },
   "chrome.appSignsFor": { network: "Testnet" },
+  "toast.dismiss": { type: "success" },
   "home.connectedAs": { address: "GABC1234" },
   "home.discovered": { count: 3 },
   "home.streamLoaded": { id: 42 },
   "home.created": { id: 42 },
   "home.batchCreated": { count: 2, ids: "#41, #42" },
+  "home.noFundsClaimAll": { count: 2 },
+  "home.claimAllSuccess": { amounts: "1,5 XLM", count: 2 },
+  "home.claimAllSkipped": { count: 1 },
+  "home.claimAllMore": { offset: 20 },
   "home.withdrew": { amount: "1,5", id: 42 },
   "home.claimed": { amount: "1,5", id: 42 },
   "home.toppedUp": { amount: "1,5", id: 42 },
   "home.cancelled": { id: 42 },
+  "home.statusChanged": { id: 42, status: "cancelled" },
+  "home.streamEvent": { id: 42, event: "withdrawn" },
+  "stream.sponsoredClaimed": { amount: "1,5", txHash: "abc123" },
+  "stream.amountExceedsAvailable": { amount: "1,5 XLM" },
+  "address.accrualUpdated": { count: 2 },
+  "txBuilder.simulated": { functionName: "create_stream" },
+  "txBuilder.executed": { functionName: "create_stream", hash: "abc123" },
+  "passkey.registered": { key: "a1b2c3d4" },
   "home.walletFailed": { reason: "user rejected" },
   "pay.invoice.title": { id: 42 },
   "pay.invoice.progress": { percent: "35%" },

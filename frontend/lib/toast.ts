@@ -7,22 +7,41 @@ export interface Toast {
   duration?: number;
 }
 
+export interface ToastAnnouncement {
+  message: string;
+  type: ToastType;
+  key: string | null;
+}
+
 export interface ToastStore {
   getToasts: () => Toast[];
-  addToast: (message: string, type?: ToastType, duration?: number) => string;
+  getAnnouncement: () => ToastAnnouncement;
+  addToast: (
+    message: string,
+    type?: ToastType,
+    duration?: number,
+    dedupeKey?: string
+  ) => string;
   removeToast: (id: string) => void;
   clear: () => void;
   subscribe: (listener: (toasts: Toast[]) => void) => () => void;
-  success: (message: string, duration?: number) => string;
-  error: (message: string, duration?: number) => string;
-  info: (message: string, duration?: number) => string;
+  subscribeToAnnouncements: (listener: (announcement: ToastAnnouncement) => void) => () => void;
+  announce: (message: string, type?: ToastType, dedupeKey?: string) => void;
+  clearAnnouncements: () => void;
+  success: (message: string, duration?: number, dedupeKey?: string) => string;
+  error: (message: string, duration?: number, dedupeKey?: string) => string;
+  info: (message: string, duration?: number, dedupeKey?: string) => string;
 }
 
+const EMPTY_ANNOUNCEMENT: ToastAnnouncement = { message: "", type: "info", key: null };
 let globalToastCounter = 0;
 
 export function createToastStore(initial: Toast[] = []): ToastStore {
   let toasts = [...initial];
+  let announcement = EMPTY_ANNOUNCEMENT;
+  let lastAnnouncementKey: string | null = null;
   const listeners = new Set<(toasts: Toast[]) => void>();
+  const announcementListeners = new Set<(announcement: ToastAnnouncement) => void>();
 
   function notify() {
     for (const listener of listeners) {
@@ -30,10 +49,38 @@ export function createToastStore(initial: Toast[] = []): ToastStore {
     }
   }
 
-  function addToast(message: string, type: ToastType = "info", duration: number = 5000): string {
+  function notifyAnnouncement() {
+    for (const listener of announcementListeners) {
+      listener(announcement);
+    }
+  }
+
+  function announce(message: string, type: ToastType = "info", dedupeKey?: string): void {
+    if (!message) return;
+    const key = dedupeKey ?? `${type}\u0000${message}`;
+    if (key === lastAnnouncementKey) return;
+    lastAnnouncementKey = key;
+    announcement = { message, type, key };
+    notifyAnnouncement();
+  }
+
+  function clearAnnouncements(): void {
+    if (announcement.key === null) return;
+    announcement = EMPTY_ANNOUNCEMENT;
+    lastAnnouncementKey = null;
+    notifyAnnouncement();
+  }
+
+  function addToast(
+    message: string,
+    type: ToastType = "info",
+    duration: number = 5000,
+    dedupeKey?: string
+  ): string {
     const id = `toast-${Date.now()}-${++globalToastCounter}`;
     toasts = [...toasts, { id, type, message, duration }];
     notify();
+    announce(message, type, dedupeKey);
     return id;
   }
 
@@ -45,6 +92,7 @@ export function createToastStore(initial: Toast[] = []): ToastStore {
   function clear(): void {
     toasts = [];
     notify();
+    clearAnnouncements();
   }
 
   function subscribe(listener: (toasts: Toast[]) => void): () => void {
@@ -52,15 +100,29 @@ export function createToastStore(initial: Toast[] = []): ToastStore {
     return () => listeners.delete(listener);
   }
 
+  function subscribeToAnnouncements(
+    listener: (announcement: ToastAnnouncement) => void
+  ): () => void {
+    announcementListeners.add(listener);
+    return () => announcementListeners.delete(listener);
+  }
+
   return {
     getToasts: () => toasts,
+    getAnnouncement: () => announcement,
     addToast,
     removeToast,
     clear,
     subscribe,
-    success: (message: string, duration?: number) => addToast(message, "success", duration),
-    error: (message: string, duration?: number) => addToast(message, "error", duration ?? 6000),
-    info: (message: string, duration?: number) => addToast(message, "info", duration),
+    subscribeToAnnouncements,
+    announce,
+    clearAnnouncements,
+    success: (message: string, duration?: number, dedupeKey?: string) =>
+      addToast(message, "success", duration, dedupeKey),
+    error: (message: string, duration?: number, dedupeKey?: string) =>
+      addToast(message, "error", duration ?? 6000, dedupeKey),
+    info: (message: string, duration?: number, dedupeKey?: string) =>
+      addToast(message, "info", duration, dedupeKey),
   };
 }
 

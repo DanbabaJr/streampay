@@ -5,6 +5,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { StreamView, StreamRoleFilter, StreamStatusFilter } from "@/lib/stellar";
 import { computeAccruedAt, computeAvailable } from "@/lib/accrual";
 import { serializeAddressExplorerUrlState } from "@/lib/address-explorer-url";
+import { useToast } from "@/components/toast";
+import { useT } from "@/lib/i18n/provider";
 
 export interface AddressStats {
   totalStreams: number;
@@ -66,6 +68,8 @@ export default function AddressExplorerClient({
   totalMatching,
   stats,
 }: AddressExplorerClientProps) {
+  const toast = useToast();
+  const t = useT();
   // Reconcile SSR snapshot timestamp with client-side 1-second interval tick
   const [tickNow, setTickNow] = useState<number>(asOfTimestamp);
   const [copied, setCopied] = useState(false);
@@ -76,48 +80,41 @@ export default function AddressExplorerClient({
   // A single polite region covers all per-card counters; over-announcing a
   // per-second ticker is distracting and was identified in the a11y audit.
   // -------------------------------------------------------------------------
-  const liveRegionRef = useRef<HTMLSpanElement | null>(null);
   const lastAnnounceTimeRef = useRef<number>(0);
   const ANNOUNCE_THROTTLE_MS = 5_000;
 
   // IDs for static ARIA label associations
   const statsRegionId = useId();
   const listingsSectionId = useId();
-  const copyStatusId = useId();
 
   useEffect(() => {
     const timer = setInterval(() => {
       setTickNow(Math.floor(Date.now() / 1000));
 
       // Throttled screen-reader announcement for the live accrual
-      if (
-        liveRegionRef.current &&
-        Date.now() - lastAnnounceTimeRef.current >= ANNOUNCE_THROTTLE_MS
-      ) {
+      if (Date.now() - lastAnnounceTimeRef.current >= ANNOUNCE_THROTTLE_MS) {
         lastAnnounceTimeRef.current = Date.now();
         const activeCount = streams.filter((s) => s.status === "Active").length;
         if (activeCount > 0) {
-          // Clear then set so AT picks up repeated updates
-          liveRegionRef.current.textContent = "";
-          requestAnimationFrame(() => {
-            if (liveRegionRef.current) {
-              liveRegionRef.current.textContent =
-                `Accrual updated. ${activeCount} active stream${activeCount === 1 ? "" : "s"} ticking.`;
-            }
-          });
+          toast.announce(
+            t("address.accrualUpdated", { count: activeCount }),
+            "info",
+            `address-accrual:${activeCount}`
+          );
         }
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [streams]);
+  }, [streams, t, toast]);
 
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(address);
       setCopied(true);
+      toast.success(t("address.addressCopied"));
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Ignore clipboard write failures silently; the visible label is enough
+      toast.error(t("address.copyFailed"));
     }
   }
 
@@ -145,14 +142,6 @@ export default function AddressExplorerClient({
 
   return (
     <main className="wrap">
-      {/* Polite live region for throttled accrual announcements */}
-      <span
-        ref={liveRegionRef}
-        className="sr-only"
-        aria-live="polite"
-        aria-atomic="true"
-      />
-
       <div style={{ marginBottom: 16 }}>
         <Link href="/" style={{ fontSize: 13, color: "var(--muted)" }}>
           ← Back to StreamPay
@@ -189,15 +178,6 @@ export default function AddressExplorerClient({
               >
                 {copied ? "Copied!" : "Copy"}
               </button>
-              {/* Polite copy-status for AT — redundant visually but correct for SR */}
-              <span
-                id={copyStatusId}
-                className="sr-only"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {copied ? "Address copied to clipboard." : ""}
-              </span>
             </div>
           </div>
 
@@ -327,11 +307,8 @@ export default function AddressExplorerClient({
         </div>
       </nav>
 
-      {/* Matching count — polite status summary for SR */}
       <div
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "12px 0 16px" }}
-        aria-live="polite"
-        aria-atomic="true"
       >
         <span className="muted" style={{ fontSize: 13 }}>
           Showing {streams.length} of {totalMatching} matching stream{totalMatching === 1 ? "" : "s"}

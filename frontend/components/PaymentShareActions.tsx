@@ -5,8 +5,7 @@
  *
  * The absolute URL is resolved after mount because the server does not know
  * the browser origin. Both actions are native buttons, so they are reachable
- * and operable with Tab/Enter/Space; the copy result is announced through the
- * toast live region and a polite status node.
+ * and operable with Tab/Enter/Space; the copy result uses the shared live region.
  */
 
 import { useId, useState, useSyncExternalStore } from "react";
@@ -32,7 +31,6 @@ export default function PaymentShareActions({
   const toast = useToast();
   const [copied, setCopied] = useState(false);
   const titleId = useId();
-  const statusId = useId();
 
   // Server render has no origin; the client snapshot supplies it without a
   // post-mount state update (and therefore without a hydration mismatch).
@@ -98,20 +96,10 @@ export default function PaymentShareActions({
           className="copy-btn"
           onClick={handleCopy}
           aria-label={t("share.copyLabel")}
-          aria-describedby={statusId}
         >
           {copied ? t("share.copiedButton") : t("share.copy")}
         </button>
       </div>
-
-      <span
-        id={statusId}
-        className="sr-only"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {copied ? t("share.copied") : ""}
-      </span>
     </section>
   );
 }
