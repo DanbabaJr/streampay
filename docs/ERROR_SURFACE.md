@@ -8,7 +8,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 
 | Code | Variant | Status | Processed by | Meaning |
 | ---: | --- | --- | --- | --- |
-| 1 | `StreamNotFound` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `accept_sender_transfer`, `available`, `cancel_stream`, `expire_dispute`, `get_stream`, `migrate_stream_version`, `pause_stream`, `propose_ownership_transfer`, `propose_rate_change`, `propose_sender_transfer`, `raise_dispute`, `refund_target`, `required_dispute_bond`, `resolve_dispute`, `resume_stream`, `sender_history`, `set_refund_target`, `sponsored_withdraw`, `stream_record_version`, `top_up`, `withdraw`, `withdraw_all`, `withdraw_many`, `withdraw_max` | no stream is stored under the id |
+| 1 | `StreamNotFound` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `accept_sender_transfer`, `available`, `cancel_stream`, `expire_dispute`, `get_stream`, `migrate_stream_version`, `pause_stream`, `propose_ownership_transfer`, `propose_rate_change`, `propose_sender_transfer`, `raise_dispute`, `refund_target`, `required_dispute_bond`, `resolve_dispute`, `resume_stream`, `sender_history`, `set_refund_target`, `sponsored_withdraw`, `stream_record_version`, `sweep_stream`, `top_up`, `withdraw`, `withdraw_all`, `withdraw_many`, `withdraw_max` | no stream is stored under the id |
 | 2 | `NotStreamSender` | **retired** (unreachable) | — | Reserved role check from the original draft. The contract authorizes sender-only actions by comparing the caller address directly and uses `NotAuthorized` (#12) otherwise, so this variant is never returned. Retained for wire compatibility. |
 | 3 | `NotStreamRecipient` | **retired** (unreachable) | — | Reserved role check from the original draft. Recipient-only actions require the recipient's authorization (`require_auth`) and use `NotAuthorized` (#12) for business-rule rejections, so this variant is never returned. Retained for wire compatibility. |
 | 4 | `StreamNotCancellable` | reachable (1 branch(es)) | `cancel_stream` | the recipient calls cancel_stream on a stream created non-cancelable |
@@ -43,7 +43,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 33 | `PolicyNoQueuedChange` | reachable (1 branch(es)) | `policy_execute_asset` | no policy change is queued for the specified asset |
 | 34 | `PolicyNotInitialized` | reachable (1 branch(es)) | `policy_accept_handoff`, `policy_cancel_handoff`, `policy_execute_asset`, `policy_propose_asset`, `policy_propose_handoff`, `policy_set_timelock_delay` | the policy module has not been initialized |
 | 35 | `PolicyNoPendingHandoff` | reachable (1 branch(es)) | `policy_accept_handoff`, `policy_cancel_handoff` | no admin handoff proposal is pending |
-| 36 | `ContractFrozen` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `accept_sender_transfer`, `cancel_ownership_transfer`, `cancel_rate_change`, `cancel_stream`, `create_stream`, `create_stream_with_refund`, `create_streams`, `expire_sender_transfer`, `migrate_stream_version`, `propose_ownership_transfer`, `propose_rate_change`, `propose_sender_transfer`, `set_refund_target`, `top_up`, `withdraw`, `withdraw_all`, `withdraw_many`, `withdraw_max` | the contract is frozen for maintenance or upgrade |
+| 36 | `ContractFrozen` | reachable (1 branch(es)) | `accept_ownership_transfer`, `accept_rate_change`, `accept_sender_transfer`, `cancel_ownership_transfer`, `cancel_rate_change`, `cancel_stream`, `create_stream`, `create_stream_with_refund`, `create_streams`, `expire_sender_transfer`, `migrate_stream_version`, `propose_ownership_transfer`, `propose_rate_change`, `propose_sender_transfer`, `set_refund_target`, `sweep_stream`, `top_up`, `withdraw`, `withdraw_all`, `withdraw_many`, `withdraw_max` | the contract is frozen for maintenance or upgrade |
 | 37 | `ContractNotFrozen` | reachable (1 branch(es)) | `migrate_storage` | storage migration requires the contract to be frozen |
 | 38 | `NoPendingUpgrade` | reachable (2 branch(es)) | `cancel_upgrade`, `execute_upgrade` | execute_upgrade called with no upgrade pending; cancel_upgrade called with no upgrade pending |
 | 39 | `TimelockNotExpired` | reachable (1 branch(es)) | `execute_upgrade` | upgrade timelock delay has not yet expired |
@@ -137,6 +137,9 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | 127 | `AgentExpired` | **retired** (unreachable) | — | — |
 | 128 | `CapExceededPeriod` | **retired** (unreachable) | — | — |
 | 129 | `CapExceededStream` | **retired** (unreachable) | — | — |
+| 130 | `DepositBelowMinimum` | reachable (2 branch(es)) | `create_stream`, `create_streams`, `create_streams_batch`, `schedule_stream` | deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor); the per-occurrence deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor) |
+| 131 | `ClaimBelowMinimum` | reachable (2 branch(es)) | `withdraw`, `withdraw_max` | amount is below MIN_CLAIM_AMOUNT while the stream is still accruing; the accrued balance is below MIN_CLAIM_AMOUNT while the stream is still accruing |
+| 132 | `StreamNotSweepable` | reachable (3 branch(es)) | `sweep_stream` | the stream is still Active; the ledger time is before end_time + SWEEP_GRACE_SECONDS; the stream is disputed, has a pending proposal, an outstanding advance, an unmet condition, a hook or a held lock |
 
 ## Branch matrix (entrypoint × condition → error)
 
@@ -159,7 +162,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `DisputeNotOpen` | `get_dispute`, `resolve_dispute`, `expire_dispute` | `DisputeNotFound` | 81 | no open dispute exists on the stream | reachable |
 | `ExpireDisputeTooEarly` | `expire_dispute` | `DisputeNotExpired` | 82 | expire_dispute called before the dispute timelock elapsed | reachable |
 | `ResolveCallerNotSender` | `resolve_dispute` | `NotAuthorized` | 12 | resolve_dispute called by a non-sender | reachable |
-| `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `top_up`, `raise_dispute`, `expire_dispute`, `resolve_dispute`, `required_dispute_bond`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `propose_sender_transfer`, `accept_sender_transfer`, `set_refund_target`, `stream_record_version`, `migrate_stream_version`, `refund_target`, `sender_history`, `pause_stream`, `resume_stream` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
+| `StreamNotFound` | `get_stream`, `available`, `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `top_up`, `raise_dispute`, `expire_dispute`, `resolve_dispute`, `required_dispute_bond`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `propose_sender_transfer`, `accept_sender_transfer`, `set_refund_target`, `stream_record_version`, `migrate_stream_version`, `refund_target`, `sender_history`, `pause_stream`, `resume_stream`, `sweep_stream` | `StreamNotFound` | 1 | no stream is stored under the id | reachable |
 | `StreamNotActive` | `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `top_up`, `raise_dispute`, `sponsored_withdraw`, `propose_ownership_transfer`, `accept_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `propose_sender_transfer`, `accept_sender_transfer`, `set_refund_target`, `pause_stream`, `resume_stream` | `StreamNotActive` | 5 | the stream status is Cancelled or Depleted | reachable |
 | `CapacityOverflow` | `create_stream`, `top_up`, `accept_rate_change` | `MathOverflow` | 11 | deposit * duration would overflow u128 | reachable |
 | `RateProductOverflow` | `streamed_at`, `available`, `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `sponsored_withdraw`, `accept_rate_change` | `MathOverflow` | 11 | deposit * elapsed would overflow u128 | reachable |
@@ -202,7 +205,7 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `PolicyNoPendingHandoff` | `policy_accept_handoff`, `policy_cancel_handoff` | `PolicyNoPendingHandoff` | 35 | no admin handoff proposal is pending | reachable |
 | `CreateBatchEmpty` | `create_streams_batch` | `BatchEmpty` | 47 | entries is empty | reachable |
 | `CreateBatchTooLarge` | `create_streams_batch` | `BatchTooLarge` | 48 | entries length exceeds MAX_BATCH | reachable |
-| `ContractFrozen` | `create_stream`, `create_streams`, `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `top_up`, `propose_ownership_transfer`, `accept_ownership_transfer`, `cancel_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `cancel_rate_change`, `propose_sender_transfer`, `accept_sender_transfer`, `expire_sender_transfer`, `set_refund_target`, `create_stream_with_refund`, `migrate_stream_version` | `ContractFrozen` | 36 | the contract is frozen for maintenance or upgrade | reachable |
+| `ContractFrozen` | `create_stream`, `create_streams`, `withdraw`, `withdraw_max`, `withdraw_many`, `withdraw_all`, `cancel_stream`, `top_up`, `propose_ownership_transfer`, `accept_ownership_transfer`, `cancel_ownership_transfer`, `propose_rate_change`, `accept_rate_change`, `cancel_rate_change`, `propose_sender_transfer`, `accept_sender_transfer`, `expire_sender_transfer`, `set_refund_target`, `create_stream_with_refund`, `migrate_stream_version`, `sweep_stream` | `ContractFrozen` | 36 | the contract is frozen for maintenance or upgrade | reachable |
 | `MigrationNotFrozen` | `migrate_storage` | `ContractNotFrozen` | 37 | storage migration requires the contract to be frozen | reachable |
 | `ExecuteUpgradeNoPending` | `execute_upgrade` | `NoPendingUpgrade` | 38 | execute_upgrade called with no upgrade pending | reachable |
 | `CancelUpgradeNoPending` | `cancel_upgrade` | `NoPendingUpgrade` | 38 | cancel_upgrade called with no upgrade pending | reachable |
@@ -301,6 +304,13 @@ Every expected failure is a `StreamError` with a stable numeric code. This docum
 | `HookReentrancyBlocked` | `dispatch_hook` | `HookReentrancyBlocked` | 123 | nested contract entry into stream blocked by reentrancy lock | reachable |
 | `HookExecutionFailed` | `dispatch_hook` | `HookExecutionFailed` | 124 | callback contract invocation failed or reverted under Revert failure policy | reachable |
 | `InvalidHookSelector` | `register_hook` | `InvalidHookSelector` | 125 | callback selector is invalid | reachable |
+| `CreateDepositBelowMinimum` | `create_stream`, `create_streams`, `create_streams_batch` | `DepositBelowMinimum` | 130 | deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor) | reachable |
+| `ScheduleDepositBelowMinimum` | `schedule_stream` | `DepositBelowMinimum` | 130 | the per-occurrence deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor) | reachable |
+| `WithdrawBelowMinimum` | `withdraw` | `ClaimBelowMinimum` | 131 | amount is below MIN_CLAIM_AMOUNT while the stream is still accruing | reachable |
+| `WithdrawMaxBelowMinimum` | `withdraw_max` | `ClaimBelowMinimum` | 131 | the accrued balance is below MIN_CLAIM_AMOUNT while the stream is still accruing | reachable |
+| `SweepStreamActive` | `sweep_stream` | `StreamNotSweepable` | 132 | the stream is still Active | reachable |
+| `SweepGraceNotElapsed` | `sweep_stream` | `StreamNotSweepable` | 132 | the ledger time is before end_time + SWEEP_GRACE_SECONDS | reachable |
+| `SweepStreamEncumbered` | `sweep_stream` | `StreamNotSweepable` | 132 | the stream is disputed, has a pending proposal, an outstanding advance, an unmet condition, a hook or a held lock | reachable |
 
 ## Retired codes
 

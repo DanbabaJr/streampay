@@ -362,13 +362,33 @@ pub enum Branch {
     HookReentrancyBlocked,
     HookExecutionFailed,
     InvalidHookSelector,
+    // ------------------------------------------- dust economics (#78)
+    /// creation: the deposit is below `MIN_STREAM_DEPOSIT`.
+    CreateDepositBelowMinimum,
+    /// `schedule_stream`: the per-occurrence deposit is below
+    /// `MIN_STREAM_DEPOSIT`, so every stream it would create is dust.
+    ScheduleDepositBelowMinimum,
+    /// `withdraw`: the amount is below `MIN_CLAIM_AMOUNT` while the stream is
+    /// still accruing.
+    WithdrawBelowMinimum,
+    /// `withdraw_max`: the whole accrued balance is below `MIN_CLAIM_AMOUNT`
+    /// while the stream is still accruing.
+    WithdrawMaxBelowMinimum,
+    /// `sweep_stream`: the stream is still `Active`.
+    SweepStreamActive,
+    /// `sweep_stream`: the ledger clock is before `end_time + SWEEP_GRACE_SECONDS`.
+    SweepGraceNotElapsed,
+    /// `sweep_stream`: the stream is disputed, has a pending proposal, an
+    /// outstanding advance, an unmet release condition, a registered hook or a
+    /// held reentrancy lock.
+    SweepStreamEncumbered,
 }
 
 impl Branch {
     /// Every branch, in declaration order. The matrix test walks this list and
     /// the coverage test requires each [`StreamError`] variant to be produced by
     /// one of these (or retired).
-    pub const ALL: [Branch; 159] = [
+    pub const ALL: [Branch; 166] = [
         Branch::CreateDepositNonPositive,
         Branch::CreateStartTimeInPast,
         Branch::CreateInvalidTimeRange,
@@ -528,6 +548,13 @@ impl Branch {
         Branch::HookReentrancyBlocked,
         Branch::HookExecutionFailed,
         Branch::InvalidHookSelector,
+        Branch::CreateDepositBelowMinimum,
+        Branch::ScheduleDepositBelowMinimum,
+        Branch::WithdrawBelowMinimum,
+        Branch::WithdrawMaxBelowMinimum,
+        Branch::SweepStreamActive,
+        Branch::SweepGraceNotElapsed,
+        Branch::SweepStreamEncumbered,
     ];
 
     /// The entrypoint(s) through which this branch can fire. Shared helpers
@@ -588,6 +615,7 @@ impl Branch {
                 "sender_history",
                 "pause_stream",
                 "resume_stream",
+                "sweep_stream",
             ],
             Branch::StreamNotActive => &[
                 "withdraw",
@@ -725,6 +753,7 @@ impl Branch {
                 "set_refund_target",
                 "create_stream_with_refund",
                 "migrate_stream_version",
+                "sweep_stream",
             ],
             Branch::MigrationNotFrozen | Branch::AlreadyMigrated => &["migrate_storage"],
             Branch::ExecuteUpgradeNoPending | Branch::TimelockNotExpired => &["execute_upgrade"],
@@ -876,6 +905,16 @@ impl Branch {
             | Branch::TemplateRateInvalid => &["approve_template"],
             // ------------------------------------------------------ integrator hooks
             Branch::HookAlreadyRegistered | Branch::InvalidHookSelector => &["register_hook"],
+            // ------------------------------------------- dust economics (#78)
+            Branch::CreateDepositBelowMinimum => {
+                &["create_stream", "create_streams", "create_streams_batch"]
+            }
+            Branch::ScheduleDepositBelowMinimum => &["schedule_stream"],
+            Branch::WithdrawBelowMinimum => &["withdraw"],
+            Branch::WithdrawMaxBelowMinimum => &["withdraw_max"],
+            Branch::SweepStreamActive
+            | Branch::SweepGraceNotElapsed
+            | Branch::SweepStreamEncumbered => &["sweep_stream"],
             Branch::HookNotFound => &["unregister_hook"],
             Branch::HookReentrancyBlocked | Branch::HookExecutionFailed => &["dispatch_hook"],
         }
@@ -1056,6 +1095,16 @@ impl Branch {
             Branch::HookReentrancyBlocked => StreamError::HookReentrancyBlocked,
             Branch::HookExecutionFailed => StreamError::HookExecutionFailed,
             Branch::InvalidHookSelector => StreamError::InvalidHookSelector,
+            // ------------------------------------------- dust economics (#78)
+            Branch::CreateDepositBelowMinimum | Branch::ScheduleDepositBelowMinimum => {
+                StreamError::DepositBelowMinimum
+            }
+            Branch::WithdrawBelowMinimum | Branch::WithdrawMaxBelowMinimum => {
+                StreamError::ClaimBelowMinimum
+            }
+            Branch::SweepStreamActive
+            | Branch::SweepGraceNotElapsed
+            | Branch::SweepStreamEncumbered => StreamError::StreamNotSweepable,
         }
     }
 
@@ -1394,6 +1443,26 @@ impl Branch {
                 "callback contract invocation failed or reverted under Revert failure policy"
             }
             Branch::InvalidHookSelector => "callback selector is invalid",
+            // ------------------------------------------- dust economics (#78)
+            Branch::CreateDepositBelowMinimum => {
+                "deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor)"
+            }
+            Branch::ScheduleDepositBelowMinimum => {
+                "the per-occurrence deposit_amount is below MIN_STREAM_DEPOSIT (the dust floor)"
+            }
+            Branch::WithdrawBelowMinimum => {
+                "amount is below MIN_CLAIM_AMOUNT while the stream is still accruing"
+            }
+            Branch::WithdrawMaxBelowMinimum => {
+                "the accrued balance is below MIN_CLAIM_AMOUNT while the stream is still accruing"
+            }
+            Branch::SweepStreamActive => "the stream is still Active",
+            Branch::SweepGraceNotElapsed => {
+                "the ledger time is before end_time + SWEEP_GRACE_SECONDS"
+            }
+            Branch::SweepStreamEncumbered => {
+                "the stream is disputed, has a pending proposal, an outstanding advance, an unmet condition, a hook or a held lock"
+            }
         }
     }
 

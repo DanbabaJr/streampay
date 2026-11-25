@@ -1807,6 +1807,31 @@
         }
       ]
     },
+    "StreamSwept": {
+      "canonical": "streampay-event/v1|StreamSwept|key=stream_swept|topics=[stream_id:u64],data=[depleted:bool,entries_removed:u32,refund_target:Address]",
+      "data": [
+        {
+          "name": "refund_target",
+          "type": "Address"
+        },
+        {
+          "name": "depleted",
+          "type": "bool"
+        },
+        {
+          "name": "entries_removed",
+          "type": "u32"
+        }
+      ],
+      "event_key": "stream_swept",
+      "fingerprint": "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d",
+      "topics": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ]
+    },
     "StreamToppedUp": {
       "canonical": "streampay-event/v1|StreamToppedUp|key=stream_topped_up|topics=[stream_id:u64],data=[amount:i128,new_deposit:i128,sender:Address]",
       "data": [
@@ -2027,6 +2052,7 @@
     "StreamRefundTargetChanged": "sha256:20f8ba96f8e86083b6e7f70644ec49d8958349f8dc3b1ee7462e3868dae8d943",
     "StreamResumed": "sha256:76526b2a695c524df20dcea647e64f0cd38a3f8322d5196a26b10134ca4158c0",
     "StreamScheduled": "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487",
+    "StreamSwept": "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d",
     "StreamToppedUp": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
     "StreamsCreated": "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3",
     "TemplateApproved": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",

@@ -1,10 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  claimFloorApplies,
+  claimReadiness,
   fmtUnits,
   validateBatchSelection,
   validateWithdrawal,
   MAX_WITHDRAW_BATCH,
+  MIN_CLAIM_AMOUNT,
+  MIN_STREAM_DEPOSIT,
+  type ClaimFloorContext,
 } from "./withdrawal.ts";
 
 describe("Withdrawal Validation", () => {
@@ -101,5 +106,74 @@ describe("Batch claim selection", () => {
     const res = validateBatchSelection(selection);
     selection.push("3");
     assert.deepEqual(res.ids, ["1", "2"]);
+  });
+});
+
+describe("Dust floor: not worth claiming yet (#78)", () => {
+  // 10_000_000_000 base units over 10 days: ~11_574 units per second.
+  const ctx: ClaimFloorContext = {
+    startTime: 1_000,
+    endTime: 1_000 + 864_000,
+    deposit: 10_000_000_000n,
+    nowSeconds: 1_001,
+  };
+
+  it("mirrors the contract constants", () => {
+    assert.equal(MIN_CLAIM_AMOUNT, 1_000_000n);
+    assert.equal(MIN_STREAM_DEPOSIT, 10n * MIN_CLAIM_AMOUNT);
+  });
+
+  it("applies the floor only while the window is open and the stream is not paused", () => {
+    assert.equal(claimFloorApplies(ctx), true);
+    assert.equal(claimFloorApplies({ ...ctx, paused: true }), false);
+    assert.equal(claimFloorApplies({ ...ctx, nowSeconds: ctx.endTime }), false);
+  });
+
+  it("reports nothing to claim for an empty or unknown balance", () => {
+    assert.deepEqual(claimReadiness(null, ctx), { state: "nothing" });
+    assert.deepEqual(claimReadiness(0n, ctx), { state: "nothing" });
+  });
+
+  it("flags a sub-floor balance mid-stream and estimates when it clears", () => {
+    const r = claimReadiness(11_574n, ctx);
+    assert.equal(r.state, "not-worth-claiming-yet");
+    if (r.state !== "not-worth-claiming-yet") return;
+    assert.equal(r.shortfall, MIN_CLAIM_AMOUNT - 11_574n);
+    // ceil(988_426 * 864_000 / 10_000_000_000) = 86 seconds.
+    assert.equal(r.readyAt, ctx.nowSeconds + 86);
+  });
+
+  it("caps the estimate at end_time, when the floor lifts anyway", () => {
+    const r = claimReadiness(1n, { ...ctx, deposit: 2n });
+    assert.equal(r.state, "not-worth-claiming-yet");
+    if (r.state === "not-worth-claiming-yet") assert.equal(r.readyAt, ctx.endTime);
+  });
+
+  it("treats a floor-sized, ended or paused balance as claimable", () => {
+    assert.deepEqual(claimReadiness(MIN_CLAIM_AMOUNT, ctx), { state: "claimable" });
+    assert.deepEqual(claimReadiness(5n, { ...ctx, nowSeconds: ctx.endTime }), {
+      state: "claimable",
+    });
+    assert.deepEqual(claimReadiness(5n, { ...ctx, paused: true }), { state: "claimable" });
+  });
+
+  it("refuses a mid-stream sub-floor withdrawal with the contract's reason", () => {
+    const res = validateWithdrawal("999999", 5_000_000n, ctx);
+    assert.equal(res.valid, false);
+    assert.equal(res.overWithdrawal, false);
+    assert.match(res.error ?? "", /Not worth claiming yet/);
+    assert.match(res.error ?? "", /ClaimBelowMinimum/);
+  });
+
+  it("accepts the floor itself, and any amount once the stream has ended", () => {
+    assert.equal(validateWithdrawal("1000000", 5_000_000n, ctx).valid, true);
+    assert.equal(
+      validateWithdrawal("5", 5n, { ...ctx, nowSeconds: ctx.endTime + 1 }).valid,
+      true
+    );
+  });
+
+  it("keeps the old behaviour when no floor context is given", () => {
+    assert.equal(validateWithdrawal("5", 100n).valid, true);
   });
 });

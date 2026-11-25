@@ -1378,3 +1378,41 @@ pub struct HookFailed {
     pub callback_contract: Address,
     pub error_code: u32,
 }
+
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " Emitted when `sweep_stream` removes a finished, settled, unencumbered"
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = " stream's storage (#78). No tokens move: a swept stream holds none."
+)]
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamSwept {
+    #[topic]
+    pub stream_id: u64,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " The stream's refund target at sweep time: the designated party for its"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " unaccrued remainder. The sweep pays it nothing (the stream holds no tokens,"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " and Soroban does not refund prepaid rent when an entry is deleted)."
+    )]
+    pub refund_target: Address,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " True when the stream ended `Depleted`, false when it ended `Cancelled`."
+    )]
+    pub depleted: bool,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Number of per-stream persistent entries deleted."
+    )]
+    pub entries_removed: u32,
+}

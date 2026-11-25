@@ -14,7 +14,9 @@ use crate::{
 };
 
 const FIXTURES: &str = include_str!("../../../tests/client-parity/fixtures.json");
-const INITIAL_BALANCE: i128 = 1_000;
+// Comfortably above the contract-wide MIN_STREAM_DEPOSIT (#78), so every
+// fixture deposit and claim clears the dust floors.
+const INITIAL_BALANCE: i128 = 1_000_000_000;
 
 #[test]
 fn shared_client_parity_fixtures_match_event_xdr_and_balances() {

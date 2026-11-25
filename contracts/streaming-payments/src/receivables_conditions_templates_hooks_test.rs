@@ -179,7 +179,10 @@ fn test_conditional_stream_quorum_and_release() {
     f.advance_time(2 * DAY);
 
     // Withdrawal while condition is pending must fail with ConditionNotMet
-    let res = f.client.mock_all_auths().try_withdraw(&id, &100);
+    let res = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     assert_eq!(res.unwrap_err().unwrap(), StreamError::ConditionNotMet);
 
     // Publisher 1 attests
@@ -201,7 +204,10 @@ fn test_conditional_stream_quorum_and_release() {
     assert_eq!(cond_met.status, ConditionStatus::Met);
 
     // Withdrawal now succeeds!
-    let withdraw_res = f.client.mock_all_auths().try_withdraw(&id, &100);
+    let withdraw_res = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     assert!(withdraw_res.is_ok());
 }
 
@@ -232,7 +238,10 @@ fn test_conditional_stream_conservative_stale_fallback() {
 
     // Conservative fallback: release is held, never auto-released
     assert!(f.client.is_release_gated(&id));
-    let res = f.client.mock_all_auths().try_withdraw(&id, &100);
+    let res = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     assert_eq!(res.unwrap_err().unwrap(), StreamError::ConditionNotMet);
 
     // Late attestation fails with ConditionExpired
@@ -420,7 +429,10 @@ fn test_hook_failure_policies() {
     f.advance_time(2 * DAY);
 
     // Withdraw succeeds despite failing callback because policy is EmitAndContinue
-    let ok_res = f.client.mock_all_auths().try_withdraw(&id, &100);
+    let ok_res = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     assert!(ok_res.is_ok());
 
     // Unregister and re-register with Revert policy
@@ -438,7 +450,10 @@ fn test_hook_failure_policies() {
     );
 
     // Withdraw now reverts with HookExecutionFailed
-    let fail_res = f.client.mock_all_auths().try_withdraw(&id, &100);
+    let fail_res = f
+        .client
+        .mock_all_auths()
+        .try_withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     assert_eq!(
         fail_res.unwrap_err().unwrap(),
         StreamError::HookExecutionFailed
