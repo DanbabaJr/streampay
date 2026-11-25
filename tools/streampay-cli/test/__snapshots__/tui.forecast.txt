@@ -1,0 +1,10 @@
+StreamPay  testnet  recipient GBRPYH...C7OX2H  [live]
+ 1:Streams   2:Accrual  [3:Forecast]  4:Events 
+------------------------------------------------------------------------
+  stream #1: ends in 8m 20s
+  rate:       3600 units/hour
+  window:     1000 -> 2000 (16m 40s)
+  progress:   50%
+  cancelable: yes
+------------------------------------------------------------------------
+tab/arrows: panels  j/k: select  w: withdraw  c: cancel  r: refresh  q: quit
