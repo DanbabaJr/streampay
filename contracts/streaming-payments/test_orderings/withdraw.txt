@@ -1,0 +1,6 @@
+read instance ContractFrozen
+read persistent Stream(1)
+read persistent StreamPause(1)
+write persistent Stream(1)
+event Withdrawn
+transfer recipient payout

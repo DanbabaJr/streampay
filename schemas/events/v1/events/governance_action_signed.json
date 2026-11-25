@@ -1,0 +1,47 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/governance_action_signed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted for each distinct signature. A second signature from an address that already signed is refused before this event can fire, so `signature_count` here is always a count of distinct keys.",
+  "properties": {
+    "signature_count": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "signer": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "signer",
+    "signature_count"
+  ],
+  "title": "GovernanceActionSigned",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "governance_action_signed",
+    "fingerprint": "sha256:05a46601921e524677a6b100a6b1d038f189fe1ab4e796b2ecf3cef374d94b4d",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "proposal_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

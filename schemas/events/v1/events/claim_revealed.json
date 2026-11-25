@@ -1,0 +1,52 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/claim_revealed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "commitment_hash": {
+      "contentEncoding": "base64",
+      "description": "32-byte hash, base64-encoded on the registry surface.",
+      "type": "string",
+      "x-soroban-type": "BytesN<32>"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "recipient",
+    "commitment_hash",
+    "amount"
+  ],
+  "title": "ClaimRevealed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "claim_revealed",
+    "fingerprint": "sha256:faf5c8cdb3386c933e61c990712b65cfa687892c3e5d4efef033211fb25f029d",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

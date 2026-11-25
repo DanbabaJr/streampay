@@ -1,0 +1,15 @@
+[package]
+name = "streampay-sdk"
+version = "0.3.0"
+edition = "2021"
+description = "Read-only StreamPay client for Soroban, generated from the shared SDK spec."
+license = "Apache-2.0"
+# The crate is generated into the repository but is not a member of the
+# contract workspace: clients depend on it on its own, with their own lockfile.
+[workspace]
+
+[dependencies]
+# serde_json backs the shared conformance-vector decoder (src/vectors.rs).
+serde_json = "1"
+stellar-strkey = "1.0.0"
+stellar-xdr = { version = "30.0.0", features = ["base64"] }

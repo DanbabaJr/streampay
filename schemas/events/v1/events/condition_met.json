@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/condition_met.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a release condition is attested and met.",
+  "properties": {
+    "condition_id": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "condition_id"
+  ],
+  "title": "ConditionMet",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "condition_met",
+    "fingerprint": "sha256:fd16a5a73e454ddfd921679ea89440f7f6b951bbf1162db6dfb3df891b8751b2",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

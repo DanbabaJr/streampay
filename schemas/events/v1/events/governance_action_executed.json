@@ -1,0 +1,301 @@
+{
+  "$defs": {
+    "GovernanceAction": {
+      "description": "Contract enum `GovernanceAction` referenced by event fields. Wire form is [variant symbol, payload…]; the payload shape depends on the variant.",
+      "oneOf": [
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "SetFeeBps"
+            },
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u32"
+            }
+          ]
+        },
+        {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "const": "SetStreamPolicy"
+            },
+            {
+              "anyOf": [
+                {
+                  "description": "Stellar account or contract address (StrKey).",
+                  "type": "string",
+                  "x-soroban-type": "Address"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "x-soroban-type": "Option<Address>"
+            },
+            {
+              "$ref": "#/$defs/StreamPolicy",
+              "x-soroban-type": "StreamPolicy"
+            }
+          ]
+        },
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "SetFrozen"
+            },
+            {
+              "type": "boolean",
+              "x-soroban-type": "bool"
+            }
+          ]
+        },
+        {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "const": "WithdrawTreasury"
+            },
+            {
+              "description": "Stellar account or contract address (StrKey).",
+              "type": "string",
+              "x-soroban-type": "Address"
+            },
+            {
+              "description": "Stellar account or contract address (StrKey).",
+              "type": "string",
+              "x-soroban-type": "Address"
+            },
+            {
+              "type": "integer",
+              "x-soroban-type": "i128"
+            }
+          ]
+        },
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "NominateGovernor"
+            },
+            {
+              "description": "Stellar account or contract address (StrKey).",
+              "type": "string",
+              "x-soroban-type": "Address"
+            }
+          ]
+        },
+        {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "const": "ProposeUpgrade"
+            },
+            {
+              "contentEncoding": "base64",
+              "description": "32-byte hash, base64-encoded on the registry surface.",
+              "type": "string",
+              "x-soroban-type": "BytesN<32>"
+            },
+            {
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u64"
+            }
+          ]
+        },
+        {
+          "maxItems": 1,
+          "minItems": 1,
+          "prefixItems": [
+            {
+              "const": "ExecuteUpgrade"
+            }
+          ]
+        },
+        {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "const": "MigrateStorage"
+            },
+            {
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u64"
+            },
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u32"
+            }
+          ]
+        },
+        {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "const": "SetOracleConfig"
+            },
+            {
+              "items": {
+                "description": "Stellar account or contract address (StrKey).",
+                "type": "string",
+                "x-soroban-type": "Address"
+              },
+              "type": "array",
+              "x-soroban-type": "Vec<Address>"
+            },
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u32"
+            },
+            {
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u64"
+            }
+          ]
+        },
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "SetSigners"
+            },
+            {
+              "items": {
+                "description": "Stellar account or contract address (StrKey).",
+                "type": "string",
+                "x-soroban-type": "Address"
+              },
+              "type": "array",
+              "x-soroban-type": "Vec<Address>"
+            }
+          ]
+        },
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "SetVetoWindow"
+            },
+            {
+              "minimum": 0,
+              "type": "integer",
+              "x-soroban-type": "u64"
+            }
+          ]
+        }
+      ],
+      "title": "GovernanceAction",
+      "type": "array"
+    },
+    "StreamPolicy": {
+      "additionalProperties": false,
+      "description": "Contract struct `StreamPolicy` referenced by event fields.",
+      "properties": {
+        "max_duration": {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        "max_rate": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        },
+        "min_deposit": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        },
+        "min_duration": {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        "min_rate": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        }
+      },
+      "required": [
+        "min_rate",
+        "max_rate",
+        "min_duration",
+        "max_duration",
+        "min_deposit"
+      ],
+      "title": "StreamPolicy",
+      "type": "object"
+    }
+  },
+  "$id": "https://streampay.dev/schemas/events/v1/events/governance_action_executed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a matured, multiply-signed proposal is applied. `executed_by` is whoever submitted the transaction — execution is permissionless — while `signers` names the keys that actually authorized it.",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/GovernanceAction",
+      "x-soroban-type": "GovernanceAction"
+    },
+    "executed_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "signers": {
+      "items": {
+        "description": "Stellar account or contract address (StrKey).",
+        "type": "string",
+        "x-soroban-type": "Address"
+      },
+      "type": "array",
+      "x-soroban-type": "Vec<Address>"
+    }
+  },
+  "required": [
+    "action",
+    "signers",
+    "executed_by"
+  ],
+  "title": "GovernanceActionExecuted",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "governance_action_executed",
+    "fingerprint": "sha256:de687ceefc10aefae7e339b119adb836dd36507d01aaaf97c1b85fc222d8cc02",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "proposal_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

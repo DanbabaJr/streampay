@@ -1,0 +1,173 @@
+name: Wasm Function Diff
+
+# The on-demand half of the Wasm size review. On a pull request the same steps
+# run path-gated inside the `contract` job of `ci.yml` (.github/ci-gates.json:
+# `wasm-diff.yml:wasm-diff` -> `ci.yml:contract`, flag `wasm_diff`), and the
+# privileged comment is posted by `wasm-diff-comment.yml` on the completed CI
+# run — a fork PR cannot write comments itself. Dispatching this workflow is how
+# someone diffs two branches that have no open pull request.
+# `check_ci_integrity.py --checks=prmoves` fails if this copy and the `ci.yml`
+# copy ever drift apart.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: wasm-diff-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# ==============================================================================
+# WASM ANALYSIS TOOL CHOICE & JUSTIFICATION:
+#
+# We use `scripts/wasm-report.mjs --json` directly to inspect base and head Wasm
+# contract binaries with zero external dependencies.
+#
+# Why `wasm-report.mjs`:
+# 1. Byte-level granularity: `wasm-report.mjs` parses the Wasm binary format directly,
+#    extracting exact function body byte sizes from the Code section and mapping
+#    exported entrypoint names from the Export section.
+# 2. Zero unverified external dependencies: Eliminates unverified curl downloads
+#    for wabt, binaryen, or third-party disassemblers.
+# 3. Churn Normalization:
+#    Downstream functions often experience offset and index shifts when upstream
+#    routines are added or removed, despite having identical sizes.
+#    Our diff action matches exported entrypoint names and normalizes shifted
+#    function indices (0 B delta) as filtered churn to eliminate review fatigue.
+# ==============================================================================
+
+jobs:
+  wasm-diff:
+    name: Function-level Wasm binary diff
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Head (PR)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: head-repo
+
+      - name: Resolve Wasm Diff Base
+        id: diff_base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ -n "${PR_BASE_SHA:-}" ]; then
+            base="$(git -C head-repo merge-base "$PR_BASE_SHA" HEAD)"
+          else
+            base="$(git -C head-repo rev-parse --verify origin/main)"
+          fi
+          git -C head-repo cat-file -e "${base}^{commit}"
+          printf 'sha=%s\n' "$base" >> "$GITHUB_OUTPUT"
+          printf 'Wasm diff base: %s\n' "$base"
+
+      - name: Checkout Base Branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.diff_base.outputs.sha }}
+          path: base-repo
+
+      - name: Run Wasm Diff Unit Tests
+        run: |
+          python3 -m unittest discover -s head-repo/.github/scripts -p "test_*.py"
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-wasm-diff-${{ hashFiles('head-repo/Cargo.lock', 'base-repo/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-diff-
+
+      - name: Create artifacts directory
+        run: |
+          rm -rf artifacts
+          mkdir -p artifacts/base artifacts/head
+
+      # A base that cannot compile is the base branch's problem, not this PR's.
+      # Failing here would red-light every PR for as long as `main` is broken and
+      # would also skip the head build below, so the step degrades to a warning
+      # and the diff/enforce steps key off its output. The absolute size budget
+      # stays enforced by ci.yml, which builds the head regardless.
+      - name: Build Base Wasm
+        id: base
+        working-directory: base-repo
+        run: |
+          target_dir="$PWD/.ci-wasm-target"
+          rm -rf "$target_dir"
+          export CARGO_TARGET_DIR="$target_dir"
+          if command -v stellar >/dev/null 2>&1; then
+            (cd contracts/streaming-payments && stellar contract build) || true
+          else
+            SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo build --target wasm32v1-none --release -p streampay-contract || true
+          fi
+          built="$CARGO_TARGET_DIR/wasm32v1-none/release/streampay_contract.wasm"
+          if [ ! -f "$built" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the base branch produced no contract Wasm, so there is nothing to diff against. Fix the base; this PR is not blocked by it."
+            exit 0
+          fi
+          cp "$built" ../artifacts/base/streampay_contract.wasm
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          sha256sum ../artifacts/base/streampay_contract.wasm
+
+      - name: Build Head Wasm
+        working-directory: head-repo
+        run: |
+          target_dir="$PWD/.ci-wasm-target"
+          rm -rf "$target_dir"
+          export CARGO_TARGET_DIR="$target_dir"
+          if command -v stellar >/dev/null 2>&1; then
+            (cd contracts/streaming-payments && stellar contract build)
+          else
+            SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo build --target wasm32v1-none --release -p streampay-contract
+          fi
+          cp "$CARGO_TARGET_DIR/wasm32v1-none/release/streampay_contract.wasm" ../artifacts/head/streampay_contract.wasm
+          sha256sum ../artifacts/head/streampay_contract.wasm
+
+      # Invoke the composite action: .github/actions/wasm-diff
+      # max_delta is raised 1024 -> 40960 for #620's four feature modules
+      # (+37,887 B measured; docs/WASM_SIZE.md "Gate decision — #620"). The
+      # enforcement ratchet is WASM_SIZE_BUDGET_KB in ci.yml (127 KB, 231 B of
+      # headroom); re-tighten this advisory threshold after the split (#441).
+      - name: Run Wasm Function Diff Action
+        id: diff
+        if: steps.base.outputs.ok == 'true'
+        uses: ./head-repo/.github/actions/wasm-diff
+        with:
+          base_wasm: artifacts/base/streampay_contract.wasm
+          head_wasm: artifacts/head/streampay_contract.wasm
+          output_dir: artifacts
+          max_delta: 40960
+
+      - name: Display Report in CI Summary
+        if: always()
+        run: |
+          if [ -f artifacts/wasm_diff_report.md ]; then
+            cat artifacts/wasm_diff_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No function-level diff report (base wasm was not built)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Enforce Wasm Size Budget
+        if: steps.base.outputs.ok == 'true'
+        shell: bash
+        env:
+          TOTAL_DELTA: ${{ steps.diff.outputs.total_delta }}
+          MAX_DELTA: 40960
+        run: |
+          echo "Total Wasm byte delta: $TOTAL_DELTA B (budget: $MAX_DELTA B)"
+          if [ -n "$TOTAL_DELTA" ] && [ "$TOTAL_DELTA" -gt "$MAX_DELTA" ]; then
+            echo "::error::Wasm binary grew by $TOTAL_DELTA bytes, exceeding the allowed threshold of $MAX_DELTA bytes."
+            exit 1
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: wasm-diff-results
+          path: artifacts/

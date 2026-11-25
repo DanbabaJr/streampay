@@ -1,0 +1,81 @@
+{
+  "commit": "perf/footprint",
+  "updated_at": "2026-10-19T08:00:00Z",
+  "source_doc": "docs/FOOTPRINT.md",
+  "environment": {
+    "soroban_sdk": "22.0.0",
+    "stellar_xdr": "22.0.0"
+  },
+  "hot_paths": {
+    "create_stream": {
+      "budget_cpu": 560000,
+      "baseline_cpu": 541598,
+      "memory_bytes": 210434,
+      "storage_entries": 3,
+      "event_bytes_xdr": 396,
+      "description": "Stream creation with deposit pull (allowance), rate validation, stream storage, and 2 index entries"
+    },
+    "withdraw": {
+      "budget_cpu": 360000,
+      "baseline_cpu": 347082,
+      "memory_bytes": 138899,
+      "storage_entries": 1,
+      "event_bytes_xdr": 236,
+      "description": "Partial withdrawal of accrued balance, stream state update, and token transfer"
+    },
+    "withdraw_max": {
+      "budget_cpu": 350000,
+      "baseline_cpu": 338663,
+      "memory_bytes": 134329,
+      "storage_entries": 1,
+      "event_bytes_xdr": 236,
+      "description": "Atomic withdrawal of all accrued funds, stream depletion update, and token transfer"
+    },
+    "cancel_stream": {
+      "budget_cpu": 540000,
+      "baseline_cpu": 523563,
+      "memory_bytes": 171201,
+      "storage_entries": 1,
+      "event_bytes_xdr": 248,
+      "description": "Atomic stream cancellation with recipient payout and sender refund legs"
+    },
+    "top_up": {
+      "budget_cpu": 460000,
+      "baseline_cpu": 447290,
+      "memory_bytes": 167390,
+      "storage_entries": 1,
+      "event_bytes_xdr": 76,
+      "description": "Stream deposit top-up with token pull and stream state update"
+    },
+    "get_stream": {
+      "budget_cpu": 75000,
+      "baseline_cpu": 66664,
+      "memory_bytes": 40243,
+      "storage_entries": 1,
+      "event_bytes_xdr": 0,
+      "description": "Read stream entry by id"
+    },
+    "available": {
+      "budget_cpu": 65000,
+      "baseline_cpu": 58284,
+      "memory_bytes": 39461,
+      "storage_entries": 1,
+      "event_bytes_xdr": 0,
+      "description": "Calculate accrued unwithdrawn balance for stream"
+    },
+    "sender_streams_5": {
+      "budget_cpu": 60000,
+      "baseline_cpu": 52369,
+      "memory_bytes": 25006,
+      "storage_entries": 1,
+      "event_bytes_xdr": 0,
+      "description": "Page 5 stream ids from sender index with native vector slicing"
+    }
+  },
+  "storage_sizes": {
+    "stream_entry_payload_bytes": 444,
+    "stream_key_bytes": 40,
+    "stream_total_ledger_bytes": 484,
+    "sender_streams_key_bytes": 76
+  }
+}

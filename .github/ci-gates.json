@@ -1,0 +1,423 @@
+{
+  "version": 1,
+  "description": "Minimum set of CI gate steps every workflow must keep running, enforced by scripts/check_ci_integrity.py in .github/workflows/workflow-integrity.yml. Deleting one of these steps cannot fail CI by itself - a removed step reports nothing - so the gate checks this list instead. Retiring a gate deliberately is allowed: move its name out of must_have and into retired, with a reason, in the same pull request, so the deletion is in the diff. Consolidating a job into another one is allowed the same way: record the old job id under moved with its destination and a reason, and every step that job was required to run is then enforced in the destination instead - a move that loses a step fails exactly like a deletion.",
+  "must_have": {
+    "ci.yml": {
+      "contract": [
+        "Error codes and registry wiring are consistent",
+        "Cross-PR collision gate self-test",
+        "Cross-PR collision gate",
+        "Install Rust toolchain",
+        "Format check",
+        "Clippy (deny warnings)",
+        "Unit + property tests",
+        "CEI operation-order goldens",
+        "Reference model + differential tests",
+        "Error-surface table is up to date",
+        "Coverage",
+        "Wasm build (stellar contract build)",
+        "Wasm size budget check",
+        "Upload contract Wasm artifact",
+        "Install Rust toolchain (mirrors devcontainer feature)",
+        "Wasm build (devcontainer path)",
+        "Assert wasm artifact is present and non-empty"
+      ],
+      "frontend": [
+        "Install dependencies",
+        "Lint",
+        "Typecheck",
+        "Unit tests",
+        "Differential vectors are up to date",
+        "Differential tests (against shared vector corpus)",
+        "Network indicator tests",
+        "Client parity smoke tests",
+        "Testnet canary suite (imports the frontend builders)",
+        "Accessibility audit (axe WCAG 2.1 AA gate)",
+        "Scheduler + fee-series simulation (vitest)",
+        "Build",
+        "Dependency audit",
+        "Explain a dependency-audit failure",
+        "Install CLI dependencies",
+        "CLI tests including parity fixtures"
+      ],
+      "storybook-visual": [
+        "Install dependencies",
+        "Playwright matches the container image",
+        "Storybook build",
+        "Visual regression (Playwright screenshot diff)",
+        "Upload visual diffs",
+        "Render candidate baselines",
+        "Upload candidate baselines",
+        "Explain a visual-regression failure"
+      ],
+      "data-plane": [
+        "Event registry artifacts are up to date",
+        "Event compatibility check against the base",
+        "Compatibility checker tests",
+        "Typecheck",
+        "Unit + fast-forward ledger tests",
+        "Dependency audit",
+        "Tests",
+        "Soak tests",
+        "Check performance budgets (3-run median & bounds)",
+        "Seeded regression defense test",
+        "Lint runbook command freshness",
+        "Error catalog is up to date",
+        "Benchmark freshness & regression check"
+      ],
+      "supply-chain": [
+        "cargo-deny (advisories, licenses, bans, sources)",
+        "Explain a cargo-deny failure"
+      ],
+      "docs": [
+        "Check internal markdown links",
+        "No duplicate JSON keys",
+        "Tracked files are stored with LF"
+      ]
+    },
+    "attestation.yml": {
+      "tamper-audit": [
+        "Run the tamper audit",
+        "Report the pinned signing key fingerprint"
+      ],
+      "verify-release": [
+        "Resolve the release to verify",
+        "Download the published Wasm and attestation",
+        "Cross-check the release asset against the in-repo mirror",
+        "Verify the signature and the digest",
+        "Verify the published SHA256SUMS",
+        "Re-run the reproducible double build",
+        "Upload the reproducibility evidence",
+        "Record the attestation state"
+      ]
+    },
+    "client-parity-nightly.yml": {
+      "full-fixture-matrix": [
+        "Contract testutils parity run",
+        "Frontend parity run",
+        "CLI parity run",
+        "Archive shared parity fixtures"
+      ]
+    },
+    "fuzz.yml": {
+      "streamed_at": [
+        "Run fuzz session"
+      ],
+      "conservation": [
+        "Run conservation fuzz session"
+      ]
+    },
+    "fuzz-campaign.yml": {
+      "fuzz": [
+        "Build the release wasm (campaign_wasm only)",
+        "Restore corpus from the fuzz-corpus branch",
+        "Replay triaged regressions",
+        "Run campaign",
+        "Triage crashers",
+        "Source coverage"
+      ],
+      "report": [
+        "Combine per-target runs into one report",
+        "Persist corpus and report to fuzz-corpus"
+      ]
+    },
+    "infra.yml": {
+      "terraform": [
+        "Format check",
+        "Validate every stack (no credentials)",
+        "Rendered compose parses (docker compose config)",
+        "Structural + hardening checks on the rendered artifacts",
+        "Rendered shell scripts parse",
+        "Caddyfile validates in the image the stack actually runs",
+        "No plaintext secrets anywhere in the rendered output",
+        "Terraform state is never committed"
+      ]
+    },
+    "key-rotation-drill.yml": {
+      "drill": [
+        "Run the key-rotation drill",
+        "Upload pass/fail matrix"
+      ]
+    },
+    "mutation.yml": {
+      "mutation": [
+        "Install cargo-mutants",
+        "Run mutation testing",
+        "Extract mutation summary",
+        "Upload mutation results",
+        "Check kill rate threshold",
+        "Comment on issue with results"
+      ]
+    },
+    "nightly-fuzz.yml": {
+      "differential_fuzz": [
+        "Run differential fuzz session",
+        "Persist failing seeds / crash artifacts"
+      ],
+      "conservation_fuzz": [
+        "Run conservation fuzz session",
+        "Persist failing seeds / crash artifacts"
+      ]
+    },
+    "oncall-ping.yml": {
+      "ping": [
+        "Checkout repository",
+        "Setup Node.js",
+        "Calculate and Deliver On-Call Announcement"
+      ]
+    },
+    "promote.yml": {
+      "sandbox": [
+        "Install stellar-cli",
+        "Run gates (tests / fuzz / digest / schema)",
+        "Record digests for downstream jobs",
+        "Upload evidence bundle"
+      ],
+      "testnet": [
+        "Download published Wasm",
+        "Verify digest continuity",
+        "Deploy to testnet",
+        "Canary checks",
+        "Record promotion",
+        "Upload promotion record"
+      ],
+      "mainnet-canary": [
+        "Download published Wasm",
+        "Verify digest continuity",
+        "Deploy to mainnet",
+        "Canary checks (rollback trigger)",
+        "Record promotion",
+        "Upload promotion record"
+      ],
+      "rollback": [
+        "Roll back to the previously promoted digest",
+        "Upload rollback record"
+      ]
+    },
+    "rehearsal.yml": {
+      "rehearsal": [
+        "Run the rehearsal",
+        "Upload rehearsal evidence"
+      ]
+    },
+    "release.yml": {
+      "wasm": [
+        "Test before releasing",
+        "Build release Wasm",
+        "Verify the build is reproducible (double build, wasm + spec-json)",
+        "Compute digest and emit toolchain release metadata",
+        "Generate signed attestation",
+        "Attest Wasm build provenance",
+        "Create/edit release draft",
+        "Mirror the signed attestation into attestations/",
+        "Upload attestation + reproducibility evidence"
+      ]
+    },
+    "security-triage.yml": {
+      "triage": [
+        "Triage security intake"
+      ],
+      "sla-sweep": [
+        "Ping maintainers on overdue reports"
+      ]
+    },
+    "testnet-canary.yml": {
+      "canary": [
+        "Install canary dependencies",
+        "Install frontend dependencies",
+        "Audit production dependencies",
+        "Test alert formatting",
+        "Type-check canary",
+        "Run testnet lifecycle",
+        "Deliver failure alert",
+        "Preserve canary failure status"
+      ]
+    },
+    "workflow-integrity.yml": {
+      "integrity": [
+        "Self-test: the checker can still fail",
+        "Self-test: the source scanner can still fail",
+        "Changed-path detector tests",
+        "Workflows parse and every step is well-formed",
+        "Every required CI gate is still wired",
+        "No text file is committed as UTF-16 or with a BOM",
+        "Every tracked source file is still a parseable program",
+        "Explain a workflow-integrity failure"
+      ]
+    }
+  },
+  "pr_checks": {
+    "max": 6,
+    "expected": {
+      "ci.yml": [
+        "contract",
+        "frontend",
+        "data-plane",
+        "storybook-visual",
+        "supply-chain",
+        "docs"
+      ]
+    }
+  },
+  "pr_moves": {
+    "fuzz-gate.yml": {
+      "fuzz_gate": {
+        "to": "ci.yml:contract",
+        "path_flag": "fuzz",
+        "reason": "PR fuzz build and regression replay folded into Contract without adding a check."
+      }
+    },
+    "wasm-diff.yml": {
+      "wasm-diff": {
+        "to": "ci.yml:contract",
+        "path_flag": "wasm_diff",
+        "reason": "Function-level Wasm diff and its artifacts folded into Contract without adding a check."
+      }
+    },
+    "rehearsal.yml": {
+      "rehearsal": {
+        "to": "ci.yml:contract",
+        "path_flag": "rehearsal",
+        "reason": "Release-pipeline rehearsal folded into Contract without adding a check."
+      }
+    },
+    "sdk.yml": {
+      "spec": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "SDK schema and generated-client checks folded into Contract without adding a check."
+      },
+      "conformance": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "Cross-SDK conformance folded into Contract without adding a check."
+      },
+      "mobile": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "Mobile binding and host checks folded into Contract without adding a check."
+      },
+      "vectors": {
+        "to": "ci.yml:frontend",
+        "path_flag": "sdk",
+        "reason": "Deterministic vector regeneration folded into Frontend without adding a check."
+      },
+      "typescript": {
+        "to": "ci.yml:frontend",
+        "path_flag": "sdk",
+        "reason": "TypeScript SDK checks folded into Frontend without adding a check."
+      }
+    },
+    "infra.yml": {
+      "terraform": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "infra",
+        "reason": "Terraform render and zero-drift checks folded into Data plane without adding a check."
+      },
+      "terraform-plan-gate": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "infra",
+        "reason": "Credential-free Terraform plan gate folded into Data plane without adding a check."
+      },
+      "indexer-image": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "indexer_image",
+        "reason": "Indexer multi-arch image and size-budget checks folded into Data plane without adding a check."
+      }
+    },
+    "secrets-rotation.yml": {
+      "rotation-tests": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "rotation",
+        "reason": "Secrets-rotation regression checks folded into Data plane without adding a check."
+      }
+    },
+    "sbom-vex.yml": {
+      "gate": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "sbom",
+        "reason": "SBOM and VEX generation folded into Security without adding a check."
+      }
+    },
+    "attestation.yml": {
+      "tamper-audit": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "attestation",
+        "reason": "Attestation tamper audit folded into Security without adding a check."
+      }
+    },
+    "release-sign.yml": {
+      "self-test": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "release_signing",
+        "reason": "Sigstore verifier self-tests folded into Security without adding a check."
+      }
+    },
+    "whitepaper-claims.yml": {
+      "audit": {
+        "to": "ci.yml:docs",
+        "path_flag": "whitepaper",
+        "reason": "Whitepaper claim-to-code audit folded into Docs without adding a check."
+      }
+    },
+    "workflow-integrity.yml": {
+      "integrity": {
+        "to": "ci.yml:docs",
+        "path_flag": null,
+        "reason": "Workflow integrity runs on every PR inside Docs without adding a check."
+      }
+    }
+  },
+  "pr_replacements": {
+    "infra.yml": {
+      "docker-changes": {
+        "to": "scripts/ci_changed_paths.py:indexer_image",
+        "path_flag": "indexer_image",
+        "reason": "The PR image-change detector now emits the indexer_image flag consumed by Data plane."
+      }
+    }
+  },
+  "retired": {
+    "wasm-diff.yml": {
+      "wasm-diff": {
+        "Record PR Number": "The number came from a file the pull request writes, and the privileged commenter trusted it, so a PR could point the bot's comment at any issue in the repo. The commenter now resolves the pull request from the workflow_run event (or the Actions API) and re-validates repository, head SHA and open state before writing, so the artifact is unnecessary as well as unsafe."
+      }
+    }
+  },
+  "moved": {
+    "ci.yml": {
+      "devcontainer-verify": {
+        "to": "contract",
+        "reason": "Its whole purpose was a red that survives a formatting failure in the contract job, so that a compile error reads differently from a rustfmt complaint. The steps now run inside contract under `if: ${{ always() && !cancelled() }}`, which preserves that: they still execute when the job already failed at Format check or Clippy. One check instead of two, same diagnostic separation."
+      },
+      "cli-parity": {
+        "to": "frontend",
+        "reason": "The frontend job already installs this same tools/streampay-cli tree (`Install CLI dependencies for cross-client parity`) and runs the parity suite against it; the separate job existed only to have its own check run. Folded so the wire-parity result travels with the app it mirrors."
+      },
+      "event-registry": {
+        "to": "data-plane",
+        "reason": "The registry, the schemas and the TypeScript types are the contract's wire format, and indexer/reconciler/ttl-sentinel/perf-budgets are its consumers. One job owns the producer and every consumer, so a PR that changes an event shape sees the drift in the same check that reports the consumer breakage."
+      },
+      "indexer": {
+        "to": "data-plane",
+        "reason": "Consumer of the event registry; folded into the job that gates the schema it reads. Its own working-directory is inlined per step, so `npm ci` still runs against indexer/package-lock.json."
+      },
+      "reconciler": {
+        "to": "data-plane",
+        "reason": "Consumer of the indexer's output and the contract events; same merge as indexer, with reconciler's working-directory inlined per step."
+      },
+      "ttl-sentinel": {
+        "to": "data-plane",
+        "reason": "The sentinel reads contract storage constants and emits the same event shapes the registry owns, so it belongs with the wire-format checks. infra/ttl-sentinel working-directory is inlined per step."
+      },
+      "perf-budgets": {
+        "to": "data-plane",
+        "reason": "Builds and measures the indexer, which data-plane already builds; the budget numbers are only meaningful against that tree, and the error-catalog freshness gate is a derived-artifact check like the event registry's."
+      },
+      "benchmarks": {
+        "to": "data-plane",
+        "reason": "Protocol comparison over the same contract build, with no baseline-comparison isolation requirement, so it shares the data-plane runner instead of paying for another checkout and toolchain install."
+      }
+    }
+  }
+}

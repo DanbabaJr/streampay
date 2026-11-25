@@ -1,0 +1,1180 @@
+#!/usr/bin/env node
+import { chmodSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
+import {
+  Account,
+  Address,
+  Contract,
+  Keypair,
+  Networks,
+  nativeToScVal,
+  rpc,
+  scValToNative,
+  Transaction,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+import { decryptSecret, encryptSecret } from "./crypto.ts";
+import { completionScript, isCompletionShell } from "./completion.ts";
+import {
+  COMPLETION_SHELLS,
+  NETWORKS,
+  READ_COMMANDS,
+  SIGNER_MODES,
+  TRANSACTION_COMMANDS,
+  booleanFlags as registryBooleanFlags,
+} from "./registry.ts";
+import {
+  decodeStreamState,
+  type NetworkLabel,
+  type StreamCommand,
+  type StreamState,
+} from "./state.ts";
+import {
+  DEFAULT_WATCH_INTERVAL_MS,
+  MIN_WATCH_INTERVAL_MS,
+  watchStream,
+} from "./watch.ts";
+import {
+  ConfigError,
+  PROFILE_FIELDS,
+  configPath,
+  getProfile,
+  listProfiles,
+  loadConfig,
+  networkDefaults,
+  resolveSettings,
+  saveConfig,
+  validateField,
+  validateProfile,
+  validateProfileName,
+  type Profile,
+} from "./profiles.ts";
+import { durationSecondsFromDays } from "../../../scripts/lib/duration.ts";
+
+type OutputMode = "json" | "text";
+type SignerMode = (typeof SIGNER_MODES)[number];
+
+interface Options {
+  command: string;
+  subcommand?: string;
+  values: Map<string, string>;
+  flags: Set<string>;
+  json: boolean;
+  dryRun: boolean;
+  watch: boolean;
+  /** Positional arguments in order: `profile set <name>` has the name at index 2. */
+  positionals: string[];
+  /** The profile applied to this invocation, if any. */
+  profileName?: string;
+}
+
+interface BalanceChange {
+  token: string;
+  address: string;
+  delta: string;
+  derivedFrom: string[];
+}
+
+interface SimulationReport {
+  latestLedger: number;
+  minResourceFee: string;
+  returnValue: string | null;
+  footprint: { readOnly: string[]; readWrite: string[] };
+  eventXdr: string[];
+  expectedBalances: {
+    basis: "successful-invocation contract events";
+    note: string;
+    changes: BalanceChange[];
+  };
+}
+
+interface PreparedBatch {
+  transaction: Transaction;
+  unsignedXdr: string;
+  report: SimulationReport;
+  streamIds: string[];
+}
+
+class CliError extends Error {
+  readonly code: string;
+  readonly exitCode: number;
+
+  constructor(
+    message: string,
+    code: string,
+    exitCode: number
+  ) {
+    super(message);
+    this.code = code;
+    this.exitCode = exitCode;
+  }
+}
+
+const DUMMY_SOURCE = new Account(
+  "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+  "0"
+);
+const MAX_PAGE_SIZE = 50;
+const MAX_CLAIM_OPERATIONS_PER_TX = 50;
+
+function usage(): string {
+  return `Usage:
+  streampay [global options] <create|withdraw|cancel|top-up|claim-all> [options]
+  streampay [global options] <status|get> --stream-id <n> [--watch] [options]
+  streampay key encrypt --out <file> [--secret-env <name>] [--password-env <name>]
+  streampay completion <bash|zsh|fish>
+  streampay profile <list|show|set|remove|use|resolve> [name] [settings]
+
+Global options:
+  --contract <C...>       StreamPay contract id
+  --network <testnet|mainnet> (default: testnet)
+  --rpc-url <url>         Soroban RPC endpoint
+  --signer <env|file|ledger>
+  --source <G...>         Source address for ledger handoff or dry-run
+  --key-file <path>       Encrypted signer file (file mode)
+  --dry-run               Simulate, report footprint and do not submit
+  --signed-xdr <path>     Submit a ledger-signed transaction XDR file
+  --json                  Emit JSON schema v1
+  --profile <name>        Use a named profile (flags override profile settings)
+  --config <path>         Config file (default: $XDG_CONFIG_HOME/streampay/config.json,
+                          %APPDATA%\\streampay\\config.json on Windows)
+
+Commands:
+  create --token <C...> --recipient <G...> --deposit <units> --days <n> [--cancelable]
+  withdraw --stream-id <n> --amount <units>
+  cancel --stream-id <n>
+  top-up --stream-id <n> --amount <units>
+  claim-all
+  profile set <name> --network <testnet|mainnet> [--rpc-url ...] [--contract C...] [--signer ...]
+  profile list | show <name> | remove <name> | use <name> | resolve
+  status, get             Read and print one decoded stream snapshot
+    --stream-id <n>       Stream id (required)
+    --watch               Poll and emit JSON Lines, one line per state change
+    --interval <ms>       Watch poll interval in milliseconds
+                          (default: ${DEFAULT_WATCH_INTERVAL_MS}; minimum: ${MIN_WATCH_INTERVAL_MS})
+
+Watch mode always emits JSON Lines, even without --json. It prints a baseline
+line on the first successful poll, nothing for unchanged polls, and a final
+summary line on SIGINT. The change key is the decoded stream state from
+get_stream (id, parties, token, amounts, window, cancelable, status); RPC
+metadata such as the latest ledger is ignored.
+
+Profiles hold settings and references to secrets (an env var NAME, a key file
+path), never the secrets themselves.
+
+The --signer ledger mode prints unsigned transaction XDR. Sign that exact XDR
+with a Stellar hardware wallet, then pass the signed XDR using --signed-xdr.`;
+}
+
+function parseArgs(argv: string[]): Options {
+  if (argv.length === 0) {
+    return { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false, watch: false, positionals: [] };
+  }
+
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+  const positional: string[] = [];
+  const booleanFlags = registryBooleanFlags();
+  let wantsHelp = argv.includes("-h");
+  for (let index = 0; index < argv.length; index += 1) {
+    const part = argv[index];
+    if (part === "-h") continue;
+    if (!part.startsWith("--")) {
+      positional.push(part);
+      continue;
+    }
+    if (booleanFlags.has(part)) {
+      flags.add(part);
+      if (part === "--help") wantsHelp = true;
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new CliError(`missing value for ${part}`, "USAGE", 2);
+    }
+    values.set(part.slice(2), value);
+    index += 1;
+  }
+  const command = wantsHelp ? "help" : positional[0] ?? "help";
+  const subcommand = command === "key" || command === "completion" || command === "profile" ? positional[1] : undefined;
+  return {
+    command,
+    subcommand,
+    values,
+    flags,
+    json: flags.has("--json"),
+    dryRun: flags.has("--dry-run"),
+    watch: flags.has("--watch"),
+    positionals: positional,
+  };
+}
+
+function getOption(options: Options, name: string): string | undefined {
+  return options.values.get(name);
+}
+
+function required(options: Options, name: string): string {
+  const value = getOption(options, name);
+  if (!value) throw new CliError(`missing required --${name}`, "USAGE", 2);
+  return value;
+}
+
+function parseAddress(value: string, label: string): string {
+  try {
+    return Address.fromString(value).toString();
+  } catch {
+    throw new CliError(`invalid ${label} address`, "USAGE", 2);
+  }
+}
+
+function parsePositiveInteger(value: string, label: string): bigint {
+  if (!/^[0-9]+$/.test(value) || BigInt(value) <= 0n) {
+    throw new CliError(`${label} must be a positive integer`, "USAGE", 2);
+  }
+  return BigInt(value);
+}
+
+function parseInterval(options: Options): number {
+  const raw = getOption(options, "interval");
+  if (raw === undefined) return DEFAULT_WATCH_INTERVAL_MS;
+  if (!/^[0-9]+$/.test(raw) || Number(raw) < MIN_WATCH_INTERVAL_MS) {
+    throw new CliError(
+      `--interval must be an integer number of milliseconds >= ${MIN_WATCH_INTERVAL_MS}`,
+      "USAGE",
+      2
+    );
+  }
+  return Number(raw);
+}
+
+function networkConfig(options: Options): { passphrase: string; rpcUrl: string; label: string } {
+  const network = getOption(options, "network") ?? "testnet";
+  if (!(NETWORKS as readonly string[]).includes(network)) {
+    throw new CliError("--network must be testnet or mainnet", "USAGE", 2);
+  }
+  const defaults = networkDefaults(network);
+  return {
+    passphrase: getOption(options, "passphrase") ?? defaults.passphrase,
+    rpcUrl: getOption(options, "rpc-url") ?? defaults.rpcUrl,
+    label: network,
+  };
+}
+
+function scAddress(value: string): xdr.ScVal {
+  return nativeToScVal(Address.fromString(value), { type: "address" });
+}
+
+function scInteger(value: bigint, type: "u32" | "u64" | "i128"): xdr.ScVal {
+  return nativeToScVal(value, { type });
+}
+
+export function buildCreateStreamOperation(
+  contractId: string,
+  source: string,
+  recipient: string,
+  token: string,
+  deposit: bigint,
+  startTime: bigint,
+  endTime: bigint,
+  cancelable: boolean
+): xdr.Operation {
+  return contractCall(
+    contractId,
+    "create_stream",
+    scAddress(source),
+    scAddress(recipient),
+    scAddress(token),
+    scInteger(deposit, "i128"),
+    scInteger(startTime, "u64"),
+    scInteger(endTime, "u64"),
+    nativeToScVal(cancelable)
+  );
+}
+
+export function buildWithdrawOperation(
+  contractId: string,
+  streamId: bigint,
+  amount: bigint
+): xdr.Operation {
+  return contractCall(
+    contractId,
+    "withdraw",
+    scInteger(streamId, "u64"),
+    scInteger(amount, "i128")
+  );
+}
+
+function contractCall(contractId: string, method: string, ...args: xdr.ScVal[]): xdr.Operation {
+  return new Contract(contractId).call(method, ...args);
+}
+
+function decodeEvent(encoded: string): { name: string; data: Record<string, unknown>; topics: unknown[] } | null {
+  try {
+    const event = xdr.DiagnosticEvent.fromXDR(encoded, "base64").event();
+    const body = event.body().v0();
+    const topics = body.topics().map((topic) => scValToNative(topic));
+    const data = scValToNative(body.data());
+    if (!data || typeof data !== "object") return null;
+    return { name: String(topics[0] ?? ""), data: data as Record<string, unknown>, topics };
+  } catch {
+    return null;
+  }
+}
+
+function streamStatus(value: unknown): string {
+  if (typeof value === "string") return value.toLowerCase();
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return String(value).toLowerCase();
+  }
+}
+
+function eventDeltas(
+  events: string[],
+  contractId: string,
+  streamTokens: Map<string, string>
+): BalanceChange[] {
+  const changes = new Map<string, BalanceChange>();
+  const add = (token: string, address: unknown, delta: bigint, eventName: string) => {
+    if (delta === 0n || address == null) return;
+    const account = String(address);
+    const key = `${token}:${account}`;
+    const existing = changes.get(key);
+    if (existing) {
+      existing.delta = (BigInt(existing.delta) + delta).toString();
+      existing.derivedFrom.push(eventName);
+    } else {
+      changes.set(key, { token, address: account, delta: delta.toString(), derivedFrom: [eventName] });
+    }
+  };
+
+  for (const encoded of events) {
+    const decoded = decodeEvent(encoded);
+    if (!decoded) continue;
+    const { data, name, topics } = decoded;
+    const streamId = String(topics[1] ?? "");
+    const token = String(data.token ?? streamTokens.get(streamId) ?? "");
+    if (!token) continue;
+    if (name === "StreamCreated") {
+      const amount = BigInt(String(data.deposit));
+      eventDeltasAdd(add, token, data.sender, contractId, amount, "StreamCreated");
+    } else if (name === "FeeCharged") {
+      const amount = BigInt(String(data.amount));
+      eventDeltasAdd(add, token, data.payer, contractId, amount, "FeeCharged");
+    } else if (name === "Withdrawn") {
+      const amount = BigInt(String(data.amount));
+      add(token, data.recipient, amount, "Withdrawn");
+      add(token, contractId, -amount, "Withdrawn");
+    } else if (name === "StreamCancelled") {
+      const recipientAmount = BigInt(String(data.recipient_amount));
+      const senderAmount = BigInt(String(data.sender_amount));
+      const sender = streamTokens.get(`${streamId}:sender`);
+      const recipient = streamTokens.get(`${streamId}:recipient`);
+      add(token, recipient, recipientAmount, "StreamCancelled");
+      add(token, sender, senderAmount, "StreamCancelled");
+      add(token, contractId, -(recipientAmount + senderAmount), "StreamCancelled");
+    } else if (name === "StreamToppedUp") {
+      const amount = BigInt(String(data.amount));
+      add(token, data.sender, -amount, "StreamToppedUp");
+      add(token, contractId, amount, "StreamToppedUp");
+    }
+  }
+  return [...changes.values()].filter((change) => change.delta !== "0");
+}
+
+function eventDeltasAdd(
+  add: (token: string, address: unknown, delta: bigint, eventName: string) => void,
+  token: string,
+  payer: unknown,
+  contractId: string,
+  amount: bigint,
+  eventName: string
+) {
+  add(token, payer, -amount, eventName);
+  add(token, contractId, amount, eventName);
+}
+
+function readSecret(mode: SignerMode, options: Options): { keypair?: Keypair; source: string } {
+  if (mode === "ledger") {
+    const source = parseAddress(required(options, "source"), "source");
+    return { source };
+  }
+  let secret: string;
+  if (mode === "env") {
+    const envName = getOption(options, "secret-env") ?? "STREAMPAY_SECRET_KEY";
+    secret = process.env[envName] ?? "";
+    if (!secret) throw new CliError(`signing secret is missing from ${envName}`, "SIGNER", 3);
+  } else {
+    const keyFile = required(options, "key-file");
+    const passwordEnv = getOption(options, "password-env") ?? "STREAMPAY_KEY_PASSWORD";
+    const password = process.env[passwordEnv];
+    if (!password) throw new CliError(`password is missing from ${passwordEnv}`, "SIGNER", 3);
+    try {
+      secret = decryptSecret(JSON.parse(readFileSync(keyFile, "utf8")), password);
+    } catch (error) {
+      throw new CliError(`could not unlock key file: ${errorMessage(error)}`, "SIGNER", 3);
+    }
+  }
+  try {
+    const keypair = Keypair.fromSecret(secret.trim());
+    return { keypair, source: keypair.publicKey() };
+  } catch {
+    throw new CliError("signing secret is not a valid Stellar secret key", "SIGNER", 3);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function simulateRead(
+  server: rpc.Server,
+  contractId: string,
+  passphrase: string,
+  method: string,
+  args: xdr.ScVal[]
+): Promise<unknown> {
+  const tx = new TransactionBuilder(DUMMY_SOURCE, { fee: "100", networkPassphrase: passphrase })
+    .addOperation(contractCall(contractId, method, ...args))
+    .setTimeout(30)
+    .build();
+  const result = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(result)) {
+    throw new CliError(`simulation of ${method} failed: ${result.error}`, "SIMULATION", 4);
+  }
+  if (!result.result?.retval) {
+    throw new CliError(`simulation of ${method} returned no value`, "SIMULATION", 4);
+  }
+  return scValToNative(result.result.retval);
+}
+
+async function readStream(
+  server: rpc.Server,
+  contractId: string,
+  passphrase: string,
+  streamId: string
+): Promise<Record<string, unknown>> {
+  const result = await simulateRead(server, contractId, passphrase, "get_stream", [
+    scInteger(BigInt(streamId), "u64"),
+  ]);
+  return result as Record<string, unknown>;
+}
+
+function createServer(rpcUrl: string): rpc.Server {
+  // `allowHttp` is required by the SDK for local mock/dev RPC endpoints.
+  return new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+}
+
+async function readStreamState(
+  server: rpc.Server,
+  contractId: string,
+  passphrase: string,
+  streamId: string
+): Promise<StreamState> {
+  const native = await simulateRead(server, contractId, passphrase, "get_stream", [
+    scInteger(BigInt(streamId), "u64"),
+  ]);
+  try {
+    return decodeStreamState(native);
+  } catch (error) {
+    throw new CliError(`could not decode get_stream result: ${errorMessage(error)}`, "SIMULATION", 4);
+  }
+}
+
+function snapshotRecord(
+  command: StreamCommand,
+  network: NetworkLabel,
+  contract: string,
+  stream: StreamState
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    ok: true,
+    command,
+    network,
+    contract,
+    stream,
+  };
+}
+
+function printText(stream: StreamState): void {
+  console.log(`Stream #${stream.id}: ${stream.status}`);
+  console.log(`  sender:     ${stream.sender}`);
+  console.log(`  recipient:  ${stream.recipient}`);
+  console.log(`  token:      ${stream.token}`);
+  console.log(`  deposit:    ${stream.deposit}`);
+  console.log(`  withdrawn:  ${stream.withdrawn}`);
+  console.log(`  start:      ${stream.startTime}`);
+  console.log(`  end:        ${stream.endTime}`);
+  console.log(`  cancelable: ${stream.cancelable}`);
+}
+
+/** Resolves once buffered stdout writes have flushed (SIGINT path). */
+function flushStdout(): Promise<void> {
+  if (process.stdout.writableLength === 0) return Promise.resolve();
+  return new Promise((resolve) => process.stdout.write("", () => resolve()));
+}
+
+async function runReadCommand(
+  options: Options
+): Promise<{ value: Record<string, unknown>; exitCode: number }> {
+  const command = options.command as StreamCommand;
+  const contractId = parseAddress(required(options, "contract"), "contract");
+  const streamId = parsePositiveInteger(required(options, "stream-id"), "stream-id").toString();
+  const network = networkConfig(options);
+  const intervalMs = parseInterval(options);
+  const server = createServer(network.rpcUrl);
+  const read = () => readStreamState(server, contractId, network.passphrase, streamId);
+
+  if (options.watch) {
+    const controller = new AbortController();
+    const onSigint = () => controller.abort();
+    process.once("SIGINT", onSigint);
+    try {
+      await watchStream({
+        command,
+        network: network.label as NetworkLabel,
+        contract: contractId,
+        intervalMs,
+        readStream: read,
+        writeLine: (line) => console.log(JSON.stringify(line)),
+        signal: controller.signal,
+      });
+    } finally {
+      process.removeListener("SIGINT", onSigint);
+    }
+    // Flush the summary before exiting; a still-pending RPC socket must not
+    // keep the process alive after the operator pressed Ctrl-C.
+    await flushStdout();
+    process.exit(0);
+  }
+
+  const stream = await read();
+  return {
+    value: snapshotRecord(command, network.label as NetworkLabel, contractId, stream),
+    exitCode: 0,
+  };
+}
+
+async function prepareBatch(
+  server: rpc.Server,
+  passphrase: string,
+  contractId: string,
+  source: string,
+  operations: xdr.Operation[],
+  streamIds: string[],
+  streamTokens: Map<string, string>
+): Promise<PreparedBatch> {
+  let account: Account;
+  try {
+    account = await server.getAccount(source);
+  } catch (error) {
+    throw new CliError(`could not load source account: ${errorMessage(error)}`, "RPC", 1);
+  }
+  const builder = new TransactionBuilder(account, { fee: "100000", networkPassphrase: passphrase });
+  for (const operation of operations) builder.addOperation(operation);
+  const tx = builder.setTimeout(60).build();
+  let simulation: Awaited<ReturnType<typeof server.simulateTransaction>>;
+  try {
+    simulation = await server.simulateTransaction(tx);
+  } catch (error) {
+    throw new CliError(`Soroban RPC simulation failed: ${errorMessage(error)}`, "RPC", 1);
+  }
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new CliError(`simulation rejected the operation: ${simulation.error}`, "SIMULATION", 4);
+  }
+  const transaction = rpc.assembleTransaction(tx, simulation).build();
+  const transactionData = xdr.SorobanTransactionData.fromXDR(simulation.transactionData, "base64");
+  const footprint = transactionData.resources().footprint();
+  const events = simulation.events ?? [];
+  return {
+    transaction,
+    unsignedXdr: transaction.toXDR(),
+    streamIds,
+    report: {
+      latestLedger: simulation.latestLedger,
+      minResourceFee: String(simulation.minResourceFee),
+      returnValue: simulation.result?.retval
+        ? String(scValToNative(simulation.result.retval))
+        : null,
+      footprint: {
+        readOnly: footprint.readOnly().map((entry) => entry.toXDR("base64")),
+        readWrite: footprint.readWrite().map((entry) => entry.toXDR("base64")),
+      },
+      eventXdr: events,
+      expectedBalances: {
+        basis: "successful-invocation contract events",
+        note: "Token balance deltas decoded from this RPC simulation's contract events; these are not post-transaction account balances.",
+        changes: eventDeltas(events, contractId, streamTokens),
+      },
+    },
+  };
+}
+
+async function discoverClaimOperations(
+  server: rpc.Server,
+  contractId: string,
+  passphrase: string,
+  source: string
+): Promise<{ ids: string[]; operations: xdr.Operation[]; tokens: Map<string, string> }> {
+  const ids: string[] = [];
+  for (let offset = 0; ; offset += MAX_PAGE_SIZE) {
+    const page = await simulateRead(server, contractId, passphrase, "recipient_streams", [
+      scAddress(source),
+      scInteger(BigInt(offset), "u32"),
+      scInteger(BigInt(MAX_PAGE_SIZE), "u32"),
+    ]) as bigint[];
+    const pageIds = (page ?? []).map(String);
+    ids.push(...pageIds);
+    if (pageIds.length < MAX_PAGE_SIZE) break;
+    if (ids.length >= 50_000) {
+      throw new CliError("claim-all stopped after 50,000 streams; narrow the wallet's stream set", "USAGE", 2);
+    }
+  }
+
+  const operations: xdr.Operation[] = [];
+  const eligibleIds: string[] = [];
+  const tokens = new Map<string, string>();
+  for (const id of ids) {
+    const stream = await readStream(server, contractId, passphrase, id);
+    const token = String(stream.token);
+    const recipient = String(stream.recipient);
+    tokens.set(id, token);
+    tokens.set(`${id}:recipient`, recipient);
+    tokens.set(`${id}:sender`, String(stream.sender));
+    if (recipient !== source || !streamStatus(stream.status).includes("active")) continue;
+    const available = await simulateRead(server, contractId, passphrase, "available", [
+      scInteger(BigInt(id), "u64"),
+    ]);
+    if (BigInt(String(available)) <= 0n) continue;
+    operations.push(contractCall(contractId, "withdraw_max", scInteger(BigInt(id), "u64")));
+    eligibleIds.push(id);
+  }
+  return { ids: eligibleIds, operations, tokens };
+}
+
+async function buildOperations(
+  options: Options,
+  server: rpc.Server,
+  passphrase: string,
+  contractId: string,
+  source: string
+): Promise<{
+  operations: xdr.Operation[];
+  streamIds: string[];
+  streamTokens: Map<string, string>;
+}> {
+  const streamTokens = new Map<string, string>();
+  if (options.command === "create") {
+    const token = parseAddress(required(options, "token"), "token");
+    const recipient = parseAddress(required(options, "recipient"), "recipient");
+    const deposit = parsePositiveInteger(required(options, "deposit"), "deposit");
+    const daysText = required(options, "days");
+    let duration: bigint;
+    try {
+      duration = durationSecondsFromDays(daysText);
+    } catch (error) {
+      throw new CliError(errorMessage(error), "USAGE", 2);
+    }
+    const start = BigInt(Math.floor(Date.now() / 1000) + 60);
+    const end = start + duration;
+    return {
+      operations: [buildCreateStreamOperation(
+        contractId,
+        source,
+        recipient,
+        token,
+        deposit,
+        start,
+        end,
+        options.flags.has("--cancelable")
+      )],
+      streamIds: [],
+      streamTokens,
+    };
+  }
+  if (options.command === "withdraw" || options.command === "cancel" || options.command === "top-up") {
+    const streamId = parsePositiveInteger(required(options, "stream-id"), "stream-id").toString();
+    const stream = await readStream(server, contractId, passphrase, streamId);
+    streamTokens.set(streamId, String(stream.token));
+    streamTokens.set(`${streamId}:sender`, String(stream.sender));
+    streamTokens.set(`${streamId}:recipient`, String(stream.recipient));
+    const amount = options.command === "cancel" ? undefined :
+      parsePositiveInteger(required(options, "amount"), "amount");
+    const operation = options.command === "withdraw"
+      ? buildWithdrawOperation(contractId, BigInt(streamId), amount!)
+      : options.command === "top-up"
+        ? contractCall(contractId, "top_up", scInteger(BigInt(streamId), "u64"), scInteger(amount!, "i128"))
+        : contractCall(contractId, "cancel_stream", scAddress(source), scInteger(BigInt(streamId), "u64"));
+    return { operations: [operation], streamIds: [streamId], streamTokens };
+  }
+  if (options.command === "claim-all") {
+    throw new Error("claim-all operations require asynchronous stream discovery");
+  }
+  throw new CliError(`unknown command: ${options.command}`, "USAGE", 2);
+}
+
+async function resolveOptionsAndRun(options: Options): Promise<{ value: Record<string, unknown>; exitCode: number }> {
+  if (options.command === "help") {
+    return { value: { schemaVersion: 1, ok: true, help: usage() }, exitCode: 0 };
+  }
+  if (options.command === "completion") {
+    if (options.json) {
+      throw new CliError("completion prints a shell script; drop --json", "USAGE", 2);
+    }
+    if (!isCompletionShell(options.subcommand)) {
+      throw new CliError(`completion needs a shell: ${COMPLETION_SHELLS.join(", ")}`, "USAGE", 2);
+    }
+    return { value: { script: completionScript(options.subcommand) }, exitCode: 0 };
+  }
+  if (options.command === "key" && options.subcommand === "encrypt") {
+    const output = required(options, "out");
+    const secretEnv = getOption(options, "secret-env") ?? "STREAMPAY_SECRET_KEY";
+    const passwordEnv = getOption(options, "password-env") ?? "STREAMPAY_KEY_PASSWORD";
+    const secret = process.env[secretEnv];
+    const password = process.env[passwordEnv];
+    if (!secret || !password) {
+      throw new CliError(`secret and password must be set in ${secretEnv} and ${passwordEnv}`, "SIGNER", 3);
+    }
+    if (existsSync(output) && !options.flags.has("--force")) {
+      throw new CliError(`refusing to overwrite ${output}; pass --force to replace it`, "USAGE", 2);
+    }
+    try {
+      Keypair.fromSecret(secret.trim());
+      writeFileSync(output, `${JSON.stringify(encryptSecret(secret.trim(), password), null, 2)}\n`, { mode: 0o600 });
+      if (process.platform !== "win32") chmodSync(output, 0o600);
+    } catch (error) {
+      throw new CliError(`could not create encrypted key file: ${errorMessage(error)}`, "SIGNER", 3);
+    }
+    return { value: { schemaVersion: 1, ok: true, command: "key encrypt", keyFile: output }, exitCode: 0 };
+  }
+  if (READ_COMMANDS.includes(options.command)) {
+    applyProfile(options);
+    requireProfileContract(options);
+    return await runReadCommand(options);
+  }
+  if (options.command === "profile") {
+    return { value: runProfileCommand(options), exitCode: 0 };
+  }
+  if (!TRANSACTION_COMMANDS.includes(options.command)) {
+    throw new CliError(`unknown command: ${options.command}`, "USAGE", 2);
+  }
+
+  applyProfile(options);
+  requireProfileContract(options);
+  const contractId = parseAddress(required(options, "contract"), "contract");
+  const network = networkConfig(options);
+  const signerMode = (getOption(options, "signer") ?? (options.dryRun ? "ledger" : "env")) as SignerMode;
+  if (!(SIGNER_MODES as readonly string[]).includes(signerMode)) {
+    throw new CliError("--signer must be env, file, or ledger", "USAGE", 2);
+  }
+  const signer = readSecret(signerMode, options);
+  const source = signerMode === "ledger" ? signer.source :
+    (getOption(options, "source") ? parseAddress(required(options, "source"), "source") : signer.source);
+  if (signer.keypair && source !== signer.keypair.publicKey()) {
+    throw new CliError("--source must match the selected signing key", "SIGNER", 3);
+  }
+  const server = new rpc.Server(network.rpcUrl);
+  let operations: xdr.Operation[];
+  let streamIds: string[];
+  let streamTokens = new Map<string, string>();
+  if (options.command === "claim-all") {
+    const claim = await discoverClaimOperations(server, contractId, network.passphrase, source);
+    operations = claim.operations;
+    streamIds = claim.ids;
+    streamTokens = claim.tokens;
+  } else {
+    const plan = await buildOperations(options, server, network.passphrase, contractId, source);
+    operations = plan.operations;
+    streamIds = plan.streamIds;
+    streamTokens = plan.streamTokens;
+  }
+
+  if (operations.length === 0) {
+    return {
+      value: {
+        schemaVersion: 1,
+        ok: true,
+        command: options.command,
+        status: "nothing-to-claim",
+        network: network.label,
+        contract: contractId,
+        streamIds,
+        batches: [],
+      },
+      exitCode: 0,
+    };
+  }
+
+  const signedXdrPath = getOption(options, "signed-xdr");
+  const isLedgerHandoff = signerMode === "ledger";
+  if (signedXdrPath && !isLedgerHandoff) {
+    throw new CliError("--signed-xdr requires --signer ledger", "USAGE", 2);
+  }
+  const prepareOnly = options.dryRun || (isLedgerHandoff && !signedXdrPath);
+  const operationLimit = isLedgerHandoff && !options.dryRun
+    ? MAX_CLAIM_OPERATIONS_PER_TX
+    : operations.length;
+  const operationGroups: Array<{ operations: xdr.Operation[]; streamIds: string[] }> = [];
+  for (let offset = 0; offset < Math.min(operations.length, operationLimit); offset += MAX_CLAIM_OPERATIONS_PER_TX) {
+    operationGroups.push({
+      operations: operations.slice(offset, offset + MAX_CLAIM_OPERATIONS_PER_TX),
+      streamIds: streamIds.slice(offset, offset + MAX_CLAIM_OPERATIONS_PER_TX),
+    });
+  }
+  const hasMore = operations.length > operationLimit;
+  if (prepareOnly) {
+    const batches: PreparedBatch[] = [];
+    for (const group of operationGroups) {
+      batches.push(await prepareBatch(server, network.passphrase, contractId, source, group.operations, group.streamIds, streamTokens));
+    }
+    return {
+      value: {
+        schemaVersion: 1,
+        ok: true,
+        command: options.command,
+        status: options.dryRun ? "simulated" : "prepared",
+        network: network.label,
+        contract: contractId,
+        streamIds: options.command === "create" && batches[0]?.report.returnValue
+          ? [batches[0].report.returnValue]
+          : operationGroups.flatMap((group) => group.streamIds),
+        ...(hasMore ? { hasMore: true } : {}),
+        batches: batches.map((batch) => ({
+          unsignedXdr: batch.unsignedXdr,
+          operationCount: batch.transaction.operations.length,
+          simulation: batch.report,
+        })),
+      },
+      exitCode: 0,
+    };
+  }
+
+  if (isLedgerHandoff && operationGroups.length !== 1) {
+    throw new CliError("submit one ledger-signed batch per invocation", "USAGE", 2);
+  }
+  const transactionResults: Array<{ hash: string; status: string }> = [];
+  const batches: PreparedBatch[] = [];
+  for (const group of operationGroups) {
+    const batch = await prepareBatch(server, network.passphrase, contractId, source, group.operations, group.streamIds, streamTokens);
+    batches.push(batch);
+    let signed: Transaction | ReturnType<typeof TransactionBuilder.fromXDR>;
+    if (isLedgerHandoff) {
+      let signedContents: string;
+      try {
+        signedContents = readFileSync(signedXdrPath!, "utf8").trim();
+        signed = TransactionBuilder.fromXDR(signedContents, network.passphrase);
+      } catch (error) {
+        throw new CliError(`could not read signed transaction XDR: ${errorMessage(error)}`, "SIGNER", 3);
+      }
+      if (!Buffer.from(signed.hash()).equals(Buffer.from(batch.transaction.hash()))) {
+        throw new CliError("signed XDR does not match the simulated transaction", "SIGNER", 3);
+      }
+    } else {
+      signed = batch.transaction;
+      signed.sign(signer.keypair!);
+    }
+    let sent: Awaited<ReturnType<typeof server.sendTransaction>>;
+    try {
+      sent = await server.sendTransaction(signed);
+    } catch (error) {
+      throw new CliError(`transaction submission failed: ${errorMessage(error)}`, "RPC", 1);
+    }
+    if (sent.status === "ERROR") {
+      throw new CliError(`transaction rejected: ${JSON.stringify(sent.errorResult)}`, "RPC", 1);
+    }
+    let finalStatus = sent.status;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const result = await server.getTransaction(sent.hash);
+      if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+        finalStatus = "SUCCESS";
+        break;
+      }
+      if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+        throw new CliError("transaction failed on-chain", "RPC", 1);
+      }
+      if (attempt === 29) throw new CliError("timed out waiting for transaction inclusion", "TIMEOUT", 5);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    transactionResults.push({ hash: sent.hash, status: finalStatus });
+  }
+
+  return {
+    value: {
+      schemaVersion: 1,
+      ok: true,
+      command: options.command,
+      status: "submitted",
+      network: network.label,
+      contract: contractId,
+      streamIds: options.command === "create" && batches[0]?.report.returnValue
+        ? [batches[0].report.returnValue]
+        : streamIds,
+      ...(hasMore ? { hasMore: true } : {}),
+      transactions: transactionResults,
+      batches: batches.map((batch) => ({
+        operationCount: batch.transaction.operations.length,
+        simulation: batch.report,
+      })),
+    },
+    exitCode: 0,
+  };
+}
+
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
+function configLocation(options: Options): string {
+  return configPath({
+    flag: getOption(options, "config"),
+    env: process.env,
+    platform: process.platform,
+    home: homedir(),
+  });
+}
+
+/**
+ * Merges the selected profile into `options.values` for a transaction command.
+ * Precedence: a flag already present wins; the profile fills the rest. Runs
+ * before any RPC call, so an unknown or invalid profile never reaches the network.
+ */
+function applyProfile(options: Options): void {
+  const requested = getOption(options, "profile");
+  const path = configLocation(options);
+  if (!requested && !existsSync(path)) return;
+  const config = loadConfig(path);
+  const name = requested ?? config.defaultProfile;
+  if (!name) return;
+  const profile = getProfile(config, name);
+  const settings = resolveSettings(options.values, profile);
+  for (const field of PROFILE_FIELDS) {
+    const setting = settings[field];
+    if (setting && setting.source.startsWith("profile:")) options.values.set(field, setting.value);
+  }
+  options.profileName = name;
+}
+
+/** A profile that names no contract is a usage error, reported before any RPC call. */
+function requireProfileContract(options: Options): void {
+  if (!getOption(options, "contract") && options.profileName) {
+    throw new CliError(
+      `profile "${options.profileName}" has no contract and --contract was not given; ` +
+        `run \`streampay profile set ${options.profileName} --contract C...\` or pass --contract`,
+      "USAGE",
+      2
+    );
+  }
+}
+
+function profileName(options: Options, verb: string): string {
+  const name = options.positionals[2];
+  if (!name) throw new CliError(`profile ${verb} needs a profile name`, "USAGE", 2);
+  return name;
+}
+
+function runProfileCommand(options: Options): Record<string, unknown> {
+  const path = configLocation(options);
+  const base = { schemaVersion: 1, ok: true, command: `profile ${options.subcommand ?? ""}`.trim(), configPath: path };
+  switch (options.subcommand) {
+    case "list": {
+      const config = loadConfig(path);
+      return {
+        ...base,
+        defaultProfile: config.defaultProfile ?? null,
+        profiles: listProfiles(config).map((p) => ({ name: p.name, origin: p.origin, fields: p.fields })),
+      };
+    }
+    case "show": {
+      const config = loadConfig(path);
+      const profile = getProfile(config, profileName(options, "show"));
+      const effective = resolveSettings(new Map(), profile);
+      return {
+        ...base,
+        profile: {
+          name: profile.name,
+          origin: profile.origin,
+          default: config.defaultProfile === profile.name,
+          fields: profile.fields,
+          effective: {
+            network: effective.network!.value,
+            rpcUrl: effective["rpc-url"]!.value,
+            passphrase: effective.passphrase!.value,
+          },
+        },
+      };
+    }
+    case "set": {
+      const name = profileName(options, "set");
+      validateProfileName(name);
+      const updates: Profile = {};
+      for (const [field, value] of options.values) {
+        if (field === "config" || field === "unset") continue;
+        validateField(name, field, value, "USAGE");
+        updates[field as keyof Profile] = value;
+      }
+      const unset = (getOption(options, "unset") ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+      for (const field of unset) {
+        if (!(PROFILE_FIELDS as readonly string[]).includes(field)) {
+          throw new CliError(`cannot unset "${field}"; profile settings are: ${PROFILE_FIELDS.join(", ")}`, "USAGE", 2);
+        }
+      }
+      if (Object.keys(updates).length === 0 && unset.length === 0) {
+        throw new CliError(`profile set ${name}: nothing to change; pass settings such as --network or --contract`, "USAGE", 2);
+      }
+      const config = loadConfig(path);
+      const next: Profile = { ...config.profiles[name], ...updates };
+      for (const field of unset) delete next[field as keyof Profile];
+      validateProfile(name, next, "USAGE");
+      if (Object.keys(next).length === 0) delete config.profiles[name];
+      else config.profiles[name] = next;
+      saveConfig(path, config);
+      const saved = getProfile(loadConfig(path), name);
+      return { ...base, profile: { name: saved.name, origin: saved.origin, fields: saved.fields } };
+    }
+    case "remove": {
+      const name = profileName(options, "remove");
+      const config = loadConfig(path);
+      const known = getProfile(config, name);
+      if (!config.profiles[name]) {
+        throw new CliError(`"${name}" is a built-in profile with no overrides; there is nothing to remove`, "USAGE", 2);
+      }
+      delete config.profiles[name];
+      if (config.defaultProfile && !listProfiles(config).some((p) => p.name === config.defaultProfile)) {
+        delete config.defaultProfile;
+      }
+      saveConfig(path, config);
+      return { ...base, name: known.name, revertedToBuiltin: known.origin === "builtin+config" };
+    }
+    case "use": {
+      const name = profileName(options, "use");
+      const config = loadConfig(path);
+      getProfile(config, name);
+      config.defaultProfile = name;
+      saveConfig(path, config);
+      return { ...base, defaultProfile: name };
+    }
+    case "resolve": {
+      const config = loadConfig(path);
+      const name = getOption(options, "profile") ?? config.defaultProfile;
+      const profile = name ? getProfile(config, name) : undefined;
+      return { ...base, profile: name ?? null, settings: resolveSettings(options.values, profile) };
+    }
+    default:
+      throw new CliError("profile needs a subcommand: list, show, set, remove, use, resolve", "USAGE", 2);
+  }
+}
+
+function printProfileResult(value: Record<string, unknown>): void {
+  const fieldsLine = (fields: Record<string, string>) =>
+    Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(" ") || "(no settings)";
+  switch (value.command) {
+    case "profile list": {
+      console.log(`Config: ${String(value.configPath)}`);
+      console.log(`Default profile: ${String(value.defaultProfile ?? "(none)")}`);
+      for (const p of value.profiles as Array<{ name: string; origin: string; fields: Record<string, string> }>) {
+        console.log(`  ${p.name} [${p.origin}] ${fieldsLine(p.fields)}`);
+      }
+      return;
+    }
+    case "profile show": {
+      const p = value.profile as { name: string; origin: string; default: boolean; fields: Record<string, string>; effective: Record<string, string> };
+      console.log(`Profile ${p.name} [${p.origin}]${p.default ? " (default)" : ""}`);
+      for (const [k, v] of Object.entries(p.fields)) console.log(`  ${k}: ${v}`);
+      console.log(`Effective: network=${p.effective.network} rpc-url=${p.effective.rpcUrl}`);
+      return;
+    }
+    case "profile set": {
+      const p = value.profile as { name: string; fields: Record<string, string> };
+      console.log(`Saved profile ${p.name} to ${String(value.configPath)}: ${fieldsLine(p.fields)}`);
+      return;
+    }
+    case "profile remove":
+      console.log(`Removed profile ${String(value.name)}${value.revertedToBuiltin ? " (reverted to the built-in)" : ""}`);
+      return;
+    case "profile use":
+      console.log(`Default profile is now ${String(value.defaultProfile)}`);
+      return;
+    case "profile resolve": {
+      console.log(`Profile: ${String(value.profile ?? "(none)")}`);
+      for (const [k, s] of Object.entries(value.settings as Record<string, { value: string; source: string }>)) {
+        console.log(`  ${k}: ${s.value} (${s.source})`);
+      }
+      return;
+    }
+  }
+}
+
+function printResult(value: Record<string, unknown>, mode: OutputMode): void {
+  if (mode === "json") {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  if (value.help) {
+    console.log(String(value.help));
+    return;
+  }
+  if (typeof value.script === "string") {
+    process.stdout.write(value.script);
+    return;
+  }
+  if (typeof value.command === "string" && value.command.startsWith("profile")) {
+    printProfileResult(value);
+    return;
+  }
+  if (value.command === "key encrypt") {
+    console.log(`Encrypted signer key written to ${String(value.keyFile)}`);
+    return;
+  }
+  if (value.stream) {
+    printText(value.stream as StreamState);
+    return;
+  }
+  console.log(`StreamPay ${String(value.command)}: ${String(value.status)}`);
+  for (const batch of (value.batches as Array<Record<string, unknown>> | undefined) ?? []) {
+    if (batch.unsignedXdr) console.log(`Unsigned transaction XDR: ${batch.unsignedXdr}`);
+    const simulation = batch.simulation as SimulationReport | undefined;
+    if (!simulation) continue;
+    console.log(`Ledger: ${simulation.latestLedger}; minimum resource fee: ${simulation.minResourceFee}`);
+    console.log("Footprint read-only:");
+    for (const entry of simulation.footprint.readOnly) console.log(`  ${entry}`);
+    console.log("Footprint read-write:");
+    for (const entry of simulation.footprint.readWrite) console.log(`  ${entry}`);
+    if (simulation.returnValue !== null) console.log(`Simulated return value: ${simulation.returnValue}`);
+    for (const change of simulation.expectedBalances.changes) {
+      console.log(`Expected token delta ${change.delta}: ${change.address} (${change.token}), from ${change.derivedFrom.join(", ")}`);
+    }
+  }
+  if (value.transactions) console.log(JSON.stringify(value.transactions, null, 2));
+}
+
+async function main(): Promise<void> {
+  let options: Options = { command: "help", values: new Map(), flags: new Set(), json: false, dryRun: false, watch: false, positionals: [] };
+  try {
+    options = parseArgs(process.argv.slice(2));
+    const result = await resolveOptionsAndRun(options);
+    printResult(result.value, options.json ? "json" : "text");
+    process.exitCode = result.exitCode;
+  } catch (error) {
+    const failure = error instanceof CliError
+      ? error
+      : error instanceof ConfigError
+        ? new CliError(error.message, error.code, 2)
+        : new CliError(errorMessage(error), "RPC", 1);
+    if (options.json || options.watch || process.argv.includes("--json")) {
+      console.log(JSON.stringify({
+        schemaVersion: 1,
+        ok: false,
+        error: { code: failure.code, message: failure.message },
+      }));
+    } else {
+      console.error(`streampay: ${failure.message}`);
+    }
+    process.exitCode = failure.exitCode;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

@@ -1,0 +1,50 @@
+name: Wasm Diff PR Comment
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+concurrency:
+  group: wasm-diff-pr-comment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  post-comment:
+    name: Post PR Comment
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test privileged comment-target validation
+        run: node --test .github/scripts/wasm_diff_comment.test.js
+
+      # A run that died before its upload step has no artifact to fetch, and
+      # download-artifact treats that as a failure. The comment is a convenience
+      # on top of the diff job's own verdict, so a missing artifact skips the
+      # comment instead of adding a second red check to the PR.
+      - name: Download Diff Artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-diff-results
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      - name: Post or Update PR Comment
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { postWasmDiffComment } = require('./.github/scripts/wasm_diff_comment.js');
+            await postWasmDiffComment({ github, context, core });

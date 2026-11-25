@@ -21,6 +21,12 @@ updates:
       - frontend
     commit-message:
       prefix: "npm"
+    ignore:
+      # TypeScript 7 is the native (Go) compiler and no longer ships the classic
+      # JS API that typescript-eslint (peer: <6.1.0) and Next's build-time type
+      # check load. Remove this once typescript-eslint supports TS 7.
+      - dependency-name: "typescript"
+        versions: [">=7"]
 
   - package-ecosystem: github-actions
     directory: "/"

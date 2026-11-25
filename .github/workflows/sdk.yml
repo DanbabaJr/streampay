@@ -1,0 +1,210 @@
+name: SDKs
+
+# The post-merge half of the SDK gates. On a pull request the same steps run
+# path-gated inside `ci.yml` (.github/ci-gates.json, flag `sdk`): spec,
+# conformance and mobile in the `contract` job, vectors and typescript in
+# `frontend`. This workflow still runs on the paths below after a merge, so a
+# drift that reached main is caught even if the PR filter skipped it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/**"
+      - "contracts/streaming-payments/src/**"
+      - "contracts/streaming-payments/test_snapshots/**"
+      - "schemas/events/registry.json"
+      - "frontend/lib/errors.ts"
+      - "perf/**"
+      - ".github/workflows/sdk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    name: Spec — schema guard / coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Re-derives the IR from the contract sources and fails on any drift,
+      # naming the missing/extra entrypoint, type, event or constant.
+      - name: Spec matches the contract surface
+        run: python3 sdks/generator/check_contract_surface.py
+
+      # Operation-set coverage (spec ⊇ contract entrypoints and surface.rs
+      # registry), parser completeness, event-registry agreement, error
+      # catalog reader, and vector/spec consistency.
+      - name: Spec, vector and catalog tests
+        run: python3 -m unittest discover -s sdks/generator -p "test_*.py" -v
+
+      - name: Generated clients are up to date
+        run: python3 sdks/generator/generate.py --check
+
+  vectors:
+    name: Conformance vectors — deterministic
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/vectors/builder
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/vectors/builder/package-lock.json
+
+      - name: Install vector builder dependencies
+        run: npm ci
+
+      - name: Fixture regeneration is deterministic
+        run: |
+          node build-vectors.mjs
+          git diff --exit-code ..
+
+  typescript:
+    name: TypeScript SDK — typecheck / test / pack
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install TypeScript SDK dependencies
+        run: npm ci
+
+      - name: Generated client is up to date
+        working-directory: .
+        run: python3 sdks/generator/generate.py --check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Includes the conformance suite: every sdks/vectors/*.json must decode
+      # to its recorded canonical JSON.
+      - name: Build + tests
+        run: npm test
+
+      - name: Check SDK vector conformance runtime budget
+        run: node ../../perf/harness/check_budgets.mjs --sdk-conformance
+
+      - name: npm pack dry run
+        run: npm pack --dry-run
+
+  conformance:
+    name: Cross-SDK conformance — TypeScript / Rust / Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Orchestrator lifecycle tests
+        run: python3 -m unittest discover -s sdks/conformance -p "test_*.py" -v
+
+      - name: Build TypeScript client
+        working-directory: sdks/typescript
+        run: npm ci && npm run build
+
+      - name: Build Rust decoder
+        run: cargo build --manifest-path sdks/rust/Cargo.toml --example conformance
+
+      - name: Rust vector tests
+        run: cargo test --manifest-path sdks/rust/Cargo.toml
+
+      - name: Python SDK tests
+        env:
+          PYTHONPATH: sdks/python
+        run: python3 -m unittest discover -s sdks/python/tests -p "test_*.py" -v
+
+      - name: Three clients decode every vector identically
+        run: python3 sdks/conformance/orchestrator.py --out sdks/conformance/out
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-conformance
+          path: sdks/conformance/out
+          if-no-files-found: warn
+
+  mobile:
+    name: Mobile — UniFFI Kotlin / Swift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Binding freshness (UDL + 99-code catalog)
+        run: node sdks/mobile/scripts/generate-bindings.mjs --check
+
+      - name: Host tests
+        run: cargo test --manifest-path sdks/mobile/Cargo.toml
+
+      - name: Host-side vector runner
+        run: cargo run --manifest-path sdks/mobile/Cargo.toml --bin streampay-mobile-conformance -- sdks/vectors
+
+      - name: Install Kotlin compiler
+        run: |
+          curl -fsSL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip -o /tmp/kotlin.zip
+          unzip -q /tmp/kotlin.zip -d /opt
+          echo "/opt/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: Kotlin generated-binding compile smoke
+        run: sdks/mobile/scripts/smoke-kotlin.sh
+
+      - name: Swift generated-binding compile smoke
+        run: sdks/mobile/scripts/smoke-swift.sh

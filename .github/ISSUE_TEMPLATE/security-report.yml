@@ -1,0 +1,130 @@
+name: Security report
+description: Report a non-exploitable hardening gap, defense-in-depth weakness, or already-disclosed security issue.
+title: "[Security]: "
+labels: ["security", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **If this bug can move funds, break a stream invariant, or bypass auth on a live deployment, STOP — do not post it here.**
+        > Use [private vulnerability reporting](https://github.com/Neziahtech/streampay/security/advisories/new) instead.
+        > This public form is only for findings that are *already disclosed or fixed*, or that *cannot be exploited*
+        > (hardening, defense-in-depth, informational). See [SECURITY.md](../blob/main/SECURITY.md) and
+        > [docs/BOUNTY.md](../blob/main/docs/BOUNTY.md) for scope and rewards.
+
+        A **working reproduction is required** — reports without one are not eligible for an award.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (self-assessed)
+      description: Your best estimate; the triager confirms the final tier against docs/BOUNTY.md.
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Affected component
+      description: Where the issue lives. Determines the scope:* label applied by the triage bot.
+      options:
+        - contract (Rust)
+        - frontend (Next.js)
+        - infra/ttl-sentinel
+        - CI / GitHub Actions
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact class
+      description: The worst realistic outcome, as defined in docs/BOUNTY.md §3.4.
+      options:
+        - Funds drainable
+        - Invariant break
+        - Denial of service / availability
+        - Griefing / spam
+        - Informational
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One paragraph — what is wrong and which invariant or asset is affected.
+      placeholder: e.g. `sender_streams` index is not deduplicated on `top_up`, so pagination returns the same id twice...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >
+        Required. A failing test, a transaction hash + steps, or an exact command sequence that
+        demonstrates the issue. For contract bugs, prefer a minimal `cargo test` case.
+      placeholder: |
+        cargo test -p streampay-contract test::<name>
+        # or
+        stellar contract invoke --id <contract> -- <fn> ...
+        # expected: ...
+        # actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: max-loss
+    attributes:
+      label: Maximum-loss estimate
+      description: >
+        How much escrowed value (E, per docs/BOUNTY.md §3) can this affect in the worst case?
+        Include counts/token amounts and how you measured them.
+      placeholder: e.g. affects all live streams; at reference scale (~80 streams × 1,000 USDC) E ≈ 80,000 USDC.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: The commit SHA, tag, or contract id where you observed this.
+      placeholder: e.g. a9aa27a (main) / contract id CD...
+    validations:
+      required: true
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issues
+      description: Link any issue you think may be the same root cause (used for duplicate triage).
+      placeholder: "#123, #456"
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Proposed fix (optional)
+      description: If you have a patch in mind, describe it here. Do not open a public PR before triage.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched open reports (`label:security`, plus the affected entrypoint) and believe this is not a duplicate.
+          required: true
+        - label: I attached a reproduction (test, tx trace, or exact command sequence).
+          required: true
+        - label: This report is safe to discuss publicly (already disclosed/fixed, or not exploitable), or I already filed it as a private report.
+          required: true
+        - label: I have read docs/BOUNTY.md and understand scope and the reproduction requirement.
+          required: true

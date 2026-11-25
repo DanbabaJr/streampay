@@ -29,7 +29,7 @@ accepted change.
 - **Allowlist redaction at both ends.** The client and `/api/rum` rebuild the payload from `route, metric, value, rating, nav`. Unknown fields are dropped.
 - **Routes are templated** (`/stream/[id]`, `/`, `other`). Stream ids, addresses and query strings never leave the page.
 - No cookies (`credentials: omit`), no user agent, IP or session id is stored. The IP-derived rate-limit key lives in memory for one window only.
-- The privacy regression suite (`tests/rum-privacy.test.ts`) asserts this.
+- The privacy regression suite (`tests/rum-privacy.spec.ts`) asserts this.
 
 ## Cost controls
 
@@ -43,7 +43,7 @@ accepted change.
 2. `node scripts/lighthouse-to-lab.mjs "/=lh-home.json" "/stream/[id]=lh-stream.json" > lab-results.json`
 3. `npm run rum:gate -- --measured lab-results.json` exits 1 on any regression.
 
-The gate logic is covered by self-tests in `tests/rum-gate.test.ts`, including
+The gate logic is covered by self-tests in `tests/rum-gate.spec.ts`, including
 a CLI test that a regression exits non-zero. Running Lighthouse itself in CI
 is left as a follow-up because it needs a browser runner.
 

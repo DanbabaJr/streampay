@@ -1,0 +1,49 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/agent_revoked.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an authorized session key agent is revoked.",
+  "properties": {
+    "revoked_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "revoked_by"
+  ],
+  "title": "AgentRevoked",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "agent_revoked",
+    "fingerprint": "sha256:a96acdc2e00253728af03989e1d61ce1f94a32b973a4a4bc9bd3cdaf824c78bf",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        },
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      },
+      {
+        "name": "agent",
+        "type": "Address"
+      }
+    ]
+  }
+}

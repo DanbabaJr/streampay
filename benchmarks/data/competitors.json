@@ -1,0 +1,165 @@
+{
+  "last_updated": "2026-10-19",
+  "methodology_version": "1.0.0",
+  "competitors": {
+    "sablier_v2_linear": {
+      "name": "Sablier V2 (Lockup Linear)",
+      "protocol": "Sablier",
+      "model": "Discrete Linear Lockup (ERC-721 NFT per stream, 100% upfront escrow)",
+      "chains": ["Ethereum Mainnet", "Arbitrum One", "Optimism"],
+      "contracts": {
+        "ethereum": "0xAFb9797282b35606d649B25A775C17f920272B6c",
+        "arbitrum": "0x2C460eb3aAadAd3c8e54736fdf5A5B63402cf894",
+        "optimism": "0xb180D81995dc6EC860F5F6c4EbF0d3148154D355"
+      },
+      "citations": [
+        {
+          "title": "Sablier V2 Core GitHub Repository",
+          "url": "https://github.com/sablier-labs/v2-core",
+          "commit": "3eb3cfa3bb34bbdd9f43063f619bf18413a4dc16",
+          "date": "2023-05-18",
+          "note": "Gas snapshots extracted from forge test --gas-report on canonical test suite"
+        },
+        {
+          "title": "Sablier V2 Security Audit Report (Cantina & Code4rena)",
+          "url": "https://github.com/sablier-labs/v2-core/tree/main/audits",
+          "date": "2023-05-24",
+          "note": "Verified contract bytecode and storage packing optimizations"
+        }
+      ],
+      "storage": {
+        "raw_storage_slots": 4,
+        "bytes_per_slot": 32,
+        "total_storage_bytes": 128,
+        "nft_ownership_tracking_bytes": 32,
+        "effective_storage_bytes": 160,
+        "description": "Packed structs across 4 EVM storage slots (sender, recipient, deposit, withdrawn, start/cliff/end timestamps, token address, broker fees) plus ERC-721 owner mapping"
+      },
+      "rent_economics": {
+        "cost_per_second": 0.0,
+        "currency": "USD",
+        "state_rent_mechanism": "None (EVM perpetual state; storage cost 100% front-loaded into SSTORE gas at creation)",
+        "ongoing_protocol_tax_percent": 0.0
+      },
+      "operations": {
+        "create_stream": {
+          "evm_gas_units_avg": 218450,
+          "evm_gas_units_min": 195000,
+          "evm_gas_units_max": 245000,
+          "breakdown": {
+            "base_tx": 21000,
+            "erc721_mint": 55000,
+            "storage_initialization_sstore": 66000,
+            "erc20_safetransferfrom": 45000,
+            "logic_and_events": 31450
+          }
+        },
+        "claim": {
+          "operation_name": "withdraw / withdrawMax",
+          "evm_gas_units_avg": 59320,
+          "evm_gas_units_min": 52000,
+          "evm_gas_units_max": 68000,
+          "breakdown": {
+            "base_tx": 21000,
+            "storage_sload": 2200,
+            "accrual_math": 3120,
+            "balance_sstore_rewrite": 5000,
+            "erc20_transfer": 25000,
+            "event_emission": 3000
+          }
+        },
+        "cancel": {
+          "operation_name": "cancel",
+          "evm_gas_units_avg": 84150,
+          "evm_gas_units_min": 72000,
+          "evm_gas_units_max": 98000,
+          "breakdown": {
+            "base_tx": 21000,
+            "storage_sload": 2200,
+            "status_sstore_rewrite": 5000,
+            "recipient_payout_safetransfer": 26000,
+            "sender_refund_safetransfer": 26000,
+            "event_emission": 3950
+          }
+        }
+      }
+    },
+    "superfluid_cfa": {
+      "name": "Superfluid CFAv1 (Constant Flow Agreement)",
+      "protocol": "Superfluid",
+      "model": "Continuous Flow (SuperToken balance shifting dynamic rate, 0-gas claim, buffer collateral)",
+      "chains": ["Polygon", "Arbitrum One", "Optimism", "Ethereum Mainnet"],
+      "contracts": {
+        "cfa_v1_proxy": "0xEd6B5CD325f0F6E6705775a644b50997FAae61a8",
+        "host": "0x4C08b64A5E0c077A1792383161a0E0630D268e37"
+      },
+      "citations": [
+        {
+          "title": "Superfluid Protocol Monorepo (CFAv1 Specs)",
+          "url": "https://github.com/superfluid-finance/protocol-monorepo",
+          "contract_path": "contracts/agreements/ConstantFlowAgreementV1.sol",
+          "date": "2024-03-12",
+          "note": "Gas profiling benchmarks and Host agreement dispatch traces"
+        },
+        {
+          "title": "Superfluid Technical Whitepaper & Audit Suite",
+          "url": "https://docs.superfluid.finance/docs/protocol/advanced-topics/technical-paper",
+          "date": "2023-11-01",
+          "note": "Liquidation buffer mechanics and dynamic real-time balance formula"
+        }
+      ],
+      "storage": {
+        "raw_storage_slots": 4,
+        "bytes_per_slot": 32,
+        "total_storage_bytes": 128,
+        "effective_storage_bytes": 128,
+        "description": "Agreement struct (flowRate, timestamp, deposit) packed in 2 slots + sender/receiver net flow accumulator slots in SuperToken state (2 slots)"
+      },
+      "rent_economics": {
+        "cost_per_second": 0.0,
+        "state_rent_mechanism": "None (EVM perpetual state)",
+        "buffer_requirement": "4 hours of stream value locked upfront as liquidation deposit collateral",
+        "ongoing_capital_drag_note": "Buffer deposit incurs opportunity cost (e.g. 5% APY on locked buffer) and requires continuous sender solvency monitoring to avoid bot liquidation"
+      },
+      "operations": {
+        "create_stream": {
+          "operation_name": "createFlow",
+          "evm_gas_units_avg": 174800,
+          "evm_gas_units_min": 145000,
+          "evm_gas_units_max": 210000,
+          "breakdown": {
+            "base_tx": 21000,
+            "host_proxy_dispatch": 24000,
+            "agreement_bitmap_update": 18000,
+            "sender_receiver_netflow_sstore": 42000,
+            "buffer_deposit_sstore": 38000,
+            "event_emission_and_logic": 31800
+          }
+        },
+        "claim": {
+          "operation_name": "Passive continuous accrual (0-tx)",
+          "evm_gas_units_avg": 0,
+          "evm_gas_units_min": 0,
+          "evm_gas_units_max": 0,
+          "breakdown": {
+            "base_tx": 0,
+            "note": "Superfluid streams update balance dynamically at read time without on-chain transactions. Unwrapping SuperTokens to underlying ERC-20 via downgrade requires ~52,000 gas."
+          }
+        },
+        "cancel": {
+          "operation_name": "deleteFlow",
+          "evm_gas_units_avg": 78600,
+          "evm_gas_units_min": 68000,
+          "evm_gas_units_max": 92000,
+          "breakdown": {
+            "base_tx": 21000,
+            "host_proxy_dispatch": 18000,
+            "netflow_zeroing_sstore": 22000,
+            "buffer_deposit_refund_sstore": 12000,
+            "event_emission_and_cleanup": 5600
+          }
+        }
+      }
+    }
+  }
+}

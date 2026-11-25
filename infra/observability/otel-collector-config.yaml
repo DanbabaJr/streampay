@@ -1,0 +1,112 @@
+# OpenTelemetry Collector Configuration for StreamPay
+# Features:
+# 1. OTLP HTTP & gRPC receivers for browser, Next.js server, Soroban RPC, Indexer, and Push traces
+# 2. Tail-based sampling processor guaranteeing ZERO dropped error traces
+# 3. Exporter to Jaeger (all-in-one distributed tracing UI)
+# 4. Exporter to Prometheus for collector self-metrics
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:3000"
+            - "http://localhost:3001"
+            - "http://127.0.0.1:3000"
+            - "http://127.0.0.1:3001"
+            - "*"
+          allowed_headers:
+            - "*"
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  batch:
+    send_batch_size: 256
+    timeout: 1s
+
+  # Tail-Based Sampling: Inspects whole traces before making a retention decision.
+  # Critical Invariant: Error traces are NEVER dropped (100% retained).
+  tail_sampling:
+    decision_wait: 3s
+    num_traces: 10000
+    expected_new_traces_per_sec: 2000
+    policies:
+      # Policy 1: Retain 100% of traces where any span has status_code = ERROR
+      - name: error-status-filter
+        type: status_code
+        status_code:
+          status_codes:
+            - ERROR
+
+      # Policy 2: Retain 100% of traces where error attribute is set to true
+      - name: error-attribute-filter
+        type: string_attribute
+        string_attribute:
+          key: error
+          values:
+            - "true"
+            - "True"
+            - "1"
+
+      # Policy 3: Retain 100% of traces with HTTP error status codes (4xx / 5xx)
+      - name: http-error-filter
+        type: numeric_attribute
+        numeric_attribute:
+          key: http.status_code
+          min_value: 400
+          max_value: 599
+
+      # Policy 4: Retain 100% of traces with explicit exception events
+      - name: exception-event-filter
+        type: string_attribute
+        string_attribute:
+          key: exception.type
+          values:
+            - ".*"
+          enabled_regex_matching: true
+
+      # Policy 5: Probabilistic sampling for remaining healthy traces (100% in local dev / testnet, tunable in prod)
+      - name: healthy-trace-sample
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 100.0
+
+exporters:
+  # Export to Jaeger distributed tracing backend
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Export collector internal metrics to Prometheus
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: otelcol
+
+  # Debug console exporter for development visibility
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

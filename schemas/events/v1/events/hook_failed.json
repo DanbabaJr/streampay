@@ -1,0 +1,53 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/hook_failed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an integrator callback hook fails or reverts.",
+  "properties": {
+    "callback_contract": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "error_code": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "event_class": {
+      "description": "Soroban symbol (a short upper-/lower-case tag, not free text).",
+      "type": "string",
+      "x-soroban-type": "Symbol"
+    }
+  },
+  "required": [
+    "event_class",
+    "callback_contract",
+    "error_code"
+  ],
+  "title": "HookFailed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "hook_failed",
+    "fingerprint": "sha256:7fba9960155e2e33b3f357c702946c62c9a7d873c054d4e85e6acba47894324f",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

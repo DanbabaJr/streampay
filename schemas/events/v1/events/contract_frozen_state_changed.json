@@ -1,0 +1,39 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/contract_frozen_state_changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the contract freeze state is toggled by the governor.",
+  "properties": {
+    "changed_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "changed_by"
+  ],
+  "title": "ContractFrozenStateChanged",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "contract_frozen_state_changed",
+    "fingerprint": "sha256:090c0be66d60a23f3122acb9d4df26f1c2efea8c18828a5d48614b93692f8f7f",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "type": "boolean",
+          "x-soroban-type": "bool"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "frozen",
+        "type": "bool"
+      }
+    ]
+  }
+}

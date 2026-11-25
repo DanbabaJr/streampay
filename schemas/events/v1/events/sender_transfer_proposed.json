@@ -1,0 +1,63 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sender_transfer_proposed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the sender proposes handing the payer role to a new address. Unlike [`OwnershipProposed`], this handoff is not completed by the target's acceptance: the *recipient* consents, because changing who pays them (and who can cancel on them) is their risk to take.",
+  "properties": {
+    "expires_at": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "new_sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "nonce": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "sender_from": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "transfer_refund_rights": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    }
+  },
+  "required": [
+    "sender_from",
+    "new_sender",
+    "nonce",
+    "expires_at",
+    "transfer_refund_rights"
+  ],
+  "title": "SenderTransferProposed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sender_transfer_proposed",
+    "fingerprint": "sha256:7012eae001bbc92c7ecce6275cab31714970ba85e5ab1bde135e93dff4ec0f92",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}
