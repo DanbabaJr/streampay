@@ -1,0 +1,40 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_resumed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the sender resumes a paused stream. The window shifts by the paused length, so accrual continues from the frozen point.",
+  "properties": {
+    "new_end_time": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "new_end_time"
+  ],
+  "title": "StreamResumed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_resumed",
+    "fingerprint": "sha256:76526b2a695c524df20dcea647e64f0cd38a3f8322d5196a26b10134ca4158c0",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "schema_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "exported_at": 1700000000,
+  "rpc_url": "https://rpc.example.invalid",
+  "contract_id": "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "latest_ledger": 123456,
+  "contract_schema_version": 1,
+  "contract_frozen": false,
+  "governor": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "streams": [
+    {
+      "id": 1,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 100,
+      "withdrawn": 150,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    },
+    {
+      "id": 2,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 0,
+      "withdrawn": -1,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    },
+    {
+      "id": 3,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 100,
+      "withdrawn": 40,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Depleted"
+    },
+    {
+      "id": 4,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 100,
+      "withdrawn": 10,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Frozen"
+    },
+    {
+      "id": 5,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 100,
+      "withdrawn": 0,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    },
+    {
+      "id": 5,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 100,
+      "withdrawn": 0,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "status": "Active"
+    }
+  ],
+  "scheduled_intents": [
+    {
+      "id": 1,
+      "sender": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "recipient": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "deposit": 500,
+      "start_time": 1000,
+      "end_time": 2000,
+      "cancelable": true,
+      "interval": 100,
+      "occurrences_total": 2,
+      "occurrences_remaining": 5,
+      "fee_budget": 5,
+      "execute_after": 1500,
+      "expires_at": 2500,
+      "params_hash": "abababababababababababababababababababababababababababababababab",
+      "status": "Pending"
+    }
+  ],
+  "treasuries": [
+    {
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "charged_total": 7,
+      "withdrawn_total": 9
+    }
+  ],
+  "stream_fees": [
+    {
+      "stream_id": 1,
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "amount": 1
+    },
+    {
+      "stream_id": 99,
+      "token": "CTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "amount": 2
+    }
+  ],
+  "sender_indexes": [
+    {
+      "address": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "stream_ids": [
+        1,
+        77
+      ]
+    }
+  ],
+  "recipient_indexes": [
+    {
+      "address": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "stream_ids": [
+        1,
+        88
+      ]
+    }
+  ]
+}

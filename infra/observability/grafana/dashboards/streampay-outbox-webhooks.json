@@ -1,0 +1,714 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Operational view of the transactional outbox and webhook dispatch: is delivery falling behind? Every panel queries a metric emitted by indexer/src/outbox/metrics.ts. Alert thresholds live in infra/observability/prometheus/rules/alerts.yml (group streampay_outbox_alerts); runbooks in docs/OUTBOX.md and docs/WEBHOOKS.md.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "doc",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Outbox runbook",
+      "tooltip": "docs/OUTBOX.md",
+      "type": "link",
+      "url": "https://github.com/Neziahtech/streampay/blob/main/docs/OUTBOX.md"
+    },
+    {
+      "asDropdown": false,
+      "icon": "doc",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Webhooks runbook",
+      "tooltip": "docs/WEBHOOKS.md",
+      "type": "link",
+      "url": "https://github.com/Neziahtech/streampay/blob/main/docs/WEBHOOKS.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Is delivery falling behind? (queue depth & lag)",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Intents waiting to be dispatched (state=pending). Sustained growth means the drain rate has fallen under ingestion.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500 },
+              { "color": "red", "value": 1000 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 },
+      "id": 101,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(streampay_outbox_depth{state=\"pending\"})",
+          "legendFormat": "pending",
+          "refId": "A"
+        }
+      ],
+      "title": "Pending depth",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Intents currently claimed by a dispatcher (state=in_flight).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1000 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 },
+      "id": 102,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(streampay_outbox_depth{state=\"in_flight\"})",
+          "legendFormat": "in_flight",
+          "refId": "A"
+        }
+      ],
+      "title": "In-flight depth",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Intents dead-lettered (state=dead). Any nonzero value means a consumer exhausted its retry budget.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 10, "y": 1 },
+      "id": 103,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(streampay_outbox_depth{state=\"dead\"})",
+          "legendFormat": "dead",
+          "refId": "A"
+        }
+      ],
+      "title": "Dead-letter depth",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Divergence alarm: 1 while depth grows strictly monotonically across the alarm window above OUTBOX_ALARM_MIN_DEPTH. The primary 'is delivery falling behind?' signal.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 14, "y": 1 },
+      "id": 104,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(streampay_outbox_divergence_alarm)",
+          "legendFormat": "alarm",
+          "refId": "A"
+        }
+      ],
+      "title": "Divergence alarm",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Age of the oldest pending intent in seconds: the end-to-end dispatch/queue latency the code measures.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "seconds",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "id": 105,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "streampay_outbox_lag_seconds",
+          "legendFormat": "oldest pending (s)",
+          "refId": "A"
+        }
+      ],
+      "title": "Dispatch / queue lag",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 200,
+      "title": "Dispatch outcomes: throughput, retry & dead-letter rates",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Per-outcome dispatch rate: delivered, retry (scheduled), dead (DLQ), stale, rejected_backpressure.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "intents / s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "id": 201,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (outcome) (rate(streampay_outbox_dispatch_total[2m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Dispatch rate by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Share of dispatch attempts that dead-letter (retry budget exhausted) over 10m. DLQ growth.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.05 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "id": 202,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(increase(streampay_outbox_dispatch_total{outcome=\"dead\"}[10m])) / clamp_min(sum(increase(streampay_outbox_dispatch_total[10m])), 1)",
+          "legendFormat": "dead-letter share",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(increase(streampay_outbox_dispatch_total{outcome=\"retry\"}[10m])) / clamp_min(sum(increase(streampay_outbox_dispatch_total[10m])), 1)",
+          "legendFormat": "retry share",
+          "refId": "B"
+        }
+      ],
+      "title": "Retry & dead-letter share (10m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Delivery success ratio over 5m: delivered / all dispatch attempts.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 15 },
+      "id": 203,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(streampay_outbox_dispatch_total{outcome=\"delivered\"}[5m])) / clamp_min(sum(rate(streampay_outbox_dispatch_total[5m])), 0.001)",
+          "legendFormat": "success",
+          "refId": "A"
+        }
+      ],
+      "title": "Overall delivery success (5m)",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Recovery churn: claims reclaimed after dispatcher crash/timeout, and journal events retracted by reorg reconciliation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 15 },
+      "id": 204,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(streampay_outbox_reclaims_total[5m]))",
+          "legendFormat": "reclaims (crash/timeout)",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(streampay_outbox_retracted_total[5m]))",
+          "legendFormat": "retracted (reorg)",
+          "refId": "B"
+        }
+      ],
+      "title": "Reclaim & retract churn",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 300,
+      "title": "Webhook delivery success by destination",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Delivered-per-second per destination host (streampay_outbox_delivery_total{destination,outcome}).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "delivered / s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 301,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (destination) (rate(streampay_outbox_delivery_total{outcome=\"delivered\"}[5m]))",
+          "legendFormat": "{{destination}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Delivered rate by destination",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Success ratio per destination over 5m: delivered / (delivered+retry+dead+stale). Low ratio pinpoints a single failing endpoint.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.95 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "id": 302,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "asc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (destination) (rate(streampay_outbox_delivery_total{outcome=\"delivered\"}[5m])) / clamp_min(sum by (destination) (rate(streampay_outbox_delivery_total{outcome=~\"delivered|retry|dead|stale\"}[5m])), 0.001)",
+          "legendFormat": "{{destination}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Success ratio by destination",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Dead-letters per destination over 10m: which endpoint is exhausting its retry budget.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "dead / 10m",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 30 },
+      "id": 303,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (destination) (increase(streampay_outbox_delivery_total{outcome=\"dead\"}[10m]))",
+          "legendFormat": "{{destination}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Dead-letters by destination (10m)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "id": 400,
+      "title": "Journal high-water",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Outbox event-sequence high-water and total ingested journal events: monotonic growth confirms ingestion and dispatch are not stalled.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 38 },
+      "id": 401,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "streampay_outbox_max_seq",
+          "legendFormat": "max_seq (high-water)",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "streampay_outbox_events",
+          "legendFormat": "events (journal)",
+          "refId": "B"
+        }
+      ],
+      "title": "Journal high-water mark",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["streampay", "observability", "outbox", "webhooks"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m"] },
+  "timezone": "browser",
+  "title": "Outbox Lag & Webhook Delivery",
+  "uid": "streampay-outbox-webhooks",
+  "version": 1
+}

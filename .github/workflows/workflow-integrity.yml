@@ -1,0 +1,207 @@
+name: Workflow integrity
+
+# GitHub only reads a workflow after it parses, and a workflow that never parsed
+# can never report its own failure: Actions answers with a run *named*
+# ".github/workflows/<file>.yml", conclusion failure, zero jobs, no annotations.
+# Three PRs hit that in October 2026 (#241 inserted a second `uses:` into one
+# step, #182 broke a `run: |` block scalar in a schedule-only workflow so the
+# damage landed on main after merge), and a fourth (#416) deleted twelve named CI
+# steps, which cannot fail either because the steps were no longer there to run.
+# This job parses every workflow, verifies the step shapes, checks the required
+# gate inventory in .github/ci-gates.json against the merge base, refuses text
+# files that git would treat as binary, and scans every tracked .rs/.ts source
+# file for the structural damage a cleanly-merged conflict leaves behind
+# (duplicate definitions, an unbalanced delimiter, an unterminated token).
+# `prcap` and `prmoves` add the two contracts that came out of the six-check
+# consolidation: `.github/workflows/ci.yml` is the only PR workflow with exactly
+# its six declared jobs, and every specialist step folded into it still does
+# what the source step did.
+#
+# On a pull request these same checks run as the `docs` job of `ci.yml`
+# (.github/ci-gates.json: `workflow-integrity.yml:integrity` -> `ci.yml:docs`),
+# so the failure is attached to the PR that caused it instead of to main at
+# 03:00. This workflow is the post-merge half: it runs on every push to main and
+# on dispatch, which is what catches damage that reached main from a branch that
+# never re-ran CI.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    name: Workflow integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The gate inventory is compared against the merge base, so the history
+          # has to be here to resolve it.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml==6.0.2
+
+      # A detector that cannot fire is worse than no detector: it is green
+      # forever. Each check runs against a fixture built to violate exactly it.
+      - name: "Self-test: the checker can still fail"
+        run: python3 scripts/check_ci_integrity.py --self-test
+
+      - name: "Self-test: the source scanner can still fail"
+        run: node --test scripts/check_merge_integrity.test.mjs
+
+      - name: Changed-path detector tests
+        run: python3 -m unittest discover -s tests -p ci_changed_paths_test.py
+
+      - name: Workflows parse and every step is well-formed
+        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps,paths,prcap,prmoves
+
+      - name: Resolve the comparison base
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_BASE_SHA:-}" ]; then
+            if base="$(git merge-base "${PR_BASE_SHA}" HEAD 2>/dev/null)"; then
+              echo "Comparing gates and text files against merge base ${base}."
+              echo "base=${base}" >> "${GITHUB_OUTPUT}"
+            else
+              echo "::warning::merge base with ${PR_BASE_SHA} is not in this clone; the required-gate floor still applies, the merge-base step diff does not."
+            fi
+          fi
+
+      - name: Every required CI gate is still wired
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves
+          fi
+
+      - name: No text file is committed as UTF-16 or with a BOM
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          # On a pull request only what the PR touched; on main, the whole tree.
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves
+          fi
+
+      # The compiler catches these too, but minutes later and buried under the
+      # downstream errors they cause (`97 errors, mostly spec_xdr_*`). This names
+      # the exact line and costs two seconds.
+      #
+      # On a pull_request event actions/checkout lands on refs/pull/N/merge, so
+      # this reads the tree the merge will produce, not just the branch: which is
+      # where two PRs that each append the same entrypoint to one `impl` collide.
+      - name: Every tracked source file is still a parseable program
+        run: node scripts/check_merge_integrity.mjs
+
+      - name: Explain a workflow-integrity failure
+        if: failure()
+        run: |
+          set -eu
+          cat <<'EOF'
+          ## What just failed
+
+          This job does not build or test the product. It checks the things that
+          cannot report a problem on their own: that the CI description is
+          intact, and that each source file is still a parseable program.
+
+          - `[parse]` A workflow does not load as YAML. GitHub rejects the whole
+            file, so Actions shows a run named `.github/workflows/<file>.yml`
+            with **0 jobs** and no step output. The usual cause is a multi-line
+            script whose lines are not indented deeper than the `run: |` header:
+            the first flush-left line ends the block scalar and the rest of the
+            file is read as YAML. In a workflow that only triggers on
+            `schedule:` or `workflow_dispatch:` nothing here goes red on the PR
+            that broke it -- it goes red silently on main after the merge, so
+            this check runs on every pull request.
+          - `[dupkeys]` A mapping key is defined twice in one mapping, e.g. a
+            re-pinned `uses:` inserted above the existing one instead of
+            replacing it. Locally PyYAML keeps the last value and says nothing;
+            GitHub's parser refuses the file. Replace the line, do not add one.
+          - `[steps]` A step carries both `run:` and `uses:`, or neither, or a
+            `with:` with nothing to pass it to. Also `working-directory:` on a
+            step that has `uses:` and no `run:` -- GitHub refuses the file for
+            that one, so the pull request shows **no checks at all** rather than
+            a red one; the same directory set job-wide with
+            `defaults: run: working-directory:` is legal. Also a `needs:` pointing
+            at a job that does not exist, and an action referenced by
+            `@main` / `@master`.
+          - `[paths]` A `paths:` / `paths-ignore:` entry that no file in the
+            repository can match -- `"deploy/**"` for a `deploy/` directory that
+            has never existed, or a file renamed out from under the filter. The
+            job it gates does not fail, it silently never runs, and the pull
+            request reads green because the only evidence the gate exists is an
+            absent check. Patterns with no literal prefix (`**/*.md`) and paths a
+            PR adds itself are left alone; create the path or drop the pattern.
+          - `[gates]` A named CI step that existed at the merge base, or that
+            `.github/ci-gates.json` lists as required, is no longer in the
+            workflow. A deleted gate cannot fail -- it simply stops running, and
+            the pull request stays green. Restore the step. If the gate really is
+            being retired, move its name into `retired` in
+            `.github/ci-gates.json` with a reason, in this same PR, so the
+            deletion is visible in the diff instead of quiet.
+          - `[prcap]` Another workflow declares a PR trigger, `ci.yml` gains a
+            seventh job, a matrix, a reusable-workflow call or write permission.
+            GitHub counts one check per job, so the six-check review surface is
+            a contract rather than a naming convention.
+          - `[prmoves]` A specialist step folded into `ci.yml` lost its payload,
+            environment, working directory, original condition, resilience guard
+            or changed-path guard. The inventory in `.github/ci-gates.json` must
+            keep pointing at the job that really runs it.
+          - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
+            file is stored as UTF-16, carries a UTF-8 BOM, or contains a C0
+            control byte (0x00-0x1F other than tab/LF, or a CR outside CRLF).
+            git then calls it binary: `git diff` prints "Binary files
+            differ", the change is unreviewable, and a workflow can be gutted
+            without a reviewer seeing a single line. Re-save as UTF-8 without a
+            BOM (`* text=auto eol=lf` in `.gitattributes` handles the rest).
+          - `[merge-integrity]` A tracked `.rs` / `.ts` / `.js` file is no longer
+            a parseable program: the same `fn` declared twice in one `impl`, the
+            same top-level `function`/`class`/`const` in one file, a `{`/`(`/`[`
+            without its partner, a string or block comment that runs to the end
+            of the file, or a leftover `<<<<<<<`. Every one of those is what a
+            clean-merging conflict leaves behind, and the compiler reports them
+            as dozens of downstream errors. The finding names the line to repair.
+
+          Reproduce locally, no push needed:
+
+              pip install pyyaml==6.0.2
+              python3 scripts/check_ci_integrity.py
+              python3 scripts/check_ci_integrity.py --self-test
+              python3 -m unittest discover -s tests -p ci_changed_paths_test.py
+              node --test scripts/check_merge_integrity.test.mjs
+              node scripts/check_merge_integrity.mjs
+
+          The checker's own fixtures are in the script; if it ever reports 0
+          problems while CI is broken, run the self-test first -- it fails when
+          a detector has been weakened.
+          EOF

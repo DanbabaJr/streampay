@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "WithdrawOutcome": {
+      "additionalProperties": false,
+      "description": "Contract struct `WithdrawOutcome` referenced by event fields.",
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "x-soroban-type": "i128"
+        },
+        "stream_id": {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      },
+      "required": [
+        "stream_id",
+        "amount"
+      ],
+      "title": "WithdrawOutcome",
+      "type": "object"
+    }
+  },
+  "$id": "https://streampay.dev/schemas/events/v1/events/batch_withdraw_summary.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted once after a `withdraw_many` batch settles, alongside the per-stream [`Withdrawn`] events. The per-stream shape is unchanged so existing consumers keep working; this event is the batch-level view: every entry that paid, the total, and how many of the requested ids were skipped.",
+  "properties": {
+    "requested": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "settled": {
+      "items": {
+        "$ref": "#/$defs/WithdrawOutcome",
+        "x-soroban-type": "WithdrawOutcome"
+      },
+      "type": "array",
+      "x-soroban-type": "Vec<WithdrawOutcome>"
+    },
+    "skipped": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "total": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "settled",
+    "total",
+    "requested",
+    "skipped"
+  ],
+  "title": "BatchWithdrawSummary",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "batch_withdraw_summary",
+    "fingerprint": "sha256:59b5ba85df9a81a2bcce7610b21b724aa1e5093d0d44a54cd46370ae0dfb6860",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "recipient",
+        "type": "Address"
+      }
+    ]
+  }
+}

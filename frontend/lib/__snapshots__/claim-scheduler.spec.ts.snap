@@ -1,0 +1,202 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`replaySeries (recorded fee series) > recorded decisions table (lull) 1`] = `
+"| # | t (unix) | since end | since sig | fee stroops | budget | action | reason |
+|---|----------|-----------|-----------|-------------|--------|--------|--------|
+| 1 | 1790000000 | 3600s | 1800s | 200 | 150 | wait | too-early |
+| 2 | 1790000030 | 3570s | 1770s | 190 | 150 | wait | fee-above-threshold |
+| 3 | 1790000060 | 3540s | 1740s | 180 | 150 | wait | fee-above-threshold |
+| 4 | 1790000090 | 3510s | 1710s | 210 | 150 | wait | fee-above-threshold |
+| 5 | 1790000120 | 3480s | 1680s | 175 | 150 | wait | fee-above-threshold |
+| 6 | 1790000150 | 3450s | 1650s | 160 | 150 | wait | fee-above-threshold |
+| 7 | 1790000180 | 3420s | 1620s | 155 | 150 | wait | fee-above-threshold |
+| 8 | 1790000210 | 3390s | 1590s | 165 | 150 | wait | fee-above-threshold |
+| 9 | 1790000240 | 3360s | 1560s | 148 | 150 | submit | fee-below-threshold |"
+`;
+
+exports[`replaySeries (recorded fee series) > recorded decisions table (spike, client returns after the outage) 1`] = `
+"| # | t (unix) | since end | since sig | fee stroops | budget | action | reason |
+|---|----------|-----------|-----------|-------------|--------|--------|--------|
+| 1 | 1790002010 | 1590s | -210s | 420 | 150 | resign | signature-expired |
+| 2 | 1790002040 | 1560s | 1770s | 400 | 150 | wait | fee-above-threshold |
+| 3 | 1790002070 | 1530s | 1740s | 380 | 150 | wait | fee-above-threshold |
+| 4 | 1790002100 | 1500s | 1710s | 360 | 150 | wait | fee-above-threshold |
+| 5 | 1790002130 | 1470s | 1680s | 340 | 150 | wait | fee-above-threshold |
+| 6 | 1790002160 | 1440s | 1650s | 320 | 150 | wait | fee-above-threshold |
+| 7 | 1790002190 | 1410s | 1620s | 300 | 150 | wait | fee-above-threshold |
+| 8 | 1790002220 | 1380s | 1590s | 280 | 150 | wait | fee-above-threshold |
+| 9 | 1790002250 | 1350s | 1560s | 260 | 150 | wait | fee-above-threshold |
+| 10 | 1790002280 | 1320s | 1530s | 900 | 150 | wait | fee-above-threshold |
+| 11 | 1790002310 | 1290s | 1500s | 820 | 150 | wait | fee-above-threshold |
+| 12 | 1790002340 | 1260s | 1470s | 760 | 150 | wait | fee-above-threshold |
+| 13 | 1790002370 | 1230s | 1440s | 700 | 150 | wait | fee-above-threshold |
+| 14 | 1790002400 | 1200s | 1410s | 640 | 150 | wait | fee-above-threshold |
+| 15 | 1790002430 | 1170s | 1380s | 600 | 150 | wait | fee-above-threshold |
+| 16 | 1790002460 | 1140s | 1350s | 560 | 150 | wait | fee-above-threshold |
+| 17 | 1790002490 | 1110s | 1320s | 520 | 150 | wait | fee-above-threshold |
+| 18 | 1790002520 | 1080s | 1290s | 480 | 150 | wait | fee-above-threshold |
+| 19 | 1790002550 | 1050s | 1260s | 440 | 150 | wait | fee-above-threshold |
+| 20 | 1790002580 | 1020s | 1230s | 420 | 150 | wait | fee-above-threshold |
+| 21 | 1790002610 | 990s | 1200s | 400 | 150 | wait | fee-above-threshold |
+| 22 | 1790002640 | 960s | 1170s | 380 | 150 | wait | fee-above-threshold |
+| 23 | 1790002670 | 930s | 1140s | 360 | 150 | wait | fee-above-threshold |
+| 24 | 1790002700 | 900s | 1110s | 340 | 150 | submit | deadline-fallback |"
+`;
+
+exports[`replaySeries (recorded fee series) > recorded decisions table (spike, long signature) 1`] = `
+"| # | t (unix) | since end | since sig | fee stroops | budget | action | reason |
+|---|----------|-----------|-----------|-------------|--------|--------|--------|
+| 1 | 1790000000 | 3600s | 5400s | 900 | 150 | wait | too-early |
+| 2 | 1790000030 | 3570s | 5370s | 820 | 150 | wait | fee-above-threshold |
+| 3 | 1790000060 | 3540s | 5340s | 760 | 150 | wait | fee-above-threshold |
+| 4 | 1790000090 | 3510s | 5310s | 700 | 150 | wait | fee-above-threshold |
+| 5 | 1790000120 | 3480s | 5280s | 640 | 150 | wait | fee-above-threshold |
+| 6 | 1790000150 | 3450s | 5250s | 600 | 150 | wait | fee-above-threshold |
+| 7 | 1790000180 | 3420s | 5220s | 560 | 150 | wait | fee-above-threshold |
+| 8 | 1790000210 | 3390s | 5190s | 520 | 150 | wait | fee-above-threshold |
+| 9 | 1790000240 | 3360s | 5160s | 480 | 150 | wait | fee-above-threshold |
+| 10 | 1790000270 | 3330s | 5130s | 440 | 150 | wait | fee-above-threshold |
+| 11 | 1790000300 | 3300s | 5100s | 420 | 150 | wait | fee-above-threshold |
+| 12 | 1790000330 | 3270s | 5070s | 400 | 150 | wait | fee-above-threshold |
+| 13 | 1790000360 | 3240s | 5040s | 380 | 150 | wait | fee-above-threshold |
+| 14 | 1790000390 | 3210s | 5010s | 360 | 150 | wait | fee-above-threshold |
+| 15 | 1790000420 | 3180s | 4980s | 340 | 150 | wait | fee-above-threshold |
+| 16 | 1790000450 | 3150s | 4950s | 320 | 150 | wait | fee-above-threshold |
+| 17 | 1790000480 | 3120s | 4920s | 300 | 150 | wait | fee-above-threshold |
+| 18 | 1790000510 | 3090s | 4890s | 280 | 150 | wait | fee-above-threshold |
+| 19 | 1790000540 | 3060s | 4860s | 260 | 150 | wait | fee-above-threshold |
+| 20 | 1790000570 | 3030s | 4830s | 900 | 150 | wait | fee-above-threshold |
+| 21 | 1790000600 | 3000s | 4800s | 820 | 150 | wait | fee-above-threshold |
+| 22 | 1790000630 | 2970s | 4770s | 760 | 150 | wait | fee-above-threshold |
+| 23 | 1790000660 | 2940s | 4740s | 700 | 150 | wait | fee-above-threshold |
+| 24 | 1790000690 | 2910s | 4710s | 640 | 150 | wait | fee-above-threshold |
+| 25 | 1790000720 | 2880s | 4680s | 600 | 150 | wait | fee-above-threshold |
+| 26 | 1790000750 | 2850s | 4650s | 560 | 150 | wait | fee-above-threshold |
+| 27 | 1790000780 | 2820s | 4620s | 520 | 150 | wait | fee-above-threshold |
+| 28 | 1790000810 | 2790s | 4590s | 480 | 150 | wait | fee-above-threshold |
+| 29 | 1790000840 | 2760s | 4560s | 440 | 150 | wait | fee-above-threshold |
+| 30 | 1790000870 | 2730s | 4530s | 420 | 150 | wait | fee-above-threshold |
+| 31 | 1790000900 | 2700s | 4500s | 400 | 150 | wait | fee-above-threshold |
+| 32 | 1790000930 | 2670s | 4470s | 380 | 150 | wait | fee-above-threshold |
+| 33 | 1790000960 | 2640s | 4440s | 360 | 150 | wait | fee-above-threshold |
+| 34 | 1790000990 | 2610s | 4410s | 340 | 150 | wait | fee-above-threshold |
+| 35 | 1790001020 | 2580s | 4380s | 320 | 150 | wait | fee-above-threshold |
+| 36 | 1790001050 | 2550s | 4350s | 300 | 150 | wait | fee-above-threshold |
+| 37 | 1790001080 | 2520s | 4320s | 280 | 150 | wait | fee-above-threshold |
+| 38 | 1790001110 | 2490s | 4290s | 260 | 150 | wait | fee-above-threshold |
+| 39 | 1790001140 | 2460s | 4260s | 900 | 150 | wait | fee-above-threshold |
+| 40 | 1790001170 | 2430s | 4230s | 820 | 150 | wait | fee-above-threshold |
+| 41 | 1790001200 | 2400s | 4200s | 760 | 150 | wait | fee-above-threshold |
+| 42 | 1790001230 | 2370s | 4170s | 700 | 150 | wait | fee-above-threshold |
+| 43 | 1790001260 | 2340s | 4140s | 640 | 150 | wait | fee-above-threshold |
+| 44 | 1790001290 | 2310s | 4110s | 600 | 150 | wait | fee-above-threshold |
+| 45 | 1790001320 | 2280s | 4080s | 560 | 150 | wait | fee-above-threshold |
+| 46 | 1790001350 | 2250s | 4050s | 520 | 150 | wait | fee-above-threshold |
+| 47 | 1790001380 | 2220s | 4020s | 480 | 150 | wait | fee-above-threshold |
+| 48 | 1790001410 | 2190s | 3990s | 440 | 150 | wait | fee-above-threshold |
+| 49 | 1790001440 | 2160s | 3960s | 420 | 150 | wait | fee-above-threshold |
+| 50 | 1790001470 | 2130s | 3930s | 400 | 150 | wait | fee-above-threshold |
+| 51 | 1790001500 | 2100s | 3900s | 380 | 150 | wait | fee-above-threshold |
+| 52 | 1790001530 | 2070s | 3870s | 360 | 150 | wait | fee-above-threshold |
+| 53 | 1790001560 | 2040s | 3840s | 340 | 150 | wait | fee-above-threshold |
+| 54 | 1790001590 | 2010s | 3810s | 320 | 150 | wait | fee-above-threshold |
+| 55 | 1790001620 | 1980s | 3780s | 300 | 150 | wait | fee-above-threshold |
+| 56 | 1790001650 | 1950s | 3750s | 280 | 150 | wait | fee-above-threshold |
+| 57 | 1790001680 | 1920s | 3720s | 260 | 150 | wait | fee-above-threshold |
+| 58 | 1790001710 | 1890s | 3690s | 900 | 150 | wait | fee-above-threshold |
+| 59 | 1790001740 | 1860s | 3660s | 820 | 150 | wait | fee-above-threshold |
+| 60 | 1790001770 | 1830s | 3630s | 760 | 150 | wait | fee-above-threshold |
+| 61 | 1790001800 | 1800s | 3600s | 700 | 150 | wait | fee-above-threshold |
+| 62 | 1790001830 | 1770s | 3570s | 640 | 150 | wait | fee-above-threshold |
+| 63 | 1790001860 | 1740s | 3540s | 600 | 150 | wait | fee-above-threshold |
+| 64 | 1790001890 | 1710s | 3510s | 560 | 150 | wait | fee-above-threshold |
+| 65 | 1790001920 | 1680s | 3480s | 520 | 150 | wait | fee-above-threshold |
+| 66 | 1790001950 | 1650s | 3450s | 480 | 150 | wait | fee-above-threshold |
+| 67 | 1790001980 | 1620s | 3420s | 440 | 150 | wait | fee-above-threshold |
+| 68 | 1790002010 | 1590s | 3390s | 420 | 150 | wait | fee-above-threshold |
+| 69 | 1790002040 | 1560s | 3360s | 400 | 150 | wait | fee-above-threshold |
+| 70 | 1790002070 | 1530s | 3330s | 380 | 150 | wait | fee-above-threshold |
+| 71 | 1790002100 | 1500s | 3300s | 360 | 150 | wait | fee-above-threshold |
+| 72 | 1790002130 | 1470s | 3270s | 340 | 150 | wait | fee-above-threshold |
+| 73 | 1790002160 | 1440s | 3240s | 320 | 150 | wait | fee-above-threshold |
+| 74 | 1790002190 | 1410s | 3210s | 300 | 150 | wait | fee-above-threshold |
+| 75 | 1790002220 | 1380s | 3180s | 280 | 150 | wait | fee-above-threshold |
+| 76 | 1790002250 | 1350s | 3150s | 260 | 150 | wait | fee-above-threshold |
+| 77 | 1790002280 | 1320s | 3120s | 900 | 150 | wait | fee-above-threshold |
+| 78 | 1790002310 | 1290s | 3090s | 820 | 150 | wait | fee-above-threshold |
+| 79 | 1790002340 | 1260s | 3060s | 760 | 150 | wait | fee-above-threshold |
+| 80 | 1790002370 | 1230s | 3030s | 700 | 150 | wait | fee-above-threshold |
+| 81 | 1790002400 | 1200s | 3000s | 640 | 150 | wait | fee-above-threshold |
+| 82 | 1790002430 | 1170s | 2970s | 600 | 150 | wait | fee-above-threshold |
+| 83 | 1790002460 | 1140s | 2940s | 560 | 150 | wait | fee-above-threshold |
+| 84 | 1790002490 | 1110s | 2910s | 520 | 150 | wait | fee-above-threshold |
+| 85 | 1790002520 | 1080s | 2880s | 480 | 150 | wait | fee-above-threshold |
+| 86 | 1790002550 | 1050s | 2850s | 440 | 150 | wait | fee-above-threshold |
+| 87 | 1790002580 | 1020s | 2820s | 420 | 150 | wait | fee-above-threshold |
+| 88 | 1790002610 | 990s | 2790s | 400 | 150 | wait | fee-above-threshold |
+| 89 | 1790002640 | 960s | 2760s | 380 | 150 | wait | fee-above-threshold |
+| 90 | 1790002670 | 930s | 2730s | 360 | 150 | wait | fee-above-threshold |
+| 91 | 1790002700 | 900s | 2700s | 340 | 150 | submit | deadline-fallback |"
+`;
+
+exports[`replaySeries (recorded fee series) > recorded decisions table (spike, short signature) 1`] = `
+"| # | t (unix) | since end | since sig | fee stroops | budget | action | reason |
+|---|----------|-----------|-----------|-------------|--------|--------|--------|
+| 1 | 1790000000 | 3600s | 1800s | 900 | 150 | wait | too-early |
+| 2 | 1790000030 | 3570s | 1770s | 820 | 150 | wait | fee-above-threshold |
+| 3 | 1790000060 | 3540s | 1740s | 760 | 150 | wait | fee-above-threshold |
+| 4 | 1790000090 | 3510s | 1710s | 700 | 150 | wait | fee-above-threshold |
+| 5 | 1790000120 | 3480s | 1680s | 640 | 150 | wait | fee-above-threshold |
+| 6 | 1790000150 | 3450s | 1650s | 600 | 150 | wait | fee-above-threshold |
+| 7 | 1790000180 | 3420s | 1620s | 560 | 150 | wait | fee-above-threshold |
+| 8 | 1790000210 | 3390s | 1590s | 520 | 150 | wait | fee-above-threshold |
+| 9 | 1790000240 | 3360s | 1560s | 480 | 150 | wait | fee-above-threshold |
+| 10 | 1790000270 | 3330s | 1530s | 440 | 150 | wait | fee-above-threshold |
+| 11 | 1790000300 | 3300s | 1500s | 420 | 150 | wait | fee-above-threshold |
+| 12 | 1790000330 | 3270s | 1470s | 400 | 150 | wait | fee-above-threshold |
+| 13 | 1790000360 | 3240s | 1440s | 380 | 150 | wait | fee-above-threshold |
+| 14 | 1790000390 | 3210s | 1410s | 360 | 150 | wait | fee-above-threshold |
+| 15 | 1790000420 | 3180s | 1380s | 340 | 150 | wait | fee-above-threshold |
+| 16 | 1790000450 | 3150s | 1350s | 320 | 150 | wait | fee-above-threshold |
+| 17 | 1790000480 | 3120s | 1320s | 300 | 150 | wait | fee-above-threshold |
+| 18 | 1790000510 | 3090s | 1290s | 280 | 150 | wait | fee-above-threshold |
+| 19 | 1790000540 | 3060s | 1260s | 260 | 150 | wait | fee-above-threshold |
+| 20 | 1790000570 | 3030s | 1230s | 900 | 150 | wait | fee-above-threshold |
+| 21 | 1790000600 | 3000s | 1200s | 820 | 150 | wait | fee-above-threshold |
+| 22 | 1790000630 | 2970s | 1170s | 760 | 150 | wait | fee-above-threshold |
+| 23 | 1790000660 | 2940s | 1140s | 700 | 150 | wait | fee-above-threshold |
+| 24 | 1790000690 | 2910s | 1110s | 640 | 150 | wait | fee-above-threshold |
+| 25 | 1790000720 | 2880s | 1080s | 600 | 150 | wait | fee-above-threshold |
+| 26 | 1790000750 | 2850s | 1050s | 560 | 150 | wait | fee-above-threshold |
+| 27 | 1790000780 | 2820s | 1020s | 520 | 150 | wait | fee-above-threshold |
+| 28 | 1790000810 | 2790s | 990s | 480 | 150 | wait | fee-above-threshold |
+| 29 | 1790000840 | 2760s | 960s | 440 | 150 | wait | fee-above-threshold |
+| 30 | 1790000870 | 2730s | 930s | 420 | 150 | wait | fee-above-threshold |
+| 31 | 1790000900 | 2700s | 900s | 400 | 150 | wait | fee-above-threshold |
+| 32 | 1790000930 | 2670s | 870s | 380 | 150 | wait | fee-above-threshold |
+| 33 | 1790000960 | 2640s | 840s | 360 | 150 | wait | fee-above-threshold |
+| 34 | 1790000990 | 2610s | 810s | 340 | 150 | wait | fee-above-threshold |
+| 35 | 1790001020 | 2580s | 780s | 320 | 150 | wait | fee-above-threshold |
+| 36 | 1790001050 | 2550s | 750s | 300 | 150 | wait | fee-above-threshold |
+| 37 | 1790001080 | 2520s | 720s | 280 | 150 | wait | fee-above-threshold |
+| 38 | 1790001110 | 2490s | 690s | 260 | 150 | wait | fee-above-threshold |
+| 39 | 1790001140 | 2460s | 660s | 900 | 150 | wait | fee-above-threshold |
+| 40 | 1790001170 | 2430s | 630s | 820 | 150 | wait | fee-above-threshold |
+| 41 | 1790001200 | 2400s | 600s | 760 | 150 | wait | fee-above-threshold |
+| 42 | 1790001230 | 2370s | 570s | 700 | 150 | wait | fee-above-threshold |
+| 43 | 1790001260 | 2340s | 540s | 640 | 150 | wait | fee-above-threshold |
+| 44 | 1790001290 | 2310s | 510s | 600 | 150 | wait | fee-above-threshold |
+| 45 | 1790001320 | 2280s | 480s | 560 | 150 | wait | fee-above-threshold |
+| 46 | 1790001350 | 2250s | 450s | 520 | 150 | wait | fee-above-threshold |
+| 47 | 1790001380 | 2220s | 420s | 480 | 150 | wait | fee-above-threshold |
+| 48 | 1790001410 | 2190s | 390s | 440 | 150 | wait | fee-above-threshold |
+| 49 | 1790001440 | 2160s | 360s | 420 | 150 | wait | fee-above-threshold |
+| 50 | 1790001470 | 2130s | 330s | 400 | 150 | wait | fee-above-threshold |
+| 51 | 1790001500 | 2100s | 300s | 380 | 150 | wait | fee-above-threshold |
+| 52 | 1790001530 | 2070s | 270s | 360 | 150 | wait | fee-above-threshold |
+| 53 | 1790001560 | 2040s | 240s | 340 | 150 | wait | fee-above-threshold |
+| 54 | 1790001590 | 2010s | 210s | 320 | 150 | wait | fee-above-threshold |
+| 55 | 1790001620 | 1980s | 180s | 300 | 150 | wait | fee-above-threshold |
+| 56 | 1790001650 | 1950s | 150s | 280 | 150 | wait | fee-above-threshold |
+| 57 | 1790001680 | 1920s | 120s | 260 | 150 | submit | intent-expiring |"
+`;

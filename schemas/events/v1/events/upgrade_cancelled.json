@@ -1,0 +1,41 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/upgrade_cancelled.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a pending contract upgrade is cancelled by the governor.",
+  "properties": {
+    "cancelled_by": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "cancelled_by"
+  ],
+  "title": "UpgradeCancelled",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "upgrade_cancelled",
+    "fingerprint": "sha256:f37b6e8e716733fe20e8a2dcba11444e9e1e842470b97f9b6d820f26db976523",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "contentEncoding": "base64",
+          "description": "32-byte hash, base64-encoded on the registry surface.",
+          "type": "string",
+          "x-soroban-type": "BytesN<32>"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "new_wasm_hash",
+        "type": "BytesN<32>"
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "comment": "Audited deletions from the event registry. A grant is honored by scripts/event_compat_check.mjs only when the named shape is absent from every release tag's registry AND this PR actually deletes it — an unused grant fails the gate, so a grant can never be parked here for a later PR to reuse. Shapes that reached a release have no hatch: they need the v1 + v2 migration in README.md.",
+  "removals": [
+    {
+      "shape": "event:AgentAuthorized",
+      "reason": "Added by #660 (session-key delegation), withdrawn in #697 together with the delegated-agent entrypoints; the contract Wasm that carried them never fit the protocol's 128 KB code limit, so no release tag holds this shape.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:AgentRevoked",
+      "reason": "Added by #660 (session-key delegation), withdrawn in #697 together with the delegated-agent entrypoints; absent from every release tag.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:PolicyViolation",
+      "reason": "Added by #626, reverted in #697 because the insurance-pool surface it documents was merged without its errors.rs half and drained the pool; no release tag contains it.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:PowerAccrued",
+      "reason": "Added by #626, reverted in #697 with the voting-power surface it reports; never compiled into a released Wasm, so no consumer can hold it.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:PremiumAccrued",
+      "reason": "Added by #626, reverted in #697 with the insurance premium accrual it reports; absent from every release tag.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:SenderPolicyRevoked",
+      "reason": "Added by #626, reverted in #697 with the sender-policy entrypoints; absent from every release tag.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:SenderPolicySet",
+      "reason": "Added by #626, reverted in #697 with the sender-policy entrypoints; absent from every release tag.",
+      "pr": "#697"
+    },
+    {
+      "shape": "event:VoteCast",
+      "reason": "Added by #626, reverted in #697 with the multi-party voting surface; absent from every release tag.",
+      "pr": "#697"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/scheduled_intent_expired.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when an intent passed `expires_at` with occurrences outstanding and its escrow was returned to the sender.",
+  "properties": {
+    "refund": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender",
+    "refund"
+  ],
+  "title": "ScheduledIntentExpired",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "scheduled_intent_expired",
+    "fingerprint": "sha256:708a995061ac8713d9a6fc7ea04f7c39eee313276cc42fb0cd9268f3210500ee",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "intent_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

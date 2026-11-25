@@ -1,0 +1,152 @@
+name: Merge preview
+
+# What this workflow is
+# ---------------------
+# One question has broken `main` repeatedly in this repo, and no PR check can
+# answer it: "what does the tree look like after I merge *all* of these?". The
+# 2026-11 bulk merge left main uncompilable (19 undeclared `Branch::` arms from
+# #626, three duplicate `impl` method names from #677 over #660) while every
+# individual PR was green; #156 over #144 did the same thing to the frontend.
+#
+# So `scripts/merge_preview.sh` merges the whole open fleet into a scratch tree
+# on a schedule, runs the fast gates after each merge, and attributes the
+# failure to the PR that made the union bad. The result is posted to a pinned
+# tracking issue, where it can be read *before* the merge buttons are clicked.
+#
+# It is intentionally not a pull_request check: a preview of someone else's
+# merge order is not that PR's responsibility, and a scheduled job that can go
+# red for reasons outside the PR it annotates is how red checks stop being
+# read. The job therefore exits 0 whenever it produced a report.
+#
+# Triggers: every 6 hours, on demand (with or without the union compile), and
+# after each main push, since that is when the fleet's merge base moves.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      cargo_check:
+        description: 'Also run cargo check on the full union tree (slower, definitive)'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/merge_preview.sh'
+      - 'scripts/cross_pr_collision.py'
+      - '.github/workflows/merge-preview.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: merge-preview
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preview:
+    name: Merge preview (all open PRs vs main)
+    if: github.repository == 'Neziahtech/streampay'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install Rust toolchain
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cargo_check }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cargo_check }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-preview-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # The positive control runs first: the collision gate asserts on fixtures
+      # that must be reported. A gate that matched nothing would otherwise print
+      # a clean report forever.
+      - name: Collision gate self-test
+        run: python3 scripts/cross_pr_collision.py --self-test
+
+      - name: Preview the open fleet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CARGO_FLAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cargo_check && '--cargo-check' || '' }}
+        run: bash scripts/merge_preview.sh --report "$RUNNER_TEMP/merge-preview.md" $CARGO_FLAG
+
+      - name: Upload the report
+        uses: actions/upload-artifact@v5
+        with:
+          name: merge-preview-${{ github.run_id }}
+          path: ${{ runner.temp }}/merge-preview.md
+          if-no-files-found: error
+
+      # One pinned issue carries the history: the run updates its own marker
+      # comment rather than appending, so the fleet state stays readable instead
+      # of becoming a log. Created once, by label lookup.
+      - name: Publish to the tracking issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MARKER='<!-- merge-preview-report -->'
+          FILE="$RUNNER_TEMP/merge-preview.md"
+          [ -f "$FILE" ] || { echo "no report produced; nothing to publish"; exit 0; }
+          # The label has to exist before an issue can carry it; POSTing an
+          # existing label name answers 422, which is not a failure here.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/labels" \
+            -f name=ci:merge-preview -f color=5319e7 \
+            -f description='Automated merge-preview report for the open fleet' >/dev/null 2>&1 || true
+          ISSUE=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&labels=ci:merge-preview&per_page=1" \
+            --jq '.[0].number // empty')
+          if [ -z "$ISSUE" ]; then
+            ISSUE=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues" \
+              -f title='Merge preview — what the whole open fleet does to main' \
+              -f body="$MARKER
+          This issue is updated by .github/workflows/merge-preview.yml every six hours with the result of merging every open pull request into main in one tree, plus which PR (if any) makes that union stop building. It is the pre-flight answer for a bulk merge: see docs/WASM_SIZE.md for why the size gate and the collision gate exist." \
+              -f 'labels[]=ci:merge-preview' --jq .number)
+            echo "created tracking issue #$ISSUE"
+          else
+            echo "tracking issue #$ISSUE"
+          fi
+          { echo "$MARKER"; echo; cat "$FILE"; } > "$RUNNER_TEMP/comment.md"
+          # `gh api -f body=@file` does not read the file: `-f` is the raw-field
+          # form, and only `-F`/`--input` expand `@`. The first run therefore
+          # posted the literal path as the report. Build the JSON body so there
+          # is no quoting question left, and read the comment back to prove it.
+          python3 -c 'import json,sys; print(json.dumps({"body": open(sys.argv[1], encoding="utf-8").read()}))' \
+            "$RUNNER_TEMP/comment.md" > "$RUNNER_TEMP/comment.json"
+          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments?per_page=100" \
+            --jq '[.[] | select(.body | contains("<!-- merge-preview-report -->"))][0].id // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "updating comment $EXISTING"
+            URL=$(gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" \
+              --input "$RUNNER_TEMP/comment.json" --jq .html_url)
+          else
+            URL=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
+              --input "$RUNNER_TEMP/comment.json" --jq .html_url)
+          fi
+          POSTED=$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$(basename "$URL")" --jq .body)
+          case "$POSTED" in
+            *"## Merge preview"*) echo "published: $URL" ;;
+            *) echo "::error::the tracking comment does not contain the report (got $(printf '%s' "$POSTED" | head -c 80))"; exit 1 ;;
+          esac

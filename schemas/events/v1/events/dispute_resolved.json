@@ -1,0 +1,50 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/dispute_resolved.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the sender resolves an open dispute. `accept = true` refunds the bond to the recipient and unwinds the stream pro-rata (a `StreamCancelled` event accompanies it); `accept = false` treats the dispute as bad-faith and slashes the bond to the sender, resuming the stream normally.",
+  "properties": {
+    "accept": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "bond": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender",
+    "accept",
+    "bond"
+  ],
+  "title": "DisputeResolved",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "dispute_resolved",
+    "fingerprint": "sha256:dd2cc4e7266dce42775243de26406c0ea108c7c9d6b1d8199a61484bd6253e13",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

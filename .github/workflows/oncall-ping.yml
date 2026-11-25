@@ -1,0 +1,40 @@
+name: On-Call Handoff Ping
+
+# Weekly announcement of current primary and secondary on-call maintainers.
+# Safe by default: no-ops if ONCALL_WEBHOOK_URL secret is unconfigured.
+# Never triggers deploy, release, or mutation jobs.
+
+on:
+  schedule:
+    # Run every Monday at 09:00 UTC (matching roster handoff time)
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run mode (prints handoff payload without sending webhook)"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Notify On-Call Rotation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Calculate and Deliver On-Call Announcement
+        env:
+          ONCALL_WEBHOOK_URL: ${{ secrets.ONCALL_WEBHOOK_URL }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: |
+          node scripts/oncall/ping.mjs

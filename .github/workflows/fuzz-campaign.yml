@@ -1,0 +1,147 @@
+name: Fuzz Campaign
+
+# The persistent campaign (docs/FUZZ_CAMPAIGN.md). Weekly, hours per target,
+# corpora carried between runs on the `fuzz-corpus` branch, crashers triaged
+# into repro bundles, and one combined report with coverage.
+#
+# GitHub caps a job at 6h, so the campaign is a matrix: one job per target, in
+# parallel. A self-hosted box runs the same thing as a single
+# `scripts/fuzz/campaign.sh --hours 8` with round-robin slices instead.
+
+on:
+  schedule:
+    - cron: "23 1 * * 6" # Saturdays ~01:23 UTC
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Fuzzing hours per target (max ~5.5 on hosted runners)"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-campaign
+  cancel-in-progress: false
+
+env:
+  RUSTUP_TOOLCHAIN: nightly
+  HOURS: ${{ github.event.inputs.hours || '5' }}
+
+jobs:
+  fuzz:
+    name: campaign ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [campaign, campaign_wasm, differential, conservation, rate_schedule, streamed_at]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install nightly, llvm-tools and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal --component llvm-tools-preview
+          cargo +nightly install cargo-fuzz --locked
+
+      - name: Build the release wasm (campaign_wasm only)
+        if: matrix.target == 'campaign_wasm'
+        env:
+          RUSTUP_TOOLCHAIN: ""   # the pinned toolchain from rust-toolchain.toml
+        run: |
+          cargo build -p streampay-contract --target wasm32v1-none --release
+          echo "STREAMPAY_WASM=$PWD/target/wasm32v1-none/release/streampay_contract.wasm" >> "$GITHUB_ENV"
+
+      - name: Restore corpus from the fuzz-corpus branch
+        run: scripts/fuzz/corpus-sync.sh pull
+
+      - name: Replay triaged regressions
+        run: |
+          if [ -d "fuzz/regressions/${{ matrix.target }}" ]; then
+            features=""; [ "${{ matrix.target }}" = campaign_wasm ] && features="--features wasm"
+            (cd fuzz && cargo fuzz run ${{ matrix.target }} $features "regressions/${{ matrix.target }}" -- -runs=0)
+          fi
+
+      - name: Run campaign
+        run: |
+          scripts/fuzz/campaign.sh --hours "$HOURS" --targets ${{ matrix.target }} \
+            --jobs "$(nproc)" --slice-min 60 --out "fuzz/campaign/${{ matrix.target }}"
+
+      - name: Triage crashers
+        if: always()
+        run: scripts/fuzz/triage.sh ${{ matrix.target }} || true
+
+      - name: Source coverage
+        if: matrix.target != 'campaign_wasm'
+        run: scripts/fuzz/coverage.sh "fuzz/campaign/${{ matrix.target }}" ${{ matrix.target }} || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: |
+            fuzz/campaign/${{ matrix.target }}/
+            fuzz/corpus/${{ matrix.target }}/
+            fuzz/triage/
+            fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  report:
+    name: combined report
+    needs: fuzz
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # pushes the merged corpus and the report to fuzz-corpus
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fuzz-*
+          path: artifacts
+
+      - name: Combine per-target runs into one report
+        run: |
+          mkdir -p combined fuzz/corpus fuzz/triage
+          cat artifacts/fuzz-*/campaign/*/runs.jsonl > combined/runs.jsonl 2>/dev/null || true
+          python3 - <<'PY'
+          import glob, json
+          metas = [json.load(open(p)) for p in glob.glob("artifacts/fuzz-*/campaign/*/meta.json")]
+          meta = dict(metas[0]) if metas else {"started": "", "hours": 0, "jobs": 0, "slice_min": 0,
+                                               "commit": "", "host": "", "cores": 0, "rustc": ""}
+          meta["targets"] = ",".join(m["targets"] for m in metas)
+          meta["host"] += f" (x{len(metas)} parallel runners)"
+          json.dump(meta, open("combined/meta.json", "w"))
+          cov = {}
+          for p in glob.glob("artifacts/fuzz-*/campaign/*/coverage-summary.json"):
+              cov.update(json.load(open(p)))
+          if cov:
+              json.dump(cov, open("combined/coverage-summary.json", "w"))
+          index = {}
+          for p in glob.glob("artifacts/fuzz-*/triage/INDEX.json"):
+              index.update(json.load(open(p)))
+          json.dump(index, open("fuzz/triage/INDEX.json", "w"), indent=2)
+          PY
+          date -u +'{"finished": "%FT%TZ"}' > combined/finished.json
+          python3 scripts/fuzz/report.py render --campaign combined --fuzz fuzz > combined/REPORT.md
+          cat combined/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist corpus and report to fuzz-corpus
+        # Only the scheduled run on the canonical repo writes: a fork's or a
+        # manual run's corpus is not the project's.
+        if: github.event_name == 'schedule' && github.repository == 'Neziahtech/streampay'
+        run: |
+          for d in artifacts/fuzz-*/corpus/*/; do t=$(basename "$d"); mkdir -p "fuzz/corpus/$t"; cp "$d"* "fuzz/corpus/$t/" 2>/dev/null || true; done
+          CAMPAIGN_REPORT=combined/REPORT.md scripts/fuzz/corpus-sync.sh push
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-campaign-report
+          path: |
+            combined/
+            fuzz/triage/

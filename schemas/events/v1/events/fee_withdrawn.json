@@ -1,0 +1,56 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/fee_withdrawn.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when the treasury governor withdraws accumulated protocol fees for one token. Keyed by `token` (treasury accounting is per token); `withdrawn_total` carries the cumulative withdrawn amount so event consumers can reconcile against `treasury_status` without reading state.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "governor": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "recipient": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "withdrawn_total": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    }
+  },
+  "required": [
+    "governor",
+    "recipient",
+    "amount",
+    "withdrawn_total"
+  ],
+  "title": "FeeWithdrawn",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "fee_withdrawn",
+    "fingerprint": "sha256:9ff2fcadb55242503df39977b4db5c00d64728bc970fb0b58db39422bb5a516d",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "token",
+        "type": "Address"
+      }
+    ]
+  }
+}

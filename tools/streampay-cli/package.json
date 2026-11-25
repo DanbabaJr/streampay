@@ -1,0 +1,26 @@
+{
+  "name": "@streampay/cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless StreamPay Soroban CLI",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "streampay": "./bin/streampay.mjs"
+  },
+  "scripts": {
+    "streampay": "node --experimental-strip-types src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "ajv": "^8.17.1",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,115 @@
+name: "Wasm Function-Level Binary Diff"
+description: >
+  Measures per-function byte sizes of base and head WebAssembly (Wasm) contract
+  binaries using wasm-report.mjs, normalizes offset and symbol churn, and reports
+  function-level additions, removals, growth, and shrinkage.
+
+inputs:
+  base_wasm:
+    description: "Path to base branch .wasm binary"
+    required: true
+  head_wasm:
+    description: "Path to PR head branch .wasm binary"
+    required: true
+  output_dir:
+    description: "Directory where artifacts and reports are saved"
+    required: false
+    default: "artifacts"
+  top:
+    description: "Number of top movers to include in the summary table"
+    required: false
+    default: "15"
+  max_delta:
+    description: "Maximum allowable total byte growth before failing (default: 1024)"
+    required: false
+    default: "1024"
+
+outputs:
+  report_json:
+    description: "Path to generated JSON diff report"
+    value: ${{ steps.run-diff.outputs.report_json }}
+  report_markdown:
+    description: "Path to generated Markdown report"
+    value: ${{ steps.run-diff.outputs.report_markdown }}
+  total_delta:
+    description: "Total size delta in bytes"
+    value: ${{ steps.run-diff.outputs.total_delta }}
+  base_total_size:
+    description: "Base Wasm size in bytes"
+    value: ${{ steps.run-diff.outputs.base_total_size }}
+  head_total_size:
+    description: "Head Wasm size in bytes"
+    value: ${{ steps.run-diff.outputs.head_total_size }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Size Reports with wasm-report.mjs
+      shell: bash
+      run: |
+        mkdir -p "${{ inputs.output_dir }}"
+        base_json="${{ inputs.output_dir }}/base_report.json"
+        head_json="${{ inputs.output_dir }}/head_report.json"
+
+        # Locate wasm-report.mjs
+        if [ -f "$GITHUB_ACTION_PATH/../../scripts/wasm-report.mjs" ]; then
+          report_script="$GITHUB_ACTION_PATH/../../scripts/wasm-report.mjs"
+        elif [ -f "scripts/wasm-report.mjs" ]; then
+          report_script="scripts/wasm-report.mjs"
+        elif [ -f "head-repo/scripts/wasm-report.mjs" ]; then
+          report_script="head-repo/scripts/wasm-report.mjs"
+        else
+          echo "Error: scripts/wasm-report.mjs not found" >&2
+          exit 1
+        fi
+
+        node "$report_script" "${{ inputs.base_wasm }}" --json > "$base_json"
+        node "$report_script" "${{ inputs.head_wasm }}" --json > "$head_json"
+
+    - name: Run Function-Level Diff and Normalization
+      id: run-diff
+      shell: bash
+      run: |
+        out_json="${{ inputs.output_dir }}/wasm_diff.json"
+        out_md="${{ inputs.output_dir }}/wasm_diff_report.md"
+        base_json="${{ inputs.output_dir }}/base_report.json"
+        head_json="${{ inputs.output_dir }}/head_report.json"
+
+        args=(
+          --base "${{ inputs.base_wasm }}"
+          --head "${{ inputs.head_wasm }}"
+          --output-json "$out_json"
+          --output-markdown "$out_md"
+          --top "${{ inputs.top }}"
+          --max-delta "${{ inputs.max_delta }}"
+        )
+
+        [ -f "$base_json" ] && args+=(--base-json "$base_json")
+        [ -f "$head_json" ] && args+=(--head-json "$head_json")
+
+        # Resolve script path (local action or repo root)
+        if [ -f "$GITHUB_ACTION_PATH/../../scripts/wasm_diff.py" ]; then
+          script="$GITHUB_ACTION_PATH/../../scripts/wasm_diff.py"
+        elif [ -f ".github/scripts/wasm_diff.py" ]; then
+          script=".github/scripts/wasm_diff.py"
+        elif [ -f "head-repo/.github/scripts/wasm_diff.py" ]; then
+          script="head-repo/.github/scripts/wasm_diff.py"
+        else
+          echo "Error: wasm_diff.py not found" >&2
+          exit 1
+        fi
+
+        python3 "$script" "${args[@]}"
+
+        # Export outputs
+        echo "report_json=$out_json" >> "$GITHUB_OUTPUT"
+        echo "report_markdown=$out_md" >> "$GITHUB_OUTPUT"
+
+        if [ -f "$out_json" ]; then
+          total_delta=$(python3 -c "import json; data=json.load(open('$out_json')); print(data.get('summary', {}).get('total_delta', 0))")
+          base_total=$(python3 -c "import json; data=json.load(open('$out_json')); print(data.get('summary', {}).get('base_total_size', 0))")
+          head_total=$(python3 -c "import json; data=json.load(open('$out_json')); print(data.get('summary', {}).get('head_total_size', 0))")
+          echo "total_delta=$total_delta" >> "$GITHUB_OUTPUT"
+          echo "base_total_size=$base_total" >> "$GITHUB_OUTPUT"
+          echo "head_total_size=$head_total" >> "$GITHUB_OUTPUT"
+        fi

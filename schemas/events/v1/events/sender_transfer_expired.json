@@ -1,0 +1,52 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sender_transfer_expired.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a proposal that aged out of its acceptance window is reclaimed, freeing its storage. The role never moved.",
+  "properties": {
+    "new_sender": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "nonce": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "sender_from": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "sender_from",
+    "new_sender",
+    "nonce"
+  ],
+  "title": "SenderTransferExpired",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sender_transfer_expired",
+    "fingerprint": "sha256:52f1ec5001642966297a3a1d96e94c2a155edfeccf6622164a0834724863ba60",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

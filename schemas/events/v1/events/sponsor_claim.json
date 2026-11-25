@@ -1,0 +1,69 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/sponsor_claim.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a claim is sponsored and paid out: the operator relayed the beneficiary's withdrawal and the sponsor's budget absorbed the gas. The payout still flows from the stream, exactly as in an unsponsored withdraw.",
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "x-soroban-type": "i128"
+    },
+    "beneficiary": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "nonce": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    }
+  },
+  "required": [
+    "beneficiary",
+    "amount",
+    "nonce"
+  ],
+  "title": "SponsorClaim",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "sponsor_claim",
+    "fingerprint": "sha256:0fcc98031e4670bce6e2722764f5033590803a9c84681e2f7dccf74f8457c864",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "description": "Stellar account or contract address (StrKey).",
+          "type": "string",
+          "x-soroban-type": "Address"
+        },
+        {
+          "description": "Soroban symbol (a short upper-/lower-case tag, not free text).",
+          "type": "string",
+          "x-soroban-type": "Symbol"
+        },
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "sponsor",
+        "type": "Address"
+      },
+      {
+        "name": "kind",
+        "type": "Symbol"
+      },
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

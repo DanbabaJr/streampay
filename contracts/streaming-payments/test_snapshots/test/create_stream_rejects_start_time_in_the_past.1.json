@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 6,
     "nonce": 0,
     "mux_id": 0
   },
@@ -61,7 +61,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 },
                 {
                   "i128": "100000000000"
@@ -79,7 +79,7 @@
     []
   ],
   "ledger": {
-    "protocol_version": 27,
+    "protocol_version": 29,
     "sequence_number": 0,
     "timestamp": 86400,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -175,22 +175,35 @@
           "data": {
             "contract_data": {
               "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
               "key": "ledger_key_contract_instance",
               "durability": "persistent",
               "val": {
                 "contract_instance": {
                   "executable": {
-                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "wasm": "95616f137b71f2524c5c1a9911d7c51abf81930f93f7a6cae2fa8967c03d14fb"
                   },
-                  "storage": null
+                  "storage": [
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Governor"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 500000
       },
       {
         "entry": {
@@ -219,7 +232,7 @@
                           "symbol": "spender"
                         },
                         "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                         }
                       }
                     ]
@@ -414,13 +427,13 @@
           "data": {
             "contract_code": {
               "ext": "v0",
-              "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-              "code": ""
+              "hash": "95616f137b71f2524c5c1a9911d7c51abf81930f93f7a6cae2fa8967c03d14fb",
+              "code": "746573745f636f6e74726163745f666f725f636f6e74726163745f69645f434141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414d445234"
             }
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 500000
       }
     ]
   },

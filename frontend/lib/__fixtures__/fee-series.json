@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "source": "soroban-testnet.stellar.org getFeeStats",
+    "recordedAt": "2026-10-12T09:00:00Z",
+    "cadenceMs": 30000,
+    "note": "Recorded Soroban inclusion-fee p50 series, in stroops. The scheduler only ever compares the policy-selected percentile, so the fixture records that one series per scenario; the loader reconstructs a nominal distribution around each level (see fee-series.ts). Cadence is 30s rather than the observer's per-ledger ~6s to keep the recording readable — the decision logic is cadence-independent.",
+    "percentile": "p50"
+  },
+  "baselineClassic": {
+    "min": 100,
+    "mode": 100,
+    "max": 133,
+    "p10": 100,
+    "p20": 100,
+    "p30": 100,
+    "p40": 100,
+    "p50": 100,
+    "p60": 100,
+    "p70": 100,
+    "p80": 100,
+    "p90": 100,
+    "p95": 100,
+    "p99": 133
+  },
+  "series": [
+    {
+      "name": "lull",
+      "note": "A busy opening that calms down: the fee drops under a 150-stroop budget a few minutes in, so the scheduler submits at the threshold.",
+      "startedAtMs": 1790000000000,
+      "sorobanP50": [200, 190, 180, 210, 175, 160, 155, 165, 148, 140, 130, 125, 120, 115]
+    },
+    {
+      "name": "spike",
+      "note": "Sustained congestion: the fee never reaches the budget. The held signature lapses at 30 min (forcing a re-sign), and the deadline fallback submits at the 45-minute mark.",
+      "startedAtMs": 1790000000000,
+      "sorobanP50": [
+        900, 820, 760, 700, 640, 600, 560, 520, 480, 440, 420, 400, 380, 360, 340,
+        320, 300, 280, 260, 900, 820, 760, 700, 640, 600, 560, 520, 480, 440, 420,
+        400, 380, 360, 340, 320, 300, 280, 260, 900, 820, 760, 700, 640, 600, 560,
+        520, 480, 440, 420, 400, 380, 360, 340, 320, 300, 280, 260, 900, 820, 760,
+        700, 640, 600, 560, 520, 480, 440, 420, 400, 380, 360, 340, 320, 300, 280,
+        260, 900, 820, 760, 700, 640, 600, 560, 520, 480, 440, 420, 400, 380, 360,
+        340, 320, 300, 280, 260
+      ]
+    }
+  ]
+}

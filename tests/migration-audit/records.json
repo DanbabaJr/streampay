@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN",
+  "writtenVersion": 2,
+  "capturedFrom": "a deployment that predates record versioning, walked with scripts/migrate_audit.sh --owner <sender> --owner <recipient>",
+  "records": [
+    {
+      "streamId": "1",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "id", "value": { "kind": "u64", "value": "1" } },
+          { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+          { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+          { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+          { "key": "deposit", "value": { "kind": "i128", "value": "1000000" } },
+          { "key": "withdrawn", "value": { "kind": "i128", "value": "250000" } },
+          { "key": "start_time", "value": { "kind": "u64", "value": "1760000000" } },
+          { "key": "end_time", "value": { "kind": "u64", "value": "1760600000" } },
+          { "key": "cancelable", "value": { "kind": "bool", "value": true } },
+          { "key": "status", "value": { "kind": "symbol", "value": "Active" } },
+          { "key": "use_oracle", "value": { "kind": "bool", "value": false } }
+        ]
+      }
+    },
+    {
+      "streamId": "2",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "version", "value": { "kind": "u32", "value": "2" } },
+          {
+            "key": "stream",
+            "value": {
+              "kind": "map",
+              "entries": [
+                { "key": "id", "value": { "kind": "u64", "value": "2" } },
+                { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+                { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+                { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+                { "key": "deposit", "value": { "kind": "i128", "value": "5000000" } },
+                { "key": "withdrawn", "value": { "kind": "i128", "value": "0" } },
+                { "key": "start_time", "value": { "kind": "u64", "value": "1760000000" } },
+                { "key": "end_time", "value": { "kind": "u64", "value": "1762600000" } },
+                { "key": "cancelable", "value": { "kind": "bool", "value": false } },
+                { "key": "status", "value": { "kind": "symbol", "value": "Active" } },
+                { "key": "use_oracle", "value": { "kind": "bool", "value": false } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "streamId": "9",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "id", "value": { "kind": "u64", "value": "9" } },
+          { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+          { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+          { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+          { "key": "deposit", "value": { "kind": "i128", "value": "250000" } },
+          { "key": "withdrawn", "value": { "kind": "i128", "value": "250000" } },
+          { "key": "start_time", "value": { "kind": "u64", "value": "1750000000" } },
+          { "key": "end_time", "value": { "kind": "u64", "value": "1750300000" } },
+          { "key": "cancelable", "value": { "kind": "bool", "value": true } },
+          { "key": "status", "value": { "kind": "symbol", "value": "Completed" } },
+          { "key": "use_oracle", "value": { "kind": "bool", "value": false } }
+        ]
+      }
+    },
+    {
+      "streamId": "10",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "id", "value": { "kind": "u64", "value": "10" } },
+          { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+          { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+          { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+          { "key": "deposit", "value": { "kind": "i128", "value": "750000" } },
+          { "key": "withdrawn", "value": { "kind": "i128", "value": "0" } },
+          { "key": "start_time", "value": { "kind": "u64", "value": "1761000000" } },
+          { "key": "end_time", "value": { "kind": "u64", "value": "1761600000" } },
+          { "key": "cancelable", "value": { "kind": "bool", "value": true } },
+          { "key": "status", "value": { "kind": "symbol", "value": "Cancelled" } },
+          { "key": "use_oracle", "value": { "kind": "bool", "value": false } }
+        ]
+      }
+    },
+    {
+      "streamId": "11",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "version", "value": { "kind": "u32", "value": "2" } },
+          {
+            "key": "stream",
+            "value": {
+              "kind": "map",
+              "entries": [
+                { "key": "id", "value": { "kind": "u64", "value": "11" } },
+                { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+                { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+                { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+                { "key": "deposit", "value": { "kind": "i128", "value": "100000" } },
+                { "key": "withdrawn", "value": { "kind": "i128", "value": "100000" } },
+                { "key": "start_time", "value": { "kind": "u64", "value": "1740000000" } },
+                { "key": "end_time", "value": { "kind": "u64", "value": "1740086400" } },
+                { "key": "cancelable", "value": { "kind": "bool", "value": false } },
+                { "key": "status", "value": { "kind": "symbol", "value": "Completed" } },
+                { "key": "use_oracle", "value": { "kind": "bool", "value": true } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "streamId": "23",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "version", "value": { "kind": "u32", "value": "3" } },
+          {
+            "key": "stream",
+            "value": {
+              "kind": "map",
+              "entries": [
+                { "key": "id", "value": { "kind": "u64", "value": "23" } },
+                { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+                { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+                { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+                { "key": "deposit", "value": { "kind": "i128", "value": "4000000" } },
+                { "key": "withdrawn", "value": { "kind": "i128", "value": "0" } },
+                { "key": "start_time", "value": { "kind": "u64", "value": "1770000000" } },
+                { "key": "end_time", "value": { "kind": "u64", "value": "1770600000" } },
+                { "key": "cancelable", "value": { "kind": "bool", "value": true } },
+                { "key": "status", "value": { "kind": "symbol", "value": "Active" } },
+                { "key": "use_oracle", "value": { "kind": "bool", "value": false } },
+                { "key": "refund_to", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "streamId": "24",
+      "shape": {
+        "kind": "map",
+        "entries": [
+          { "key": "id", "value": { "kind": "u64", "value": "24" } },
+          { "key": "sender", "value": { "kind": "address", "value": "GDUD7WFKZW4DQ633BPL3NDC37H5Q2W6B4RKGKAAAAAAAAC3PFDVZQXG6" } },
+          { "key": "recipient", "value": { "kind": "address", "value": "GAYN5LJ6B4H3QFJ5RZ6D4E4R6ZQYQ2W6B4RKGKAAAAAAAAC3PFDVYDQN" } },
+          { "key": "token", "value": { "kind": "address", "value": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN" } },
+          { "key": "deposit", "value": { "kind": "i128", "value": "300000" } },
+          { "key": "withdrawn", "value": { "kind": "i128", "value": "0" } },
+          { "key": "cancelable", "value": { "kind": "bool", "value": true } },
+          { "key": "status", "value": { "kind": "symbol", "value": "Active" } },
+          { "key": "use_oracle", "value": { "kind": "bool", "value": false } }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+name: Release pipeline rehearsal
+
+# Full dress rehearsal of the promotion pipeline: sandbox gates run for real,
+# the testnet and mainnet-canary deploys are mocked (no chain credentials, no
+# secrets). It exercises every gate and every script the governed pipeline uses,
+# so a change to the pipeline is verified before it is used for a real release.
+#
+# On a pull request that touches the pipeline the same rehearsal runs as a
+# path-gated step of the `contract` job in `ci.yml` (.github/ci-gates.json:
+# `rehearsal.yml:rehearsal`, flag `rehearsal`). This dispatchable copy is the
+# standalone run: before a real release, or whenever someone wants the whole
+# promotion path proven on demand rather than only for changed files.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rehearsal:
+    name: Dress rehearsal (testnet -> mocked mainnet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rehearsal-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-rehearsal-
+
+      - name: Install stellar-cli
+        run: bash scripts/install_stellar_cli.sh
+
+      - name: Install cargo-fuzz (for the soak gate)
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: Run the rehearsal
+        run: scripts/promote_rehearsal.sh
+
+      - name: Upload rehearsal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: rehearsal-evidence
+          path: evidence/rehearsal/

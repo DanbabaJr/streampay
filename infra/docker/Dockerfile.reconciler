@@ -1,0 +1,20 @@
+# docker build -f infra/docker/Dockerfile.reconciler -t streampay/reconciler:local .   (build context = repo root)
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY reconciler/package.json reconciler/package-lock.json reconciler/tsconfig.json ./
+RUN npm ci
+COPY reconciler/src ./src
+# entries are .js files holding TS syntax, so allowJs is required; tsc still emits runnable dist/index.js
+RUN npm run build -- --allowJs; test -f dist/index.js
+
+FROM node:22-alpine AS release
+ENV NODE_ENV=production
+WORKDIR /app
+COPY reconciler/package.json reconciler/package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+USER node
+# no EXPOSE/HEALTHCHECK: poll daemon with no HTTP listener (src/http.js is an outbound client)
+# orchestrator may override with a full argv
+ENTRYPOINT ["node"]
+CMD ["dist/index.js"]

@@ -1,0 +1,42 @@
+{
+  "name": "streampay",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "stable",
+      "profile": "default",
+      "targets": "wasm32v1-none",
+      "components": "rustfmt,clippy,rust-src"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "StreamPay frontend", "onAutoForward": "openBrowser" }
+  },
+
+  "remoteEnv": {
+    "STELLAR_CLI_VERSION": "28.1.0"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "bradlc.vscode-tailwindcss",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "rust-analyzer.cargo.features": "all"
+      }
+    }
+  }
+}

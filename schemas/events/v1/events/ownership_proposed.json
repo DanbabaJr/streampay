@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "OwnershipRole": {
+      "description": "Contract enum `OwnershipRole` referenced by event fields, wire-encoded as its variant symbol.",
+      "enum": [
+        "Recipient",
+        "Sender"
+      ],
+      "title": "OwnershipRole",
+      "type": "string"
+    }
+  },
+  "$id": "https://streampay.dev/schemas/events/v1/events/ownership_proposed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when a current sender or recipient proposes handing their role to a new address. The handoff takes effect only when the target accepts.",
+  "properties": {
+    "current_owner": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "expires_at": {
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u64"
+    },
+    "new_owner": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    },
+    "role": {
+      "$ref": "#/$defs/OwnershipRole",
+      "x-soroban-type": "OwnershipRole"
+    }
+  },
+  "required": [
+    "current_owner",
+    "new_owner",
+    "role",
+    "expires_at"
+  ],
+  "title": "OwnershipProposed",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "ownership_proposed",
+    "fingerprint": "sha256:77f15471e0257555e2f2b21551588b94a2e0170c9bfa3c540ab637c1ca3e01c4",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}
