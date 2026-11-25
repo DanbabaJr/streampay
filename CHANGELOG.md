@@ -9,6 +9,11 @@ interface: they are only ever appended to, never renumbered or reused.
 
 ## [Unreleased]
 
+### Added
+- Frontend: stream comparison workbench at `/compare`. Overlays accrual curves,
+  exhaustion forecast and fee estimates for up to 5 streams or hypothetical
+  parameter sets, simulated client-side with a shareable parameter URL.
+
 ## [0.3.0] - 2026-10-04
 
 ### Changed
