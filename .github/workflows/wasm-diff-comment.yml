@@ -2,13 +2,17 @@ name: Wasm Diff PR Comment
 
 on:
   workflow_run:
-    workflows: ["Wasm Function Diff"]
+    workflows: ["CI"]
     types:
       - completed
 
+concurrency:
+  group: wasm-diff-pr-comment
+  cancel-in-progress: false
+
 permissions:
   contents: read
-  pull-requests: write
+  actions: read
   issues: write
 
 jobs:
@@ -17,6 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.workflow_run.event == 'pull_request'
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test privileged comment-target validation
+        run: node --test .github/scripts/wasm_diff_comment.test.js
+
       # A run that died before its upload step has no artifact to fetch, and
       # download-artifact treats that as a failure. The comment is a convenience
       # on top of the diff job's own verdict, so a missing artifact skips the
@@ -35,58 +46,5 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('fs');
-
-            // 1. Identify PR number
-            let prNumber = null;
-            const prNumberFile = 'artifacts/pr_number';
-            if (fs.existsSync(prNumberFile)) {
-              const content = fs.readFileSync(prNumberFile, 'utf8').trim();
-              if (content && !isNaN(parseInt(content, 10))) {
-                prNumber = parseInt(content, 10);
-              }
-            }
-
-            if (!prNumber && context.payload.workflow_run.pull_requests && context.payload.workflow_run.pull_requests.length > 0) {
-              prNumber = context.payload.workflow_run.pull_requests[0].number;
-            }
-
-            if (!prNumber) {
-              core.warning('No PR number found for workflow run. Skipping PR comment.');
-              return;
-            }
-
-            // 2. Read diff report
-            const reportPath = 'artifacts/wasm_diff_report.md';
-            if (!fs.existsSync(reportPath)) {
-              core.warning(`Report file ${reportPath} not found`);
-              return;
-            }
-            const reportBody = fs.readFileSync(reportPath, 'utf8');
-            const botMarker = '<!-- wasm-diff-report -->';
-
-            // 3. Post or update comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-            });
-
-            const existingComment = comments.find(c => c.body && c.body.includes(botMarker));
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body: reportBody,
-              });
-              console.log(`Updated existing PR comment ID: ${existingComment.id} on PR #${prNumber}`);
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: reportBody,
-              });
-              console.log(`Created new PR comment on PR #${prNumber}`);
-            }
+            const { postWasmDiffComment } = require('./.github/scripts/wasm_diff_comment.js');
+            await postWasmDiffComment({ github, context, core });

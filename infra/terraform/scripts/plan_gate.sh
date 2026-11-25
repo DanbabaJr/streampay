@@ -10,14 +10,16 @@
 #      kubernetes — produce a clean `terraform plan` from the fixture at
 #      stacks/<stack>/fixtures/ci-plan.tfvars.json, with `-input=false` so a
 #      missing value is an error instead of a prompt.
-#   4. Nothing is applied and no remote backend is used. `terraform plan`
-#      against the implicit local backend reads no state file and writes none;
-#      the gate also refuses a tree that declares a remote backend.
+#   4. Nothing is applied and no remote backend is used. The gate works from a
+#      temporary copy that excludes local state and provider caches, so an apply
+#      earlier in the same job cannot change what this plan reads. It also
+#      refuses a tree that declares a remote backend.
 #
-# `--self-test` runs step 3 again with stacks/minimal-single-vm/fixtures/
+# `--self-test` proves that state isolation with a stub Terraform binary, then
+# runs step 3 again with stacks/minimal-single-vm/fixtures/
 # ci-plan-invalid.tfvars.json and requires the plan to fail on the variable
 # validation blocks. A gate that cannot fail is green forever, so the self-test
-# asserts both the failure and the two specific validation messages.
+# asserts both the failure and the specific validation messages.
 #
 # stacks/aws-ec2 is validate-only here on purpose: its plan reads
 # aws_caller_identity, aws_availability_zones, aws_subnet and aws_ami, which are
@@ -34,8 +36,9 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-tf_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+source_tf_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+tf_root="$source_tf_root"
 
 mode="gate"
 case "${1:-}" in
@@ -80,6 +83,32 @@ rm -f /tmp/plan_gate_backends.$$
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT INT TERM
+
+# Preserve the repository-relative module and observability paths while leaving
+# every state file and initialized provider directory behind.
+plan_repo="$work_dir/repo"
+mkdir -p "$plan_repo/infra"
+copy_tree() {
+  source=$1
+  target=$2
+  mkdir -p "$target"
+  tar -C "$source" \
+    --exclude='.terraform' \
+    --exclude='*.tfstate' \
+    --exclude='*.tfstate.*' \
+    --exclude='build' \
+    --exclude='node_modules' \
+    -cf "$work_dir/input.tar" .
+  tar -C "$target" -xf "$work_dir/input.tar"
+}
+copy_tree "$source_tf_root" "$plan_repo/infra/terraform"
+copy_tree "$repo_root/infra/docker" "$plan_repo/infra/docker"
+copy_tree "$repo_root/infra/observability" "$plan_repo/infra/observability"
+tf_root="$plan_repo/infra/terraform"
+
+if find "$tf_root" \( -name '.terraform' -o -name '*.tfstate' -o -name '*.tfstate.*' \) -print | grep -q .; then
+  fail "the isolated Terraform copy still contains local state or provider data"
+fi
 
 # --- Step 1: formatting --------------------------------------------------------
 if [ "$mode" = "gate" ]; then
@@ -135,6 +164,9 @@ if [ "$mode" = "gate" ]; then
 fi
 
 # --- Step 4: self-test ---------------------------------------------------------
+say "self-test: local state and provider caches must stay isolated"
+sh "$script_dir/plan_gate_isolation_test.sh" "$script_dir/plan_gate.sh"
+
 say "self-test: the invalid fixture must be rejected by variable validation"
 if plan_with minimal-single-vm \
     "$tf_root/stacks/minimal-single-vm/fixtures/ci-plan-invalid.tfvars.json" \

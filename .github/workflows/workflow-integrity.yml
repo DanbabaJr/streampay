@@ -11,12 +11,20 @@ name: Workflow integrity
 # gate inventory in .github/ci-gates.json against the merge base, refuses text
 # files that git would treat as binary, and scans every tracked .rs/.ts source
 # file for the structural damage a cleanly-merged conflict leaves behind
-# (duplicate definitions, an unbalanced delimiter, an unterminated token). It
-# runs on every pull request, so the failure is attached to the PR that caused it
-# instead of to main at 03:00.
+# (duplicate definitions, an unbalanced delimiter, an unterminated token).
+# `prcap` and `prmoves` add the two contracts that came out of the six-check
+# consolidation: `.github/workflows/ci.yml` is the only PR workflow with exactly
+# its six declared jobs, and every specialist step folded into it still does
+# what the source step did.
+#
+# On a pull request these same checks run as the `docs` job of `ci.yml`
+# (.github/ci-gates.json: `workflow-integrity.yml:integrity` -> `ci.yml:docs`),
+# so the failure is attached to the PR that caused it instead of to main at
+# 03:00. This workflow is the post-merge half: it runs on every push to main and
+# on dispatch, which is what catches damage that reached main from a branch that
+# never re-ran CI.
 
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
@@ -39,11 +47,13 @@ jobs:
           # has to be here to resolve it.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
-      - uses: actions/setup-python@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -58,8 +68,11 @@ jobs:
       - name: "Self-test: the source scanner can still fail"
         run: node --test scripts/check_merge_integrity.test.mjs
 
+      - name: Changed-path detector tests
+        run: python3 -m unittest discover -s tests -p ci_changed_paths_test.py
+
       - name: Workflows parse and every step is well-formed
-        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps,paths
+        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps,paths,prcap,prmoves
 
       - name: Resolve the comparison base
         id: base
@@ -83,9 +96,9 @@ jobs:
         run: |
           set -eu
           if [ -n "${BASE:-}" ]; then
-            python3 scripts/check_ci_integrity.py --checks=gates --base "${BASE}"
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves --base "${BASE}"
           else
-            python3 scripts/check_ci_integrity.py --checks=gates
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves
           fi
 
       - name: No text file is committed as UTF-16 or with a BOM
@@ -95,9 +108,9 @@ jobs:
           set -eu
           # On a pull request only what the PR touched; on main, the whole tree.
           if [ -n "${BASE:-}" ]; then
-            python3 scripts/check_ci_integrity.py --checks=encoding --base "${BASE}"
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves --base "${BASE}"
           else
-            python3 scripts/check_ci_integrity.py --checks=encoding
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves
           fi
 
       # The compiler catches these too, but minutes later and buried under the
@@ -156,6 +169,14 @@ jobs:
             being retired, move its name into `retired` in
             `.github/ci-gates.json` with a reason, in this same PR, so the
             deletion is visible in the diff instead of quiet.
+          - `[prcap]` Another workflow declares a PR trigger, `ci.yml` gains a
+            seventh job, a matrix, a reusable-workflow call or write permission.
+            GitHub counts one check per job, so the six-check review surface is
+            a contract rather than a naming convention.
+          - `[prmoves]` A specialist step folded into `ci.yml` lost its payload,
+            environment, working directory, original condition, resilience guard
+            or changed-path guard. The inventory in `.github/ci-gates.json` must
+            keep pointing at the job that really runs it.
           - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
             file is stored as UTF-16, carries a UTF-8 BOM, or contains a C0
             control byte (0x00-0x1F other than tab/LF, or a CR outside CRLF).
@@ -176,6 +197,7 @@ jobs:
               pip install pyyaml==6.0.2
               python3 scripts/check_ci_integrity.py
               python3 scripts/check_ci_integrity.py --self-test
+              python3 -m unittest discover -s tests -p ci_changed_paths_test.py
               node --test scripts/check_merge_integrity.test.mjs
               node scripts/check_merge_integrity.mjs
 

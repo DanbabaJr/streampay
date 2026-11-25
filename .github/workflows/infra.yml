@@ -1,33 +1,30 @@
 name: Infra
 
-# Issue #105: a pull request that touches the IaC has to prove the minimal path
+# Issue #105: a change that touches the IaC has to prove the minimal path
 # renders, that re-applying produces no drift, and that nothing that looks like a
 # secret value landed in the rendered output. None of that needs cloud
 # credentials, so it never needs a maintainer to click anything.
 #
-# The path filter is what makes that affordable: every step here reads files
-# under infra/, digests/ or the indexer image's own inputs, so a PR that changes
-# none of them cannot change the verdict. The check is absent from such a pull
-# request rather than green on it — which is the honest result, since a
+# On a pull request these checks run as path-gated steps of the `data-plane` job
+# in `ci.yml` (.github/ci-gates.json: `infra.yml:terraform` and
+# `infra.yml:terraform-plan-gate` -> flag `infra`, `infra.yml:indexer-image` ->
+# flag `indexer_image`), and this workflow is the post-merge half that runs on
+# every push to main.
+#
+# Path awareness is what makes that affordable: every step here reads files
+# under infra/, digests/ or the indexer image's own inputs, so a change that
+# touches none of them cannot move the verdict. The check is skipped for such a
+# pull request rather than green on it — which is the honest result, since an
 # always-running job that can only pass for the wrong reason is the noise this
 # repo keeps having to explain.
 #
-# perf/baselines/docker.json is in the filter because that is the file the size
-# budget reads its threshold from: a PR that only relaxes the budget has to be
-# the one that proves the relaxed number still holds.
+# perf/baselines/docker.json is one of the inputs because that is the file the
+# size budget reads its threshold from: a change that only relaxes the budget has
+# to be the one that proves the relaxed number still holds.
 
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - "infra/**"
-      - "digests/**"
-      - "indexer/**"
-      - "perf/baselines/docker.json"
-      - "perf/harness/check_image_budget.mjs"
-      - "perf/test/image_budget.test.mjs"
-      - ".github/workflows/infra.yml"
   workflow_dispatch:
 
 concurrency:
@@ -55,7 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v4
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           # The drift gate reads `terraform plan -detailed-exitcode`. The wrapper
@@ -199,8 +197,9 @@ jobs:
       # Same pin as the terraform job above, and the same archive digest as
       # digests/terraform-1.9.8.sha256. plan_gate.sh refuses to run under a
       # different version, so a setup-action drift cannot silently change what
-      # \"plan\" means for these stacks.
-      - uses: hashicorp/setup-terraform@v4
+      # "plan" means for these stacks.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
@@ -219,7 +218,10 @@ jobs:
   # Indexer image (issue #543): multi-arch build + size budget.
   #
   # These jobs only run for changes that can move the image: the Dockerfile,
-  # the indexer's dependency manifests, the budget/baseline and this workflow.
+  # the indexer sources and manifests, .dockerignore, the budget/baseline and
+  # this workflow. On a pull request the same gate is the path-gated
+  # `indexer_image` step of the `data-plane` job in `ci.yml`; this detector is
+  # what keeps a merge to main from rebuilding the image on every push.
   # --------------------------------------------------------------------------
   docker-changes:
     name: Infra — detect container changes
@@ -229,7 +231,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The diff needs the PR base commit, not a depth-1 checkout.
+          # The diff needs the comparison base commit, not a depth-1 checkout.
           fetch-depth: 0
 
       - id: filter
@@ -240,7 +242,7 @@ jobs:
             exit 0
           fi
           base="${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "$base...HEAD" | grep -Eq '^(infra/docker/|indexer/package(-lock)?\.json$|perf/baselines/docker\.json$|perf/harness/check_image_budget\.mjs$|perf/test/image_budget\.test\.mjs$|\.github/workflows/infra\.yml$)'; then
+          if git diff --name-only "$base...HEAD" | grep -Eq '^(infra/docker/|indexer/|\.dockerignore$|perf/baselines/docker\.json$|perf/harness/check_image_budget\.mjs$|perf/test/image_budget\.test\.mjs$|\.github/workflows/infra\.yml$)'; then
             echo "indexer=true" >> "$GITHUB_OUTPUT"
           else
             echo "indexer=false" >> "$GITHUB_OUTPUT"
@@ -259,8 +261,10 @@ jobs:
 
       # QEMU supplies the arm64 instruction set on an amd64 runner; buildx is
       # the builder that can target more than one platform.
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Build linux/amd64 image
         run: |

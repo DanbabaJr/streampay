@@ -13,22 +13,16 @@ name: Release signing (Sigstore keyless)
 # only this job talks to Fulcio and Rekor. Nothing here reads a signing secret:
 # the certificate is minted from the run's workload identity and expires with it.
 #
-# The gate's self-tests run on every pull request that touches this chain, so a
-# verifier that stopped rejecting tampered artifacts or foreign identities goes
-# red on the change that broke it, not on the next release.
+# The gate's self-tests run on every pull request that touches this chain, as
+# the path-gated `release_signing` step of the `supply-chain` job in `ci.yml`
+# (.github/ci-gates.json: `release-sign.yml:self-test` -> `ci.yml:supply-chain`),
+# so a verifier that stopped rejecting tampered artifacts or foreign identities
+# goes red on the change that broke it, not on the next release.
 
 on:
   push:
     tags:
       - "v*"
-  pull_request:
-    paths:
-      - "scripts/sigstore_lib.sh"
-      - "scripts/sigstore_sign.sh"
-      - "scripts/verify_sigstore.sh"
-      - "tests/sigstore_verify_test.sh"
-      - "docs/SIGSTORE.md"
-      - ".github/workflows/release-sign.yml"
   workflow_dispatch:
     inputs:
       tag:

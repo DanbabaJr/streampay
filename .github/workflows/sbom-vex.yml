@@ -19,6 +19,11 @@ name: SBOM + VEX
 #
 # The gate's own self-tests run here too: tests/sbom_vex_test.py injects
 # advisories and drift and requires a block for each.
+#
+# On a pull request the gate is the path-gated `sbom` step of the `supply-chain`
+# job in `ci.yml` (.github/ci-gates.json: `sbom-vex.yml:gate`), and this
+# workflow is the post-merge and release halves — the push paths below keep a
+# merged dependency change audited even if the PR-side filter skipped it.
 
 on:
   push:
@@ -29,23 +34,10 @@ on:
       - "Cargo.lock"
       - "Cargo.toml"
       - "deny.toml"
+      - "frontend/package.json"
       - "frontend/package-lock.json"
-      - "indexer/package-lock.json"
-      - "sdks/**"
-      - "tools/streampay-cli/**"
-      - "infra/docker/**"
-      - "security/vex/**"
-      - "scripts/sbom_vex.py"
-      - "tests/sbom_vex_test.py"
-      - ".github/workflows/sbom-vex.yml"
-  pull_request:
-    paths:
-      - "contracts/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "deny.toml"
-      - "frontend/package-lock.json"
-      - "indexer/package-lock.json"
+      - "indexer/**"
+      - ".dockerignore"
       - "sdks/**"
       - "tools/streampay-cli/**"
       - "infra/docker/**"
@@ -73,11 +65,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
-      - uses: actions/setup-python@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

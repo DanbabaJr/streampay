@@ -4,14 +4,12 @@ name: Whitepaper claims
 # This fails when the contract moves under the paper, so a stale claim cannot
 # merge silently. It runs on contract changes too, not just doc changes:
 # a moved line is exactly how a claim goes stale.
+#
+# On a pull request the same audit is the path-gated `whitepaper` step of the
+# `docs` job in `ci.yml` (.github/ci-gates.json: `whitepaper-claims.yml:audit`).
+# This workflow is the post-merge half, on the push paths below.
 
 on:
-  pull_request:
-    paths:
-      - "docs/WHITEPAPER.md"
-      - "contracts/**"
-      - "scripts/check_whitepaper_claims.py"
-      - ".github/workflows/whitepaper-claims.yml"
   push:
     branches: [main]
     paths:
@@ -28,7 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python3 scripts/check_whitepaper_claims.py
+      - name: Check whitepaper claims against code
+        run: python3 scripts/check_whitepaper_claims.py
