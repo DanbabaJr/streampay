@@ -4,7 +4,10 @@ name: Attestation
 #
 #   1. tamper-audit — proves the verifier actually rejects tampering. Runs on
 #      every change to the chain, because a verifier that has never been shown a
-#      flipped byte is an untested control.
+#      flipped byte is an untested control. On a pull request it is the
+#      path-gated `attestation` step of the `supply-chain` job in `ci.yml`
+#      (.github/ci-gates.json: `attestation.yml:tamper-audit`); this workflow is
+#      the post-merge half.
 #   2. verify-release — nightly, re-verifies the attestation on the latest
 #      published release asset, so a release that was valid when published is
 #      still provable today (and a quietly rewritten asset stops being).
@@ -36,16 +39,6 @@ on:
         default: false
   push:
     branches: [main]
-    paths:
-      - "scripts/attest.sh"
-      - "scripts/verify_wasm.sh"
-      - "scripts/attestation_lib.sh"
-      - "scripts/attestation_keygen.sh"
-      - "scripts/reproducible_build.sh"
-      - "tests/attestation_tamper_audit.sh"
-      - "attestations/**"
-      - ".github/workflows/attestation.yml"
-  pull_request:
     paths:
       - "scripts/attest.sh"
       - "scripts/verify_wasm.sh"

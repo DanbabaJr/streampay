@@ -20,6 +20,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -85,9 +88,18 @@ jobs:
       # so the very next interface addition must be #441's split, mechanically.
       # Recorded in full in docs/WASM_SIZE.md ("Gate decision — #620").
       WASM_SIZE_BUDGET_KB: 127
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_changed_paths.py
 
       # Fast, dependency-free guard that runs before the toolchain is even
       # installed: StreamError codes are the on-chain wire contract, and the
@@ -365,14 +377,363 @@ jobs:
           [ -s "$wasm" ] || { echo "wasm missing or empty"; exit 1; }
           echo "OK: $(ls -sh "$wasm")"
 
+      # ------------------------------------------------------------------
+      # PR specialist gates. Restore tracked files before each block so a
+      # failed formatter or generator cannot contaminate the next gate;
+      # untracked build output and evidence are deliberately left in place.
+      # ------------------------------------------------------------------
+
+      - name: Restore tracked files before fuzz-gate:fuzz_gate
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.fuzz == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[fuzz-gate:fuzz_gate] Install nightly toolchain + cargo-fuzz"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.fuzz == 'true' }}
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: "[fuzz-gate:fuzz_gate] Build every fuzz target"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.fuzz == 'true' }}
+        working-directory: fuzz
+        run: cargo +nightly fuzz build
+
+      - name: "[fuzz-gate:fuzz_gate] Replay triaged regressions"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.fuzz == 'true' }}
+        run: |
+          shopt -s nullglob
+          replayed=0
+          for dir in fuzz/regressions/*/; do
+            target="$(basename "$dir")"
+            echo "== replaying $target ($(find "$dir" -type f | wc -l) seed(s))"
+            (cd fuzz && cargo +nightly fuzz run "$target" "regressions/$target" -- -runs=0)
+            replayed=$((replayed + 1))
+          done
+          if [ "$replayed" = 0 ]; then
+            echo "::error::fuzz/regressions/ has no target directories, so this gate replays nothing. A fixed crasher belongs here (docs/FUZZ_CAMPAIGN.md); if the removal was deliberate, replace this step with the reason instead of shipping a vacuous gate."
+            exit 1
+          fi
+
+      - name: Restore tracked files before wasm-diff:wasm-diff
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[wasm-diff:wasm-diff] Checkout Head (PR)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: head-repo
+
+      - name: "[wasm-diff:wasm-diff] Resolve Wasm Diff Base"
+        id: diff_base
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ -n "${PR_BASE_SHA:-}" ]; then
+            base="$(git -C head-repo merge-base "$PR_BASE_SHA" HEAD)"
+          else
+            base="$(git -C head-repo rev-parse --verify origin/main)"
+          fi
+          git -C head-repo cat-file -e "${base}^{commit}"
+          printf 'sha=%s\n' "$base" >> "$GITHUB_OUTPUT"
+          printf 'Wasm diff base: %s\n' "$base"
+
+      - name: "[wasm-diff:wasm-diff] Checkout Base Branch"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.diff_base.outputs.sha }}
+          path: base-repo
+
+      - name: "[wasm-diff:wasm-diff] Run Wasm Diff Unit Tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        run: |
+          python3 -m unittest discover -s head-repo/.github/scripts -p "test_*.py"
+
+      - name: "[wasm-diff:wasm-diff] Cache cargo"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-wasm-diff-${{ hashFiles('head-repo/Cargo.lock', 'base-repo/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-diff-
+
+      - name: "[wasm-diff:wasm-diff] Create artifacts directory"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        run: |
+          rm -rf artifacts
+          mkdir -p artifacts/base artifacts/head
+
+      - name: "[wasm-diff:wasm-diff] Build Base Wasm"
+        id: base
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        working-directory: base-repo
+        run: |
+          target_dir="$PWD/.ci-wasm-target"
+          rm -rf "$target_dir"
+          export CARGO_TARGET_DIR="$target_dir"
+          if command -v stellar >/dev/null 2>&1; then
+            (cd contracts/streaming-payments && stellar contract build) || true
+          else
+            SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo build --target wasm32v1-none --release -p streampay-contract || true
+          fi
+          built="$CARGO_TARGET_DIR/wasm32v1-none/release/streampay_contract.wasm"
+          if [ ! -f "$built" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the base branch produced no contract Wasm, so there is nothing to diff against. Fix the base; this PR is not blocked by it."
+            exit 0
+          fi
+          cp "$built" ../artifacts/base/streampay_contract.wasm
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          sha256sum ../artifacts/base/streampay_contract.wasm
+
+      - name: "[wasm-diff:wasm-diff] Build Head Wasm"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' }}
+        working-directory: head-repo
+        run: |
+          target_dir="$PWD/.ci-wasm-target"
+          rm -rf "$target_dir"
+          export CARGO_TARGET_DIR="$target_dir"
+          if command -v stellar >/dev/null 2>&1; then
+            (cd contracts/streaming-payments && stellar contract build)
+          else
+            SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo build --target wasm32v1-none --release -p streampay-contract
+          fi
+          cp "$CARGO_TARGET_DIR/wasm32v1-none/release/streampay_contract.wasm" ../artifacts/head/streampay_contract.wasm
+          sha256sum ../artifacts/head/streampay_contract.wasm
+
+      - name: "[wasm-diff:wasm-diff] Run Wasm Function Diff Action"
+        id: diff
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' && steps.base.outputs.ok == 'true' }}
+        uses: ./head-repo/.github/actions/wasm-diff
+        with:
+          base_wasm: artifacts/base/streampay_contract.wasm
+          head_wasm: artifacts/head/streampay_contract.wasm
+          output_dir: artifacts
+          max_delta: 40960
+
+      - name: "[wasm-diff:wasm-diff] Display Report in CI Summary"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' && always() }}
+        run: |
+          if [ -f artifacts/wasm_diff_report.md ]; then
+            cat artifacts/wasm_diff_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No function-level diff report (base wasm was not built)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: "[wasm-diff:wasm-diff] Enforce Wasm Size Budget"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' && steps.base.outputs.ok == 'true' }}
+        shell: bash
+        env:
+          TOTAL_DELTA: ${{ steps.diff.outputs.total_delta }}
+          MAX_DELTA: 40960
+        run: |
+          echo "Total Wasm byte delta: $TOTAL_DELTA B (budget: $MAX_DELTA B)"
+          if [ -n "$TOTAL_DELTA" ] && [ "$TOTAL_DELTA" -gt "$MAX_DELTA" ]; then
+            echo "::error::Wasm binary grew by $TOTAL_DELTA bytes, exceeding the allowed threshold of $MAX_DELTA bytes."
+            exit 1
+          fi
+
+      - name: "[wasm-diff:wasm-diff] Upload Artifacts"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.wasm_diff == 'true' && always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-diff-results
+          path: artifacts/
+
+      - name: Restore tracked files before rehearsal:rehearsal
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[rehearsal:rehearsal] Install Rust toolchain"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: "[rehearsal:rehearsal] Cache cargo"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rehearsal-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-rehearsal-
+
+      - name: "[rehearsal:rehearsal] Install stellar-cli"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        run: bash scripts/install_stellar_cli.sh
+
+      - name: "[rehearsal:rehearsal] Install cargo-fuzz (for the soak gate)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz
+
+      - name: "[rehearsal:rehearsal] Run the rehearsal"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' }}
+        run: scripts/promote_rehearsal.sh
+
+      - name: "[rehearsal:rehearsal] Upload rehearsal evidence"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rehearsal == 'true' && always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: rehearsal-evidence
+          path: evidence/rehearsal/
+
+      - name: Restore tracked files before sdk:spec
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sdk:spec] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[sdk:spec] Spec matches the contract surface"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: python3 sdks/generator/check_contract_surface.py
+
+      - name: "[sdk:spec] Spec, vector and catalog tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: python3 -m unittest discover -s sdks/generator -p "test_*.py" -v
+
+      - name: "[sdk:spec] Generated clients are up to date"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: python3 sdks/generator/generate.py --check
+
+      - name: Restore tracked files before sdk:conformance
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sdk:conformance] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[sdk:conformance] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: "[sdk:conformance] Install Rust toolchain"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: "[sdk:conformance] Orchestrator lifecycle tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: python3 -m unittest discover -s sdks/conformance -p "test_*.py" -v
+
+      - name: "[sdk:conformance] Build TypeScript client"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: npm ci && npm run build
+
+      - name: "[sdk:conformance] Build Rust decoder"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: cargo build --manifest-path sdks/rust/Cargo.toml --example conformance
+
+      - name: "[sdk:conformance] Rust vector tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: cargo test --manifest-path sdks/rust/Cargo.toml
+
+      - name: "[sdk:conformance] Python SDK tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        env:
+          PYTHONPATH: sdks/python
+        run: python3 -m unittest discover -s sdks/python/tests -p "test_*.py" -v
+
+      - name: "[sdk:conformance] Three clients decode every vector identically"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: python3 sdks/conformance/orchestrator.py --out sdks/conformance/out
+
+      - name: "[sdk:conformance] Upload failure artifacts"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-conformance
+          path: sdks/conformance/out
+          if-no-files-found: warn
+
+      - name: Restore tracked files before sdk:mobile
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sdk:mobile] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: "[sdk:mobile] Install Rust toolchain"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: "[sdk:mobile] Set up Java"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: "[sdk:mobile] Binding freshness (UDL + 99-code catalog)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: node sdks/mobile/scripts/generate-bindings.mjs --check
+
+      - name: "[sdk:mobile] Host tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: cargo test --manifest-path sdks/mobile/Cargo.toml
+
+      - name: "[sdk:mobile] Host-side vector runner"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: cargo run --manifest-path sdks/mobile/Cargo.toml --bin streampay-mobile-conformance -- sdks/vectors
+
+      - name: "[sdk:mobile] Install Kotlin compiler"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: |
+          curl -fsSL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip -o /tmp/kotlin.zip
+          unzip -q /tmp/kotlin.zip -d /opt
+          echo "/opt/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: "[sdk:mobile] Kotlin generated-binding compile smoke"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: sdks/mobile/scripts/smoke-kotlin.sh
+
+      - name: "[sdk:mobile] Swift generated-binding compile smoke"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        run: sdks/mobile/scripts/smoke-swift.sh
+
   frontend:
     name: Frontend — lint / typecheck / tests / build / audit / CLI parity
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ github.workspace }}
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_changed_paths.py
 
       - uses: actions/setup-node@v7
         with:
@@ -529,10 +890,92 @@ jobs:
       # the SDK 17 xdr renames, noUncheckedIndexedAccess in the arg parser)
       # that needs an RPC-backed follow-up before it can be fixed safely.
 
+      # ------------------------------------------------------------------
+      # SDK vector and TypeScript gates. Every run step carries its source
+      # working directory because this job defaults to frontend/.
+      # ------------------------------------------------------------------
+
+      - name: Restore tracked files before sdk:vectors
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sdk:vectors] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/vectors/builder/package-lock.json
+
+      - name: "[sdk:vectors] Install vector builder dependencies"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/vectors/builder
+        run: npm ci
+
+      - name: "[sdk:vectors] Fixture regeneration is deterministic"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/vectors/builder
+        run: |
+          node build-vectors.mjs
+          git diff --exit-code ..
+
+      - name: Restore tracked files before sdk:typescript
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sdk:typescript] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: "[sdk:typescript] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[sdk:typescript] Install TypeScript SDK dependencies"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: npm ci
+
+      - name: "[sdk:typescript] Generated client is up to date"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: .
+        run: python3 sdks/generator/generate.py --check
+
+      - name: "[sdk:typescript] Typecheck"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: npm run typecheck
+
+      - name: "[sdk:typescript] Build + tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: npm test
+
+      - name: "[sdk:typescript] Check SDK vector conformance runtime budget"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: node ../../perf/harness/check_budgets.mjs --sdk-conformance
+
+      - name: "[sdk:typescript] npm pack dry run"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sdk == 'true' }}
+        working-directory: sdks/typescript
+        run: npm pack --dry-run
+
   data-plane:
     name: Data plane — events, indexer, reconciler, TTL, perf, benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    env:
+      TF_VERSION: "1.9.8"
+      RENDER_CONTRACT_ID: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     steps:
 
       # ------------------------------------------------------------------
@@ -541,6 +984,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_changed_paths.py
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -697,9 +1147,288 @@ jobs:
       - name: Benchmark freshness & regression check
         run: npm run benchmark:verify
 
+      # ------------------------------------------------------------------
+      # Infrastructure and secrets-rotation PR gates. Source job defaults are
+      # inlined on each run step; the former docker-changes job is replaced by
+      # steps.paths.outputs.indexer_image from the detector above.
+      # ------------------------------------------------------------------
+
+      - name: Restore tracked files before infra:terraform
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[infra:terraform] Set up Terraform"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: "[infra:terraform] Format check"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: "[infra:terraform] Validate every stack (no credentials)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: infra/terraform
+        run: |
+          for stack in minimal-single-vm kubernetes aws-ec2; do
+            echo "::group::$stack"
+            (cd "stacks/$stack" && terraform init -backend=false -input=false && terraform validate)
+            echo "::endgroup::"
+          done
+
+      - name: "[infra:terraform] Minimal path -- apply, then require an empty plan"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          sh infra/terraform/scripts/apply_and_check_drift.sh \
+            --stack minimal-single-vm -- \
+            -var "contract_id=$RENDER_CONTRACT_ID" \
+            -var apply_locally=true \
+            -var 'bootstrap_command=["sh","-c","echo rendered-bundle"]'
+
+      - name: "[infra:terraform] Kubernetes path -- apply, then require an empty plan"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          sh infra/terraform/scripts/apply_and_check_drift.sh \
+            --stack kubernetes -- \
+            -var "contract_id=$RENDER_CONTRACT_ID" \
+            -var manifest_dir=/tmp/sp-ci-k8s \
+            -var ingress_tls_mode=cert-manager \
+            -var cert_manager_cluster_issuer=letsencrypt-prod \
+            -var ingress_host=pay.example.org \
+            -var extender_enabled=true
+
+      - name: "[infra:terraform] Rendered compose parses (docker compose config)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          bundle=infra/terraform/stacks/minimal-single-vm/build
+          # The compose file points at the per-service 0600 secret files, which
+          # only exist on a real host. Create empty ones so `config` resolves the
+          # references; the no-plaintext step below proves they stay empty.
+          sudo mkdir -p /etc/streampay
+          for f in $(grep -rho '/etc/streampay/[A-Za-z0-9._-]*\.env' "$bundle/docker-compose.yml" | sort -u); do
+            sudo touch "$f"
+          done
+          docker compose -f "$bundle/docker-compose.yml" config --quiet
+          echo "compose config OK"
+
+      - name: "[infra:terraform] Structural + hardening checks on the rendered artifacts"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          npm ci --no-fund --no-audit --prefix infra/terraform/scripts
+          node infra/terraform/scripts/check_render.mjs \
+            --bundle infra/terraform/stacks/minimal-single-vm/build \
+            --manifests /tmp/sp-ci-k8s/manifests.yaml
+
+      - name: "[infra:terraform] Rendered shell scripts parse"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          find infra/terraform/stacks/minimal-single-vm/build -name '*.sh' -print0 |
+            xargs -0 -r -n1 sh -n
+          echo "sh -n OK"
+
+      - name: "[infra:terraform] Caddyfile validates in the image the stack actually runs"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/infra/terraform/stacks/minimal-single-vm/build/Caddyfile:/tmp/Caddyfile:ro" \
+            caddy:2.8-alpine caddy validate --adapter caddyfile --config /tmp/Caddyfile
+
+      - name: "[infra:terraform] systemd unit verification (best effort)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! command -v systemd-analyze >/dev/null 2>&1; then
+            echo "systemd-analyze unavailable on this runner; unit structure is still"
+            echo "checked by check_render.mjs, which is the blocking gate."
+            exit 0
+          fi
+          # A warning rather than a failure: systemd resolves ExecStart paths and
+          # unit dependencies against the host it runs on, which a CI runner is
+          # not. check_render.mjs is the blocking gate for unit structure.
+          systemd-analyze verify infra/terraform/stacks/minimal-single-vm/build/systemd/*.service 2>&1 |
+            tee /tmp/systemd-verify.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::systemd-analyze exited $status on a runner that is not the target host"
+          fi
+
+      - name: "[infra:terraform] No plaintext secrets anywhere in the rendered output"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          # check_render.mjs scans the assignment patterns; this catches the two
+          # shapes that are leaks wherever they appear: a Stellar secret seed and a
+          # PEM private key body. Both patterns are anchored so a doc that names the
+          # format does not trip it.
+          if grep -rEIn '(^|[^A-Z2-7])S[A-Z2-7]{55}([^A-Z2-7]|$)' \
+              infra/terraform/stacks/minimal-single-vm/build /tmp/sp-ci-k8s; then
+            echo "::error::a value that looks like a Stellar secret seed was rendered to disk"
+            exit 1
+          fi
+          if grep -rEin -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+              infra/terraform/stacks/minimal-single-vm/build /tmp/sp-ci-k8s; then
+            echo "::error::a PEM private key was rendered to disk"
+            exit 1
+          fi
+          # The secret files compose references must still be empty here: nothing on
+          # a CI runner delivered a value into them.
+          for f in $(grep -rho '/etc/streampay/[A-Za-z0-9._-]*\.env' \
+              infra/terraform/stacks/minimal-single-vm/build/docker-compose.yml | sort -u); do
+            if [ -s "$f" ]; then
+              echo "::error::$f is not empty on a machine that delivered no secrets"
+              exit 1
+            fi
+          done
+          echo "no plaintext secrets in the rendered output"
+
+      - name: "[infra:terraform] Terraform state is never committed"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          if git ls-files | grep -E '(\.tfstate($|\.)|\.terraform/|\.tfvars$)'; then
+            echo "::error::terraform state, provider directories or tfvars are tracked in git"
+            exit 1
+          fi
+          echo "no tracked terraform state"
+
+      - name: Restore tracked files before infra:terraform-plan-gate
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[infra:terraform-plan-gate] Set up Terraform"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: "[infra:terraform-plan-gate] fmt / validate / plan (read-only)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: infra/terraform
+        run: sh scripts/plan_gate.sh
+
+      - name: "[infra:terraform-plan-gate] Self-test — invalid fixture must fail the gate"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.infra == 'true' }}
+        working-directory: infra/terraform
+        run: sh scripts/plan_gate.sh --self-test
+
+      - name: Restore tracked files before infra:indexer-image
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[infra:indexer-image] Size-gate unit tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: node --test perf/test/image_budget.test.mjs
+
+      - name: "[infra:indexer-image] Set up QEMU"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: "[infra:indexer-image] Set up Docker Buildx"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        uses: docker/setup-buildx-action@v4
+
+      - name: "[infra:indexer-image] Build linux/amd64 image"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f infra/docker/Dockerfile.indexer \
+            -t streampay/indexer:ci \
+            .
+
+      - name: "[infra:indexer-image] Enforce image size budget (amd64)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: node perf/harness/check_image_budget.mjs --image streampay/indexer:ci --key indexer
+
+      - name: "[infra:indexer-image] Build linux/arm64 image"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --load \
+            -f infra/docker/Dockerfile.indexer \
+            -t streampay/indexer:ci-arm64 \
+            .
+
+      - name: "[infra:indexer-image] Enforce image size budget (arm64)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: node perf/harness/check_image_budget.mjs --image streampay/indexer:ci-arm64 --key indexer
+
+      - name: "[infra:indexer-image] Self-test — bloated fixture must fail the budget"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: node perf/harness/check_image_budget.mjs --self-test --key indexer
+
+      - name: "[infra:indexer-image] Multi-arch manifest build (no push)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.indexer_image == 'true' }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --output type=cacheonly \
+            -f infra/docker/Dockerfile.indexer \
+            .
+
+      - name: Restore tracked files before secrets-rotation:rotation-tests
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[secrets-rotation:rotation-tests] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: indexer/package-lock.json
+
+      - name: "[secrets-rotation:rotation-tests] Install dependencies"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        working-directory: indexer
+        run: npm ci
+
+      - name: "[secrets-rotation:rotation-tests] Typecheck"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        working-directory: indexer
+        run: npm run typecheck
+
+      - name: "[secrets-rotation:rotation-tests] Build"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        working-directory: indexer
+        run: npm run build
+
+      - name: "[secrets-rotation:rotation-tests] Overlap window, fail-safe abort, audit integrity, hot reload"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        working-directory: indexer
+        run: node --test dist/secrets/rotation.test.js dist/rpc-credentials.test.js
+
+      - name: "[secrets-rotation:rotation-tests] Rotation policy is valid JSON"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.rotation == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          node -e "const p=require('./infra/secrets-rotation/rotation-policy.json');
+            for (const name of ['webhook_signing_keys','rpc_credentials']) {
+              if (!p.secrets[name]) { throw new Error('policy is missing ' + name); }
+            }
+            if (p.secrets.webhook_signing_keys.overlap_seconds < 60) {
+              throw new Error('webhook overlap below 60s is an outage, not a rotation');
+            }
+            console.log('rotation policy OK');"
+
   storybook-visual:
     name: Storybook — build / visual regression
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Baselines are rendered by exactly this image, so a pixel diff is a UI
     # change and never a font-hinting difference between machines. The tag
     # must equal the @playwright/test version pinned in frontend/package.json
@@ -785,8 +1514,20 @@ jobs:
   supply-chain:
     name: Security — advisories / licenses
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CYCLONEDX_SPEC: "1.5"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_changed_paths.py
 
       # cargo-deny's advisories check covers the same RustSec database as
       # cargo-audit, so one gate owns the ignore policy (see deny.toml).
@@ -801,11 +1542,454 @@ jobs:
         run: |
           echo "::error::cargo-deny rejected the dependency graph — it prints the exact rule above (advisory / license / ban / source). If a crate you added pulls in an advisory, bump it. If the advisory is transitive and has no upstream fix, it belongs in deny.toml's ignore list with a comment naming the RUSTSEC id and why (see RUSTSEC-2024-0436 there) — and that is a change a maintainer reviews on its own, not something to bury in a feature PR. Reproduce locally: cargo install cargo-deny && cargo deny check."
 
+      # ------------------------------------------------------------------
+      # Supply-chain PR gates. CYCLONEDX_SPEC is inherited from the job env;
+      # the generated SBOM artifact keeps its original SHA-bound name.
+      # ------------------------------------------------------------------
+
+      - name: Restore tracked files before sbom-vex:gate
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[sbom-vex:gate] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: "[sbom-vex:gate] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[sbom-vex:gate] Install Rust toolchain"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: "[sbom-vex:gate] Cache cargo"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-sbom-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-sbom-
+
+      - name: "[sbom-vex:gate] Install stellar-cli v28.1.0"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: bash scripts/install_stellar_cli.sh
+
+      - name: "[sbom-vex:gate] Install cargo-deny"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: "[sbom-vex:gate] Install cargo-cyclonedx"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          if ! command -v cargo-cyclonedx >/dev/null 2>&1; then
+            cargo install cargo-cyclonedx --locked
+          fi
+          cargo cyclonedx --version
+
+      - name: "[sbom-vex:gate] Build the contract Wasm (the artifact the SBOMs describe)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        working-directory: contracts/streaming-payments
+        run: stellar contract build
+
+      - name: "[sbom-vex:gate] Rust SBOM (contract crate, from Cargo.lock)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          mkdir -p sbom/rust
+          rm -f contracts/streaming-payments/*.cdx.json
+          # `--output-pattern`/`--output-prefix` were removed from
+          # cargo-cyclonedx 0.5.10; the file is named after the package unless
+          # `--override-filename` names it. `--all` here means "every
+          # dependency" (already the default) — it is not "every workspace
+          # member", so the manifest path is explicit and the output is located
+          # by globbing rather than by guessing a filename.
+          cargo cyclonedx \
+            --manifest-path contracts/streaming-payments/Cargo.toml \
+            --format json \
+            --spec-version "$CYCLONEDX_SPEC"
+          shopt -s nullglob
+          produced=(contracts/streaming-payments/*.cdx.json)
+          if [ "${#produced[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one *.cdx.json from cargo-cyclonedx in contracts/streaming-payments, found ${#produced[@]}${produced[*]:+: ${produced[*]}}"
+            exit 1
+          fi
+          mv "${produced[0]}" sbom/rust/streampay-contract.cdx.json
+          grep -q '"bomFormat"' sbom/rust/streampay-contract.cdx.json \
+            || { echo "::error::the Rust SBOM is not a CycloneDX document"; exit 1; }
+
+      - name: "[sbom-vex:gate] Rust shipped dependency graph (what the Wasm actually links)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          mkdir -p sbom/rust
+          cargo tree \
+            --manifest-path contracts/streaming-payments/Cargo.toml \
+            -e normal \
+            --prefix none \
+            --offline \
+            > sbom/rust/normal-deps.txt
+          # An empty or truncated graph would make the reverse check pass by
+          # saying nothing, so require it to look like the real graph: the root
+          # crate first, and the SDK the contract is built on somewhere in it.
+          lines=$(wc -l < sbom/rust/normal-deps.txt)
+          [ "$lines" -ge 50 ] \
+            || { echo "::error::cargo tree produced $lines line(s); refusing to gate against it"; exit 1; }
+          head -n 1 sbom/rust/normal-deps.txt | grep -q '^streampay-contract v' \
+            || { echo "::error::cargo tree did not start at the contract crate"; exit 1; }
+          grep -q '^soroban-sdk v' sbom/rust/normal-deps.txt \
+            || { echo "::error::cargo tree output does not contain soroban-sdk; wrong manifest or features?"; exit 1; }
+          wc -l sbom/rust/normal-deps.txt
+
+      - name: "[sbom-vex:gate] npm SBOMs (frontend, indexer, TypeScript SDK, CLI)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          mkdir -p sbom
+          # Pinned major: the positional argument is the *package.json* (the
+          # generator finds the lockfile next to it), and an unpinned `npx`
+          # would let a new major change that contract under us.
+          npx --yes @cyclonedx/cyclonedx-npm@6 --version
+          for pair in \
+            frontend=frontend \
+            indexer=indexer \
+            sdk=sdks/typescript \
+            cli=tools/streampay-cli; do
+            name="${pair%%=*}"
+            dir="${pair#*=}"
+            if [ ! -f "$dir/package.json" ]; then
+              echo "::warning::$dir/package.json is absent; no SBOM for '$name'"
+              continue
+            fi
+            if [ ! -f "$dir/package-lock.json" ]; then
+              # A package without a lockfile has no resolved dependency graph
+              # to describe. That is acceptable for a private, unpublished tool
+              # (it is installed with --no-package-lock in ci.yml) and never for
+              # something shipped, where the silence would hide the gap.
+              if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("private") else 1)' "$dir/package.json"; then
+                echo "::notice::$dir is a private package with no lockfile; no SBOM for '$name'"
+                continue
+              fi
+              echo "::error::$dir/package-lock.json is absent; a published package must have a lockfile so it can have an SBOM"
+              exit 1
+            fi
+            # `--ignore-npm-errors`: the SBOM is derived from the lockfile, and
+            # `npm ls` exits non-zero for an incomplete-but-resolved tree (e.g.
+            # ELSPROBLEMS from a nested peer range capping eslint below what
+            # frontend declares). The JSON it still emits is complete; real
+            # install health is gated by the Frontend and Indexer jobs, and the
+            # empty-SBOM check below stays as the backstop.
+            npx --yes @cyclonedx/cyclonedx-npm@6 \
+              "$dir/package.json" \
+              --package-lock-only --output-format JSON \
+              --ignore-npm-errors \
+              --spec-version "$CYCLONEDX_SPEC" \
+              --output-file "$PWD/sbom/$name.cdx.json"
+            [ -s "sbom/$name.cdx.json" ] \
+              || { echo "::error::cyclonedx-npm wrote no SBOM for '$name'"; exit 1; }
+          done
+          ls -l sbom
+
+      - name: "[sbom-vex:gate] Python generator SBOM"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          mkdir -p sbom
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+
+          root = pathlib.Path(".")
+          requirements = sorted(root.glob("sdks/generator/requirements*.txt"))
+          if not requirements:
+              artifact = root / "sdks/generator/generate.py"
+              digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+              document = {
+                  "bomFormat": "CycloneDX",
+                  "specVersion": "1.5",
+                  "version": 1,
+                  "metadata": {
+                      "component": {
+                          "type": "application",
+                          "name": "streampay-sdk-generator",
+                          "version": subprocess.run(
+                              ["git", "describe", "--tags", "--always"],
+                              capture_output=True, text=True, check=False,
+                          ).stdout.strip() or "0.0.0",
+                          "hashes": [{"alg": "SHA-256", "content": digest}],
+                      },
+                      "properties": [
+                          {"name": "streampay:sbom:no-third-party-dependencies", "value": "true"},
+                          {"name": "streampay:sbom:artifact", "value": "sdks/generator/generate.py"},
+                      ],
+                  },
+                  "components": [],
+              }
+              pathlib.Path("sbom/python.cdx.json").write_text(json.dumps(document, indent=2) + "\n")
+              print("python generator: stdlib-only, recorded as a declared empty SBOM")
+          else:
+              subprocess.run(
+                  ["python3", "-m", "pip", "install", "--quiet", "cyclonedx-bom"],
+                  check=True,
+              )
+              print("python generator: cyclonedx-py from", requirements[0])
+          PY
+          if ls sdks/generator/requirements*.txt >/dev/null 2>&1; then
+            for req in sdks/generator/requirements*.txt; do
+              cyclonedx-py requirements "$req" \
+                --output-format JSON --spec-version "$CYCLONEDX_SPEC" \
+                --output-file sbom/python.cdx.json
+            done
+          fi
+
+      - name: "[sbom-vex:gate] Build the indexer image for its SBOM"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          docker build -f infra/docker/Dockerfile.indexer -t streampay-indexer:${{ github.sha }} .
+
+      - name: "[sbom-vex:gate] Install syft"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: "[sbom-vex:gate] Indexer image SBOM"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          syft version
+          syft "streampay-indexer:${{ github.sha }}" \
+            -o "cyclonedx-json=sbom/indexer-image.cdx.json" \
+            --quiet
+          if [ ! -s sbom/indexer-image.cdx.json ]; then
+            echo "::error::syft produced no SBOM for the indexer image"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          path = pathlib.Path("sbom/indexer-image.cdx.json")
+          try:
+              document = json.loads(path.read_text(encoding="utf-8"))
+          except json.JSONDecodeError as exc:
+              sys.exit(f"::error::{path} is not JSON: {exc}")
+          if document.get("bomFormat") != "CycloneDX":
+              sys.exit(f"::error::{path} is not a CycloneDX document")
+          if not document.get("components"):
+              sys.exit(f"::error::{path} lists no components: the image SBOM is empty")
+          PY
+
+      - name: "[sbom-vex:gate] cargo-deny advisory report"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -u
+          mkdir -p advisories
+          # cargo-deny 0.21 `--format json` emits a stream of JSON documents
+          # (one per finding plus a final "summary") and writes it to stderr on
+          # success, leaving stdout empty — neither stream alone is the report.
+          # Both are concatenated for the gate, which parses document streams,
+          # and the presence of the summary document proves the check actually
+          # ran (a truncated or empty file must never read as "no advisories").
+          cargo deny --format json check advisories \
+            > advisories/cargo-deny.stdout.json \
+            2> advisories/cargo-deny.diagnostics.json
+          rc=$?
+          cat advisories/cargo-deny.stdout.json advisories/cargo-deny.diagnostics.json \
+            > advisories/cargo-deny.json
+          # The exit code is a bitset per check: advisories=1, bans=2,
+          # licenses=4, sources=8. Only the advisories bit is expected here, so
+          # any other bit is a tooling/configuration failure, not a finding.
+          if [ $((rc & ~1)) -ne 0 ]; then
+            echo "::error::cargo deny exited $rc, which is more than 'advisories found'; diagnostics:"
+            cat advisories/cargo-deny.diagnostics.json || true
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          path = pathlib.Path("advisories/cargo-deny.json")
+          text = path.read_text(encoding="utf-8")
+          if not text.strip():
+              sys.exit(f"::error::{path} is empty: cargo-deny wrote no JSON to either stream")
+          decoder = json.JSONDecoder()
+          documents, index = [], 0
+          while index < len(text):
+              while index < len(text) and text[index].isspace():
+                  index += 1
+              if index >= len(text):
+                  break
+              try:
+                  document, index = decoder.raw_decode(text, index)
+              except json.JSONDecodeError as exc:
+                  sys.exit(f"::error::{path} is not a JSON document stream: {exc}")
+              documents.append(document)
+          if not any(isinstance(d, dict) and d.get("type") == "summary" for d in documents):
+              sys.exit(f"::error::{path} has no cargo-deny 'summary' document: the check did not run to completion")
+          PY
+
+      - name: "[sbom-vex:gate] npm advisory reports"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set +e
+          mkdir -p advisories
+          for dir in frontend indexer sdks/typescript tools/streampay-cli; do
+            [ -f "$dir/package.json" ] || continue
+            name="$(basename "$dir")"
+            ( cd "$dir" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 )
+            npm audit --json --omit=dev --prefix "$dir" > "advisories/npm-audit-$name.json"
+          done
+          set -e
+          ls -l advisories
+          echo "npm audit exit codes are advisory findings, not step failures; the gate judges them"
+
+      - name: "[sbom-vex:gate] pip-audit report (only when the generator has dependencies)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set +e
+          if ls sdks/generator/requirements*.txt >/dev/null 2>&1; then
+            python3 -m pip install --quiet pip-audit
+            pip-audit --format json --requirement sdks/generator/requirements.txt \
+              > advisories/pip-audit.json
+          else
+            echo "no requirements file: the generator has no third-party dependencies to audit"
+          fi
+          set -e
+
+      - name: "[sbom-vex:gate] Gate self-tests (an injected advisory must block)"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: python3 tests/sbom_vex_test.py
+
+      - name: "[sbom-vex:gate] SBOM + VEX gate"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' }}
+        run: |
+          set -eu
+          args=()
+          for pair in \
+            rust=sbom/rust/streampay-contract.cdx.json \
+            frontend=sbom/frontend.cdx.json \
+            indexer=sbom/indexer.cdx.json \
+            sdk=sbom/sdk.cdx.json \
+            cli=sbom/cli.cdx.json \
+            python=sbom/python.cdx.json \
+            indexer-image=sbom/indexer-image.cdx.json; do
+            if [ -f "${pair#*=}" ]; then args+=(--sbom "$pair"); fi
+          done
+
+          # Published artifacts, each bound to the SBOM that describes it.
+          args+=(--artifact "contract-wasm=target/wasm32v1-none/release/streampay_contract.wasm")
+          args+=(--sbom-for contract-wasm=rust)
+
+          # Lockfile cross-check: the SBOM must describe what the build installs.
+          for pair in \
+            rust=Cargo.lock \
+            frontend=frontend/package-lock.json \
+            indexer=indexer/package-lock.json \
+            sdk=sdks/typescript/package-lock.json \
+            cli=tools/streampay-cli/package-lock.json; do
+            if [ -f "${pair#*=}" ]; then args+=(--lock "$pair"); fi
+          done
+          # The reverse half of the Cargo.lock check runs against what the Wasm
+          # links, not against the whole resolve. Without it the gate refuses to
+          # guess, so a missing file here fails the job rather than the check.
+          if [ -f sbom/rust/normal-deps.txt ]; then
+            args+=(--shipped-graph rust=sbom/rust/normal-deps.txt)
+          fi
+
+          # Advisory reports, normalised from the three ecosystems.
+          if [ -f advisories/cargo-deny.json ]; then
+            args+=(--advisories "cargo-deny=advisories/cargo-deny.json")
+          fi
+          for report in advisories/npm-audit-*.json; do
+            if [ -s "$report" ]; then args+=(--advisories "npm-audit=$report"); fi
+          done
+          if [ -f advisories/pip-audit.json ]; then
+            args+=(--advisories "pip-audit=advisories/pip-audit.json")
+          fi
+
+          if [ -f security/sbom-baseline.json ]; then
+            args+=(--baseline security/sbom-baseline.json)
+          else
+            echo "::notice::no security/sbom-baseline.json yet: drift is enforced against the lockfiles only"
+          fi
+
+          args+=(--vex security/vex/vex.json --index-out sbom/sbom-index.json)
+          # cargo-deny's own ignore list is a suppression this gate would never
+          # see as an advisory, so require each ignored id to be triaged too.
+          if [ -f deny.toml ]; then args+=(--deny-config deny.toml); fi
+          python3 scripts/sbom_vex.py "${args[@]}"
+
+      - name: "[sbom-vex:gate] Upload SBOMs, advisory reports and the index"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.sbom == 'true' && always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-vex-${{ github.sha }}
+          path: |
+            sbom/
+            advisories/
+          if-no-files-found: warn
+
+      - name: Restore tracked files before attestation:tamper-audit
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.attestation == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[attestation:tamper-audit] Run the tamper audit"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.attestation == 'true' }}
+        run: bash tests/attestation_tamper_audit.sh
+
+      - name: "[attestation:tamper-audit] Report the pinned signing key fingerprint"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.attestation == 'true' && hashFiles('attestations/signing-key.pub') != '' }}
+        run: |
+          fp=$(openssl pkey -pubin -in attestations/signing-key.pub -outform DER | sha256sum | awk '{print $1}')
+          echo "pinned signing key fingerprint: sha256:$fp"
+          {
+            echo "### Attestation signing key"
+            echo ""
+            echo "Fingerprint on this ref: \`sha256:$fp\`"
+            echo ""
+            echo "Compare against the fingerprint published in the release notes."
+            echo "A change that nobody announced is a key substitution."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! git rev-parse --verify -q HEAD~1 >/dev/null; then
+            echo "no parent commit available — cannot compare the key against history"
+          elif git diff --quiet HEAD~1 -- attestations/signing-key.pub; then
+            echo "signing key unchanged from the parent commit"
+          else
+            echo "::warning::attestations/signing-key.pub differs from the parent commit — confirm this rotation was announced"
+          fi
+
+      - name: Restore tracked files before release-sign:self-test
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.release_signing == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[release-sign:self-test] Verification-gate self-tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.release_signing == 'true' }}
+        run: bash tests/sigstore_verify_test.sh
+
   docs:
-    name: Docs — internal link lint
+    name: Docs — links / dashboards / whitepaper claims / CI integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_changed_paths.py
 
       - uses: actions/setup-node@v7
         with:
@@ -856,3 +2040,188 @@ jobs:
       # Binary fixtures are reported by git as `-text` and are not flagged.
       - name: Tracked files are stored with LF
         run: bash scripts/check_line_endings.sh
+
+      # ------------------------------------------------------------------
+      # Documentation and workflow-integrity PR gates. Whitepaper audit is
+      # path-filtered; workflow integrity remains unfiltered on PRs because its
+      # source workflow has no paths filter and no corresponding detector flag.
+      # ------------------------------------------------------------------
+
+      - name: Restore tracked files before whitepaper-claims:audit
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.whitepaper == 'true' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[whitepaper-claims:audit] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.whitepaper == 'true' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[whitepaper-claims:audit] Check whitepaper claims against code"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.paths.outputs.whitepaper == 'true' }}
+        run: python3 scripts/check_whitepaper_claims.py
+
+      - name: Restore tracked files before workflow-integrity:integrity
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: git restore --source=HEAD --worktree --staged .
+
+      - name: "[workflow-integrity:integrity] Set up Node.js"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: "[workflow-integrity:integrity] Set up Python"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: "[workflow-integrity:integrity] Install PyYAML"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: python3 -m pip install --quiet pyyaml==6.0.2
+
+      - name: "[workflow-integrity:integrity] Self-test: the checker can still fail"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: python3 scripts/check_ci_integrity.py --self-test
+
+      - name: "[workflow-integrity:integrity] Self-test: the source scanner can still fail"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: node --test scripts/check_merge_integrity.test.mjs
+
+      - name: "[workflow-integrity:integrity] Changed-path detector tests"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: python3 -m unittest discover -s tests -p ci_changed_paths_test.py
+
+      - name: "[workflow-integrity:integrity] Workflows parse and every step is well-formed"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: python3 scripts/check_ci_integrity.py --checks=parse,triggers,dupkeys,steps,paths,prcap,prmoves
+
+      - name: "[workflow-integrity:integrity] Resolve the comparison base"
+        id: base
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_BASE_SHA:-}" ]; then
+            if base="$(git merge-base "${PR_BASE_SHA}" HEAD 2>/dev/null)"; then
+              echo "Comparing gates and text files against merge base ${base}."
+              echo "base=${base}" >> "${GITHUB_OUTPUT}"
+            else
+              echo "::warning::merge base with ${PR_BASE_SHA} is not in this clone; the required-gate floor still applies, the merge-base step diff does not."
+            fi
+          fi
+
+      - name: "[workflow-integrity:integrity] Every required CI gate is still wired"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=gates,prcap,prmoves
+          fi
+
+      - name: "[workflow-integrity:integrity] No text file is committed as UTF-16 or with a BOM"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -eu
+          # On a pull request only what the PR touched; on main, the whole tree.
+          if [ -n "${BASE:-}" ]; then
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves --base "${BASE}"
+          else
+            python3 scripts/check_ci_integrity.py --checks=encoding,prcap,prmoves
+          fi
+
+      - name: "[workflow-integrity:integrity] Every tracked source file is still a parseable program"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' }}
+        run: node scripts/check_merge_integrity.mjs
+
+      - name: "[workflow-integrity:integrity] Explain a workflow-integrity failure"
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && failure() }}
+        run: |
+          set -eu
+          cat <<'EOF'
+          ## What just failed
+
+          This job does not build or test the product. It checks the things that
+          cannot report a problem on their own: that the CI description is
+          intact, and that each source file is still a parseable program.
+
+          - `[parse]` A workflow does not load as YAML. GitHub rejects the whole
+            file, so Actions shows a run named `.github/workflows/<file>.yml`
+            with **0 jobs** and no step output. The usual cause is a multi-line
+            script whose lines are not indented deeper than the `run: |` header:
+            the first flush-left line ends the block scalar and the rest of the
+            file is read as YAML. In a workflow that only triggers on
+            `schedule:` or `workflow_dispatch:` nothing here goes red on the PR
+            that broke it -- it goes red silently on main after the merge, so
+            this check runs on every pull request.
+          - `[dupkeys]` A mapping key is defined twice in one mapping, e.g. a
+            re-pinned `uses:` inserted above the existing one instead of
+            replacing it. Locally PyYAML keeps the last value and says nothing;
+            GitHub's parser refuses the file. Replace the line, do not add one.
+          - `[steps]` A step carries both `run:` and `uses:`, or neither, or a
+            `with:` with nothing to pass it to. Also `working-directory:` on a
+            step that has `uses:` and no `run:` -- GitHub refuses the file for
+            that one, so the pull request shows **no checks at all** rather than
+            a red one; the same directory set job-wide with
+            `defaults: run: working-directory:` is legal. Also a `needs:` pointing
+            at a job that does not exist, and an action referenced by
+            `@main` / `@master`.
+          - `[paths]` A `paths:` / `paths-ignore:` entry that no file in the
+            repository can match -- `"deploy/**"` for a `deploy/` directory that
+            has never existed, or a file renamed out from under the filter. The
+            job it gates does not fail, it silently never runs, and the pull
+            request reads green because the only evidence the gate exists is an
+            absent check. Patterns with no literal prefix (`**/*.md`) and paths a
+            PR adds itself are left alone; create the path or drop the pattern.
+          - `[gates]` A named CI step that existed at the merge base, or that
+            `.github/ci-gates.json` lists as required, is no longer in the
+            workflow. A deleted gate cannot fail -- it simply stops running, and
+            the pull request stays green. Restore the step. If the gate really is
+            being retired, move its name into `retired` in
+            `.github/ci-gates.json` with a reason, in this same PR, so the
+            deletion is visible in the diff instead of quiet.
+          - `[prcap]` Another workflow declares a PR trigger, `ci.yml` gains a
+            seventh job, a matrix, a reusable-workflow call or write permission.
+            GitHub counts one check per job, so the six-check review surface is
+            a contract rather than a naming convention.
+          - `[prmoves]` A specialist step folded into `ci.yml` lost its payload,
+            environment, working directory, original condition, resilience guard
+            or changed-path guard. The inventory in `.github/ci-gates.json` must
+            keep pointing at the job that really runs it.
+          - `[encoding]` A tracked `.yml` / `.md` / `.ts` / `.rs` / `.py` / ...
+            file is stored as UTF-16, carries a UTF-8 BOM, or contains a C0
+            control byte (0x00-0x1F other than tab/LF, or a CR outside CRLF).
+            git then calls it binary: `git diff` prints "Binary files
+            differ", the change is unreviewable, and a workflow can be gutted
+            without a reviewer seeing a single line. Re-save as UTF-8 without a
+            BOM (`* text=auto eol=lf` in `.gitattributes` handles the rest).
+          - `[merge-integrity]` A tracked `.rs` / `.ts` / `.js` file is no longer
+            a parseable program: the same `fn` declared twice in one `impl`, the
+            same top-level `function`/`class`/`const` in one file, a `{`/`(`/`[`
+            without its partner, a string or block comment that runs to the end
+            of the file, or a leftover `<<<<<<<`. Every one of those is what a
+            clean-merging conflict leaves behind, and the compiler reports them
+            as dozens of downstream errors. The finding names the line to repair.
+
+          Reproduce locally, no push needed:
+
+              pip install pyyaml==6.0.2
+              python3 scripts/check_ci_integrity.py
+              python3 scripts/check_ci_integrity.py --self-test
+              python3 -m unittest discover -s tests -p ci_changed_paths_test.py
+              node --test scripts/check_merge_integrity.test.mjs
+              node scripts/check_merge_integrity.mjs
+
+          The checker's own fixtures are in the script; if it ever reports 0
+          problems while CI is broken, run the self-test first -- it fails when
+          a detector has been weakened.
+          EOF

@@ -180,13 +180,22 @@ Three things to know:
 
 ### How CI is organised
 
-`ci.yml` reports **six** checks on a pull request: Contract, Frontend, Data
-plane, Storybook, Security, Docs. GitHub publishes one check run per job, so a
-shorter review surface means fewer jobs, not shorter names — and the thirteen
-jobs this file used to have are the same steps re-homed, with the migration
-recorded per job in [`.github/ci-gates.json`](./.github/ci-gates.json) under
-`moved`. Two rules follow from that and `scripts/check_ci_integrity.py` enforces
-both on every pull request:
+`ci.yml` is the **only** pull-request workflow and reports **six** checks:
+Contract, Frontend, Data plane, Storybook, Security, Docs. GitHub publishes one
+check run per job, so a shorter review surface means fewer jobs, not shorter
+names. The thirteen jobs this file used to have are the same steps re-homed,
+with the migration recorded per job in
+[`.github/ci-gates.json`](./.github/ci-gates.json) under `moved`.
+
+The specialist workflows keep their release, scheduled and manual triggers, but
+no longer create PR checks. Their PR validations run as path-aware steps inside
+the six jobs. `scripts/ci_changed_paths.py` compares the PR merge base with its
+head and emits the flags consumed by those steps; a change to the CI workflow,
+the detector or its tests selects every specialist group, and a Git or pattern
+error fails closed rather than skipping a gate.
+
+Three rules follow from that, and `scripts/check_ci_integrity.py` enforces all
+three on every pull request:
 
 - A job's steps may move, but none may vanish. A gate that disappears cannot
   fail, so the checker compares the merge base against your branch and reports
@@ -196,10 +205,10 @@ both on every pull request:
   build steps used to be a separate check so that a compile error still showed
   up when the job had already stopped at a formatting complaint; inside the
   Contract job they carry that condition and keep behaving the same way.
-
-Anything outside `ci.yml` stays a separate workflow, and each one declares the
-paths it actually reads, so a pull request that touches none of them never waits
-on a verdict it could not change.
+- The `prcap` rule rejects another PR workflow, a matrix, a reusable-workflow job
+  or write permission. The `prmoves` rule checks every inventory-recorded
+  specialist move for one equivalent copy with the same payload, environment,
+  working directory and original condition, plus its path guard.
 
 ### Other mechanical gates, in one place
 

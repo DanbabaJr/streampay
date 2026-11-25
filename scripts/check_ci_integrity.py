@@ -50,6 +50,12 @@ What it checks
   encoding   no tracked text file is committed as UTF-16, with a UTF-8 BOM, or
              containing any C0 control byte (0x00-0x1F) other than tab and LF,
              or a CR that is not part of a CRLF pair
+  prcap      ci.yml is the only pull-request workflow and contains exactly the
+             six inventoried jobs, with no matrix, reusable-workflow call, or
+             write permission
+  prmoves    every specialist step folded into ci.yml still has one prefixed
+             copy with the same payload, environment, working directory and
+             original condition, plus the recorded path guard
 
 Usage
 -----
@@ -66,7 +72,9 @@ Exit status: 0 clean, 1 findings, 2 the checker itself could not run.
 """
 
 import argparse
+import ast
 import collections.abc
+import copy
 import json
 import os
 import re
@@ -110,7 +118,10 @@ SKIP_DIRS = {".git", "node_modules", "target", ".next", "dist", "build",
              "coverage", ".venv", "venv", "__pycache__", ".cargo"}
 WORKFLOW_DIR = ".github/workflows"
 GATES_FILE = ".github/ci-gates.json"
-ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "paths", "gates", "encoding")
+ALL_CHECKS = ("parse", "triggers", "dupkeys", "steps", "paths", "gates", "encoding",
+              "prcap", "prmoves")
+PR_TRIGGERS = {"pull_request", "pull_request_target", "pull_request_review",
+               "pull_request_review_comment"}
 
 
 class DupKeyLoader(yaml.SafeLoader):
@@ -485,6 +496,583 @@ def load_inventory(root, ref=None):
         return json.loads(text)
     except ValueError as exc:
         return {"_error": f"inventory is not valid JSON: {exc}"}
+
+
+def inventory_pair(root, base, rule):
+    here = load_inventory(root)
+    before = load_inventory(root, base) if base else here
+    problems = []
+    for label, inventory in (("here", here), ("base", before)):
+        if "_error" in inventory:
+            problems.append((rule, GATES_FILE, 0,
+                             f"ci-gates.json ({label}): {inventory['_error']}"))
+    return (here, before), problems
+
+
+def workflow_document(text):
+    docs, parse_error, _ = parse_yaml(text)
+    if parse_error:
+        return None, parse_error
+    for doc in docs:
+        if isinstance(doc, dict):
+            return doc, None
+    return None, "workflow contains no YAML mapping"
+
+
+def workflow_triggers(doc):
+    return doc.get("on", doc.get(True))
+
+
+def active_pr_triggers(doc):
+    triggers = workflow_triggers(doc)
+    if isinstance(triggers, dict):
+        return [name for name in triggers if name in PR_TRIGGERS]
+    if isinstance(triggers, list):
+        return [name for name in triggers if name in PR_TRIGGERS]
+    return []
+
+
+def permission_problem(permissions, where):
+    if permissions is None:
+        return f"{where} does not declare permissions; PR jobs must explicitly stay read-only"
+    if isinstance(permissions, str):
+        return None if permissions == "read-all" else f"{where} grants '{permissions}' permissions"
+    if not isinstance(permissions, dict):
+        return f"{where} permissions is not a mapping or 'read-all'"
+    for name, value in permissions.items():
+        if value not in ("read", "none"):
+            return f"{where} grants '{name}: {value}'; pull-request jobs must stay read-only"
+    return None
+
+
+def ci_path_flags(root):
+    rel = "scripts/ci_changed_paths.py"
+    text = read_work_tree(root, rel)
+    if text is None:
+        raise RuntimeError(f"{rel} is missing")
+    try:
+        tree = ast.parse(text, filename=rel)
+    except SyntaxError as exc:
+        raise RuntimeError(f"{rel} does not parse: {exc}") from exc
+    values = {}
+    for node in tree.body:
+        targets = []
+        value = None
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in ("PATH_GROUPS", "COMMON_PATHS"):
+                values[target.id] = ast.literal_eval(value)
+    groups = values.get("PATH_GROUPS")
+    if not isinstance(groups, dict):
+        raise RuntimeError(f"{rel}: PATH_GROUPS is not defined as a mapping")
+    common = values.get("COMMON_PATHS")
+    if not isinstance(common, (tuple, list)) or not all(isinstance(path, str) for path in common):
+        raise RuntimeError(f"{rel}: COMMON_PATHS is not defined as a sequence of paths")
+    required_common = {
+        ".github/workflows/ci.yml",
+        "scripts/ci_changed_paths.py",
+        "tests/ci_changed_paths_test.py",
+    }
+    missing = sorted(required_common - set(common))
+    if missing:
+        raise RuntimeError(f"{rel}: COMMON_PATHS omits required CI inputs {missing}")
+    return set(groups)
+
+
+def default_run_dir(mapping):
+    if not isinstance(mapping, dict):
+        return {}
+    defaults = mapping.get("defaults")
+    if not isinstance(defaults, dict):
+        return {}
+    run = defaults.get("run")
+    return run if isinstance(run, dict) else {}
+
+
+def effective_working_directory(workflow, job, step):
+    if "run" not in step:
+        return "."
+    for mapping in (step, default_run_dir(job), default_run_dir(workflow)):
+        if isinstance(mapping, dict) and "working-directory" in mapping:
+            return str(mapping["working-directory"]).strip()
+    return "."
+
+
+def effective_environment(workflow, job, step):
+    environment = {}
+    for mapping in (workflow.get("env"), job.get("env"), step.get("env")):
+        if isinstance(mapping, dict):
+            environment.update(mapping)
+    return environment
+
+
+def executable_payload(step):
+    return {key: value for key, value in step.items()
+            if key not in ("name", "if", "working-directory")}
+
+
+def condition_terms(condition):
+    if condition is None:
+        return set()
+    text = str(condition).strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    text = re.sub(r"\s+", " ", text)
+    return {term.strip() for term in text.split("&&") if term.strip()}
+
+
+def is_root_checkout(step):
+    if not str(step.get("uses", "")).startswith("actions/checkout@"):
+        return False
+    with_block = step.get("with")
+    path = ""
+    if isinstance(with_block, dict):
+        path = str(with_block.get("path") or "").strip().strip("/")
+    return path in ("", ".")
+
+
+def checkout_depth(step):
+    with_block = step.get("with")
+    raw = with_block.get("fetch-depth", 1) if isinstance(with_block, dict) else 1
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def path_detector_problems(job, rel, job_id):
+    problems = []
+    steps = job.get("steps") if isinstance(job, dict) else None
+    candidates = [step for step in (steps or [])
+                  if isinstance(step, dict) and step.get("id") == "paths"]
+    if len(candidates) != 1:
+        problems.append(("prmoves", rel, 0,
+                         f"job '{job_id}' must have exactly one changed-path detector step with id 'paths'"))
+        return problems
+    detector = candidates[0]
+    if "scripts/ci_changed_paths.py" not in str(detector.get("run", "")):
+        problems.append(("prmoves", rel, 0,
+                         f"job '{job_id}' path detector does not run scripts/ci_changed_paths.py"))
+    environment = detector.get("env")
+    expected_base = "${{ github.event.pull_request.base.sha }}"
+    if not isinstance(environment, dict) or environment.get("PR_BASE_SHA") != expected_base:
+        problems.append(("prmoves", rel, 0,
+                         f"job '{job_id}' path detector does not receive the PR base SHA"))
+    if "github.event_name == 'pull_request'" not in condition_terms(detector.get("if")):
+        problems.append(("prmoves", rel, 0,
+                         f"job '{job_id}' path detector is not restricted to pull_request events"))
+    return problems
+
+
+def pr_cap_problems(root, base=None):
+    """Enforce one PR workflow, six jobs, no matrices/reusable jobs/write access."""
+    problems = []
+    inventories, inventory_errors = inventory_pair(root, base, "prcap")
+    problems.extend(inventory_errors)
+    if inventory_errors:
+        return problems
+
+    saw_contract = False
+    maxima = []
+    expected = {}
+    expected_by_label = {"here": set(), "base": set()}
+    for label, inventory in (("here", inventories[0]), ("base", inventories[1])):
+        contract = inventory.get("pr_checks")
+        if contract is None:
+            if label == "base" and inventories[0].get("pr_checks") is not None:
+                continue
+            problems.append(("prcap", GATES_FILE, 0,
+                             f"ci-gates.json ({label}): pr_checks is missing"))
+            continue
+        saw_contract = True
+        if not isinstance(contract, dict):
+            problems.append(("prcap", GATES_FILE, 0,
+                             f"ci-gates.json ({label}): pr_checks is not a mapping"))
+            continue
+        maximum = contract.get("max")
+        if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 1:
+            problems.append(("prcap", GATES_FILE, 0,
+                             f"ci-gates.json ({label}): pr_checks.max must be a positive integer"))
+        else:
+            maxima.append(maximum)
+            if maximum > 6:
+                problems.append(("prcap", GATES_FILE, 0,
+                                 f"ci-gates.json ({label}): pr_checks.max is {maximum}, above the hard cap of 6"))
+        expected_map = contract.get("expected")
+        if not isinstance(expected_map, dict) or not expected_map:
+            problems.append(("prcap", GATES_FILE, 0,
+                             f"ci-gates.json ({label}): pr_checks.expected must name the PR jobs"))
+            continue
+        for workflow, jobs in expected_map.items():
+            if workflow != "ci.yml":
+                problems.append(("prcap", GATES_FILE, 0,
+                                 f"pr_checks expects jobs in '{workflow}'; ci.yml must be the only PR workflow"))
+            if not isinstance(jobs, list) or not jobs or not all(isinstance(job, str) and job for job in jobs):
+                problems.append(("prcap", GATES_FILE, 0,
+                                 f"pr_checks.expected.{workflow} must be a nonempty list of job ids"))
+                continue
+            if len(jobs) != len(set(jobs)):
+                problems.append(("prcap", GATES_FILE, 0,
+                                 f"pr_checks.expected.{workflow} declares a job id more than once"))
+            if len(set(jobs)) != 6:
+                problems.append(("prcap", GATES_FILE, 0,
+                                 f"pr_checks.expected.{workflow} names {len(set(jobs))} jobs; "
+                                 "the consolidated PR contract requires exactly six"))
+            expected.setdefault(workflow, set()).update(jobs)
+            if workflow == "ci.yml":
+                expected_by_label[label].update(jobs)
+    removed_expected = sorted(expected_by_label["base"] - expected_by_label["here"])
+    if removed_expected:
+        problems.append(("prcap", GATES_FILE, 0,
+                         f"pr_checks.expected.ci.yml removes inventoried jobs {removed_expected}; "
+                         "a PR cannot lower the six-check contract"))
+    if not saw_contract:
+        problems.append(("prcap", GATES_FILE, 0,
+                         "ci-gates.json does not define pr_checks; the PR check cap is unenforced"))
+        return problems
+
+    maximum = min(maxima) if maxima else 6
+    files = list_workflows(root)
+    if files is None:
+        problems.append(("prcap", WORKFLOW_DIR, 0, "could not list workflows"))
+        return problems
+    pr_files = []
+    documents = {}
+    for rel in files:
+        text = read_work_tree(root, rel)
+        if text is None:
+            continue
+        doc, parse_error = workflow_document(text)
+        if parse_error:
+            problems.append(("prcap", rel, 0,
+                             f"cannot enforce the PR cap because the workflow does not parse: {parse_error}"))
+            continue
+        documents[rel] = doc
+        if active_pr_triggers(doc):
+            pr_files.append(rel)
+    expected_file = f"{WORKFLOW_DIR}/ci.yml"
+    for rel in pr_files:
+        if rel != expected_file:
+            problems.append(("prcap", rel, 0,
+                             f"workflow declares {', '.join(active_pr_triggers(documents[rel]))}; "
+                             "ci.yml must be the only pull-request workflow"))
+    if expected_file not in pr_files:
+        problems.append(("prcap", expected_file, 0,
+                         "ci.yml does not declare a pull_request trigger"))
+
+    doc = documents.get(expected_file)
+    if doc is None:
+        return problems
+    permission_issue = permission_problem(doc.get("permissions"), "ci.yml workflow permissions")
+    if permission_issue:
+        problems.append(("prcap", expected_file, 0, permission_issue))
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        problems.append(("prcap", expected_file, 0, "ci.yml jobs is not a mapping"))
+        return problems
+    expected_jobs = expected.get("ci.yml", set())
+    actual_jobs = set(jobs)
+    if actual_jobs != expected_jobs:
+        missing = sorted(expected_jobs - actual_jobs)
+        extra = sorted(actual_jobs - expected_jobs)
+        problems.append(("prcap", expected_file, 0,
+                         f"ci.yml jobs do not match pr_checks.expected "
+                         f"(missing={missing or 'none'}, unexpected={extra or 'none'})"))
+    if len(actual_jobs) > maximum:
+        problems.append(("prcap", expected_file, 0,
+                         f"ci.yml defines {len(actual_jobs)} jobs, above pr_checks.max={maximum}"))
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        if "strategy" in job:
+            problems.append(("prcap", expected_file, line_of(read_work_tree(root, expected_file), f"  {job_id}:"),
+                             f"job '{job_id}' declares a strategy; matrices can multiply PR check runs"))
+        if "uses" in job:
+            problems.append(("prcap", expected_file, line_of(read_work_tree(root, expected_file), f"  {job_id}:"),
+                             f"job '{job_id}' calls a reusable workflow; PR checks must be visible in ci.yml"))
+        if "permissions" in job:
+            issue = permission_problem(job.get("permissions"), f"job '{job_id}' permissions")
+            if issue:
+                problems.append(("prcap", expected_file, 0, issue))
+    return problems
+
+
+def migration_records(inventories, section, rule, problems):
+    records = {}
+    by_label = {"here": {}, "base": {}}
+    for label, inventory in (("here", inventories[0]), ("base", inventories[1])):
+        entries = inventory.get(section)
+        if entries is None:
+            if label == "base" and inventories[0].get(section) is not None:
+                continue
+            problems.append((rule, GATES_FILE, 0,
+                             f"ci-gates.json ({label}): {section} is missing"))
+            continue
+        if not isinstance(entries, dict):
+            problems.append((rule, GATES_FILE, 0,
+                             f"ci-gates.json ({label}): {section} is not a mapping"))
+            continue
+        for source, jobs in entries.items():
+            source_key = os.path.basename(str(source))
+            if not isinstance(jobs, dict):
+                problems.append((rule, GATES_FILE, 0,
+                                 f"{section}.{source_key} is not a mapping"))
+                continue
+            for job_id, entry in jobs.items():
+                key = (source_key, str(job_id))
+                if not isinstance(entry, dict):
+                    problems.append((rule, GATES_FILE, 0,
+                                     f"{section} entry '{source_key}' / '{job_id}' is not a mapping"))
+                    continue
+                by_label[label][key] = entry
+                if key in records and records[key] != entry:
+                    problems.append((rule, GATES_FILE, 0,
+                                     f"{section} entry '{source_key}' / '{job_id}' differs between base and head; "
+                                     "review the migration change explicitly"))
+                else:
+                    records[key] = entry
+    if isinstance(inventories[0].get(section), dict):
+        for source_key, job_id in sorted(by_label["base"].keys() - by_label["here"].keys()):
+            problems.append((rule, GATES_FILE, 0,
+                             f"{section} entry '{source_key}' / '{job_id}' existed at the base and is "
+                             "missing here; a PR cannot silently unenforce a relocated gate"))
+    return records
+
+
+def source_workflow_problems(root, source_key, source_job_id, cache, problems):
+    rel = f"{WORKFLOW_DIR}/{source_key}"
+    if rel not in cache:
+        text = read_work_tree(root, rel)
+        if text is None:
+            cache[rel] = (None, None, "workflow is missing")
+        else:
+            doc, parse_error = workflow_document(text)
+            cache[rel] = (doc, parse_error, text)
+    doc, parse_error, _ = cache[rel]
+    if parse_error:
+        problems.append(("prmoves", rel, 0,
+                         f"cannot verify relocated gates: {parse_error}"))
+        return None, None
+    triggers = active_pr_triggers(doc)
+    if triggers:
+        problems.append(("prmoves", rel, 0,
+                         f"source workflow still declares {', '.join(triggers)}; its PR steps belong in ci.yml"))
+    jobs = doc.get("jobs")
+    job = jobs.get(source_job_id) if isinstance(jobs, dict) else None
+    if not isinstance(job, dict):
+        problems.append(("prmoves", rel, 0,
+                         f"source job '{source_job_id}' is missing"))
+        return doc, None
+    return doc, job
+
+
+def shared_checkout_problems(root, source_step, destination_steps, source_rel, dest_rel,
+                             source_job_id, dest_job_id):
+    problems = []
+    roots = [step for step in destination_steps if isinstance(step, dict) and is_root_checkout(step)]
+    if len(roots) != 1:
+        problems.append(("prmoves", dest_rel, 0,
+                         f"job '{dest_job_id}' must have one repository-root checkout to replace "
+                         f"the shared checkout from '{source_rel}' / '{source_job_id}'"))
+        return problems
+    destination = roots[0]
+    if source_step.get("uses") != destination.get("uses"):
+        problems.append(("prmoves", dest_rel, 0,
+                         f"job '{dest_job_id}' shared checkout action differs from the source"))
+    source_with = source_step.get("with") if isinstance(source_step.get("with"), dict) else {}
+    destination_with = destination.get("with") if isinstance(destination.get("with"), dict) else {}
+    for key in sorted((set(source_with) | set(destination_with)) - {"fetch-depth", "path"}):
+        if source_with.get(key) != destination_with.get(key):
+            problems.append(("prmoves", dest_rel, 0,
+                             f"job '{dest_job_id}' shared checkout option '{key}' differs from the source"))
+    source_depth = checkout_depth(source_step)
+    destination_depth = checkout_depth(destination)
+    if source_depth is None or destination_depth is None:
+        problems.append(("prmoves", dest_rel, 0,
+                         f"job '{dest_job_id}' shared checkout has an unreadable fetch-depth"))
+    elif source_depth < 0 or destination_depth < 0:
+        problems.append(("prmoves", dest_rel, 0,
+                         f"job '{dest_job_id}' shared checkout has a negative fetch-depth"))
+    elif destination_depth != 0 and (source_depth == 0 or destination_depth < source_depth):
+        problems.append(("prmoves", dest_rel, 0,
+                         f"job '{dest_job_id}' checkout depth {destination_depth} is shallower than "
+                         f"the source depth {source_depth}"))
+    return problems
+
+
+def pr_moves_problems(root, base=None):
+    """Prove every path-gated specialist step has one equivalent ci.yml copy."""
+    problems = []
+    inventories, inventory_errors = inventory_pair(root, base, "prmoves")
+    problems.extend(inventory_errors)
+    if inventory_errors:
+        return problems
+    moves = migration_records(inventories, "pr_moves", "prmoves", problems)
+    replacements = migration_records(inventories, "pr_replacements", "prmoves", problems)
+    try:
+        flags = ci_path_flags(root)
+    except RuntimeError as exc:
+        problems.append(("prmoves", "scripts/ci_changed_paths.py", 0, str(exc)))
+        flags = set()
+
+    ci_rel = f"{WORKFLOW_DIR}/ci.yml"
+    ci_text = read_work_tree(root, ci_rel)
+    ci_doc = None
+    if ci_text is None:
+        problems.append(("prmoves", ci_rel, 0, "ci.yml is missing"))
+    else:
+        ci_doc, parse_error = workflow_document(ci_text)
+        if parse_error:
+            problems.append(("prmoves", ci_rel, 0,
+                             f"cannot verify relocated gates: {parse_error}"))
+    ci_jobs = ci_doc.get("jobs") if isinstance(ci_doc, dict) else None
+    if not isinstance(ci_jobs, dict):
+        ci_jobs = {}
+
+    source_cache = {}
+    detector_checked = set()
+    for (source_key, source_job_id), entry in sorted(moves.items()):
+        reason = str(entry.get("reason") or "").strip()
+        if not reason:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_moves entry '{source_key}' / '{source_job_id}' has no reason"))
+        destination = str(entry.get("to") or "")
+        match = re.fullmatch(r"ci\.yml:([A-Za-z0-9_-]+)", destination)
+        if not match:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_moves entry '{source_key}' / '{source_job_id}' has invalid destination "
+                             f"'{destination}'; expected ci.yml:<job>"))
+            continue
+        dest_job_id = match.group(1)
+        if "path_flag" not in entry:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_moves entry '{source_key}' / '{source_job_id}' has no path_flag "
+                             "(use null for an every-PR gate)"))
+        path_flag = entry.get("path_flag")
+        if path_flag is not None:
+            if not isinstance(path_flag, str) or path_flag not in flags:
+                problems.append(("prmoves", GATES_FILE, 0,
+                                 f"pr_moves entry '{source_key}' / '{source_job_id}' names unknown "
+                                 f"path_flag {path_flag!r}"))
+        source_doc, source_job = source_workflow_problems(
+            root, source_key, source_job_id, source_cache, problems)
+        if source_doc is None or source_job is None:
+            continue
+        dest_job = ci_jobs.get(dest_job_id)
+        if not isinstance(dest_job, dict):
+            problems.append(("prmoves", ci_rel, 0,
+                             f"destination job '{dest_job_id}' for '{source_key}' / '{source_job_id}' is missing"))
+            continue
+        destination_steps = dest_job.get("steps")
+        if not isinstance(destination_steps, list):
+            problems.append(("prmoves", ci_rel, 0,
+                             f"destination job '{dest_job_id}' steps is not a list"))
+            continue
+        if path_flag is not None and dest_job_id not in detector_checked:
+            problems.extend(path_detector_problems(dest_job, ci_rel, dest_job_id))
+            detector_checked.add(dest_job_id)
+
+        source_steps = source_job.get("steps")
+        if not isinstance(source_steps, list):
+            problems.append(("prmoves", f"{WORKFLOW_DIR}/{source_key}", 0,
+                             f"source job '{source_job_id}' steps is not a list"))
+            continue
+        source_label = os.path.splitext(source_key)[0]
+        prefix = f"[{source_label}:{source_job_id}] "
+        for index, source_step in enumerate(source_steps, 1):
+            if not isinstance(source_step, dict):
+                problems.append(("prmoves", f"{WORKFLOW_DIR}/{source_key}", 0,
+                                 f"source job '{source_job_id}' step {index} is not a mapping"))
+                continue
+            if is_root_checkout(source_step):
+                problems.extend(shared_checkout_problems(
+                    root, source_step, destination_steps, f"{WORKFLOW_DIR}/{source_key}", ci_rel,
+                    source_job_id, dest_job_id))
+                continue
+            source_name = str(source_step.get("name") or "").strip()
+            if not source_name:
+                problems.append(("prmoves", f"{WORKFLOW_DIR}/{source_key}", 0,
+                                 f"source job '{source_job_id}' step {index} has no name, so its "
+                                 "relocated copy cannot be identified"))
+                continue
+            expected_name = prefix + source_name
+            copies = [step for step in destination_steps
+                      if isinstance(step, dict) and step.get("name") == expected_name]
+            if len(copies) != 1:
+                problems.append(("prmoves", ci_rel, 0,
+                                 f"expected exactly one copy of '{source_key}' / '{source_job_id}' / "
+                                 f"'{source_name}' named '{expected_name}', found {len(copies)}"))
+                continue
+            destination_step = copies[0]
+            if executable_payload(source_step) != executable_payload(destination_step):
+                problems.append(("prmoves", ci_rel, 0,
+                                 f"relocated step '{expected_name}' executable payload differs from its source"))
+            source_directory = effective_working_directory(source_doc, source_job, source_step)
+            destination_directory = effective_working_directory(ci_doc, dest_job, destination_step)
+            if source_directory != destination_directory:
+                problems.append(("prmoves", ci_rel, 0,
+                                 f"relocated step '{expected_name}' working directory is "
+                                 f"'{destination_directory}', expected '{source_directory}'"))
+            source_environment = effective_environment(source_doc, source_job, source_step)
+            destination_environment = effective_environment(ci_doc, dest_job, destination_step)
+            for key, value in source_environment.items():
+                if key not in destination_environment or destination_environment[key] != value:
+                    problems.append(("prmoves", ci_rel, 0,
+                                     f"relocated step '{expected_name}' environment '{key}' differs from its source"))
+            required_terms = {"always()", "!cancelled()", "github.event_name == 'pull_request'"}
+            if path_flag is not None:
+                required_terms.add(f"steps.paths.outputs.{path_flag} == 'true'")
+            required_terms.update(condition_terms(source_step.get("if")))
+            actual_terms = condition_terms(destination_step.get("if"))
+            if actual_terms != required_terms:
+                problems.append(("prmoves", ci_rel, 0,
+                                 f"relocated step '{expected_name}' condition differs from the required "
+                                 f"source + resilience + path guard (missing={sorted(required_terms - actual_terms)}, "
+                                 f"unexpected={sorted(actual_terms - required_terms)})"))
+
+    for (source_key, source_job_id), entry in sorted(replacements.items()):
+        reason = str(entry.get("reason") or "").strip()
+        if not reason:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_replacements entry '{source_key}' / '{source_job_id}' has no reason"))
+        target = str(entry.get("to") or "")
+        match = re.fullmatch(r"scripts/ci_changed_paths\.py:([A-Za-z0-9_-]+)", target)
+        if not match:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_replacements entry '{source_key}' / '{source_job_id}' has invalid target '{target}'"))
+            continue
+        path_flag = match.group(1)
+        if entry.get("path_flag") != path_flag:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_replacements entry '{source_key}' / '{source_job_id}' path_flag must be "
+                             f"'{path_flag}'"))
+        if path_flag not in flags:
+            problems.append(("prmoves", GATES_FILE, 0,
+                             f"pr_replacements entry '{source_key}' / '{source_job_id}' names unknown "
+                             f"path_flag {path_flag!r}"))
+        source_doc, source_job = source_workflow_problems(
+            root, source_key, source_job_id, source_cache, problems)
+        if source_doc is None or source_job is None:
+            continue
+        guard = f"steps.paths.outputs.{path_flag} == 'true'"
+        users = []
+        for job_id, job in ci_jobs.items():
+            if not isinstance(job, dict):
+                continue
+            if any(guard in condition_terms(step.get("if"))
+                   for step in (job.get("steps") or []) if isinstance(step, dict)):
+                users.append(job_id)
+        if not users:
+            problems.append(("prmoves", ci_rel, 0,
+                             f"replacement path flag '{path_flag}' is not used by any ci.yml step"))
+        for job_id in users:
+            problems.extend(path_detector_problems(ci_jobs[job_id], ci_rel, job_id))
+    return problems
 
 
 def gate_problems(root, base=None):
@@ -1020,6 +1608,380 @@ def self_test():
             if not [m for m in found if "'d' -> 'a' has no reason" in m]:
                 failures.append("gates detector accepted a move recorded without a reason")
 
+        def write_yaml_fixture(repo, rel, doc):
+            path = os.path.join(repo, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                handle.write(yaml.safe_dump(doc, sort_keys=False))
+
+        def write_json_fixture(repo, rel, doc):
+            path = os.path.join(repo, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                handle.write(json.dumps(doc))
+
+        cap_repo = os.path.join(tmp, "cap-repo")
+        cap_jobs = ["contract", "frontend", "data-plane", "storybook-visual",
+                    "supply-chain", "docs"]
+        cap_workflow = {
+            "name": "CI",
+            "on": {"pull_request": None},
+            "permissions": {"contents": "read"},
+            "jobs": {
+                job_id: {
+                    "runs-on": "ubuntu-latest",
+                    "steps": [{"name": "Check", "run": "true"}],
+                }
+                for job_id in cap_jobs
+            },
+        }
+        cap_inventory = {
+            "version": 1,
+            "pr_checks": {"max": 6, "expected": {"ci.yml": cap_jobs}},
+        }
+        cap_ci_rel = f"{WORKFLOW_DIR}/ci.yml"
+        cap_extra_rel = f"{WORKFLOW_DIR}/extra-pr.yml"
+        write_yaml_fixture(cap_repo, cap_ci_rel, cap_workflow)
+        write_json_fixture(cap_repo, GATES_FILE, cap_inventory)
+        write_yaml_fixture(cap_repo, f"{WORKFLOW_DIR}/specialist.yml", {
+            "name": "Specialist", "on": {"workflow_dispatch": None},
+            "jobs": {"special": {"runs-on": "ubuntu-latest",
+                                 "steps": [{"name": "Check", "run": "true"}]}},
+        })
+        baseline = pr_cap_problems(cap_repo)
+        if baseline:
+            failures.append("prcap detector reported a valid six-job PR workflow: "
+                            + " || ".join(message for _, _, _, message in baseline))
+
+        def expect_cap_failure(label, mutate, needle):
+            workflow = copy.deepcopy(cap_workflow)
+            inventory = copy.deepcopy(cap_inventory)
+            extra = os.path.join(cap_repo, cap_extra_rel.replace("/", os.sep))
+            if os.path.exists(extra):
+                os.remove(extra)
+            mutate(workflow, inventory)
+            write_yaml_fixture(cap_repo, cap_ci_rel, workflow)
+            write_json_fixture(cap_repo, GATES_FILE, inventory)
+            found = [message for _, _, _, message in pr_cap_problems(cap_repo)]
+            if not any(needle in message for message in found):
+                failures.append(f"prcap detector did not report {label}: {' || '.join(found)}")
+
+        def add_matrix(workflow, _):
+            workflow["jobs"]["contract"]["strategy"] = {"matrix": {"os": ["ubuntu-latest"]}}
+
+        def add_reusable_job(workflow, _):
+            workflow["jobs"]["contract"] = {
+                "uses": "owner/repo/.github/workflows/reusable.yml@v1"
+            }
+
+        def add_write_permission(workflow, _):
+            workflow["permissions"]["contents"] = "write"
+
+        def add_job_write_permission(workflow, _):
+            workflow["jobs"]["contract"]["permissions"] = {"contents": "write"}
+
+        def remove_permissions(workflow, _):
+            workflow.pop("permissions")
+
+        def add_extra_pr_workflow(workflow, _):
+            write_yaml_fixture(cap_repo, cap_extra_rel, {
+                "name": "Extra", "on": {"pull_request": None},
+                "jobs": {"extra": {"runs-on": "ubuntu-latest",
+                                   "steps": [{"name": "Check", "run": "true"}]}},
+            })
+
+        def reduce_contract(workflow, inventory):
+            workflow["jobs"] = {"contract": workflow["jobs"]["contract"]}
+            inventory["pr_checks"]["max"] = 1
+            inventory["pr_checks"]["expected"]["ci.yml"] = ["contract"]
+
+        def duplicate_expected_job(_, inventory):
+            inventory["pr_checks"]["expected"]["ci.yml"].append("contract")
+
+        def exceed_maximum(_, inventory):
+            inventory["pr_checks"]["max"] = 7
+
+        expect_cap_failure("a removed job", lambda w, _: w["jobs"].pop("docs"), "missing=['docs']")
+        expect_cap_failure("a matrix", add_matrix, "declares a strategy")
+        expect_cap_failure("a reusable workflow job", add_reusable_job, "calls a reusable workflow")
+        expect_cap_failure("workflow write permission", add_write_permission, "grants 'contents: write'")
+        expect_cap_failure("job write permission", add_job_write_permission, "job 'contract' permissions")
+        expect_cap_failure("implicit permissions", remove_permissions, "does not declare permissions")
+        expect_cap_failure("a second PR workflow", add_extra_pr_workflow,
+                           "ci.yml must be the only pull-request workflow")
+        expect_cap_failure("a reduced six-check contract", reduce_contract,
+                           "consolidated PR contract requires exactly six")
+        expect_cap_failure("a duplicate expected job", duplicate_expected_job,
+                           "declares a job id more than once")
+        expect_cap_failure("a maximum above six", exceed_maximum, "above the hard cap of 6")
+
+        def init_git_fixture(repo):
+            os.makedirs(repo, exist_ok=True)
+            proc = lambda *args: subprocess.run(
+                args, cwd=repo, capture_output=True, text=True,
+                encoding="utf-8", errors="replace")
+            proc("git", "init", "-q")
+            proc("git", "config", "user.email", "self-test@example.invalid")
+            proc("git", "config", "user.name", "self-test")
+            return proc
+
+        write_yaml_fixture(cap_repo, cap_ci_rel, cap_workflow)
+        write_json_fixture(cap_repo, GATES_FILE, cap_inventory)
+        cap_extra = os.path.join(cap_repo, cap_extra_rel.replace("/", os.sep))
+        if os.path.exists(cap_extra):
+            os.remove(cap_extra)
+        cap_git = init_git_fixture(cap_repo)
+        cap_git("git", "add", "-A")
+        cap_git("git", "commit", "-qm", "base")
+        cap_base = cap_git("git", "rev-parse", "HEAD").stdout.strip()
+        if not cap_base:
+            failures.append("self-test could not build a base commit for the PR-cap check")
+        else:
+            write_json_fixture(cap_repo, GATES_FILE, {"version": 1})
+            found = [message for _, _, _, message in pr_cap_problems(cap_repo, cap_base)]
+            if not any("(here): pr_checks is missing" in message for message in found):
+                failures.append("prcap detector let a PR delete the inventoried check contract")
+            reduced = copy.deepcopy(cap_workflow)
+            reduced["jobs"].pop("docs")
+            reduced_inventory = copy.deepcopy(cap_inventory)
+            reduced_inventory["pr_checks"]["expected"]["ci.yml"].remove("docs")
+            write_yaml_fixture(cap_repo, cap_ci_rel, reduced)
+            write_json_fixture(cap_repo, GATES_FILE, reduced_inventory)
+            found = [message for _, _, _, message in pr_cap_problems(cap_repo, cap_base)]
+            if not any("removes inventoried jobs ['docs']" in message for message in found):
+                failures.append("prcap detector let a PR lower the base branch's job contract")
+
+        intro_repo = os.path.join(tmp, "intro-repo")
+        intro_git = init_git_fixture(intro_repo)
+        write_yaml_fixture(intro_repo, cap_ci_rel, cap_workflow)
+        write_json_fixture(intro_repo, GATES_FILE, {"version": 1})
+        intro_git("git", "add", "-A")
+        intro_git("git", "commit", "-qm", "before consolidation")
+        intro_base = intro_git("git", "rev-parse", "HEAD").stdout.strip()
+        write_json_fixture(intro_repo, GATES_FILE, cap_inventory)
+        found = [message for _, _, _, message in pr_cap_problems(intro_repo, intro_base)]
+        if found:
+            failures.append("prcap detector blocked the initial introduction of the check contract: "
+                            + " || ".join(found))
+
+        moves_repo = os.path.join(tmp, "moves-repo")
+        guard = ("always() && !cancelled() && github.event_name == 'pull_request' "
+                 "&& steps.paths.outputs.sdk == 'true'")
+        source_workflow = {
+            "name": "Specialist",
+            "on": {"workflow_dispatch": None},
+            "env": {"SHARED": "source"},
+            "jobs": {
+                "special": {
+                    "runs-on": "ubuntu-latest",
+                    "defaults": {"run": {"working-directory": "packages/sdk"}},
+                    "env": {"JOB_ENV": "same"},
+                    "steps": [
+                        {"name": "Checkout repository", "uses": "actions/checkout@v7",
+                         "with": {"fetch-depth": 2, "persist-credentials": False}},
+                        {"name": "Prepare", "run": "echo prepare", "env": {"STEP_ENV": "same"}},
+                        {"name": "Setup", "uses": "actions/setup-node@v7",
+                         "with": {"node-version": "22"}},
+                        {"name": "Report", "if": "always()", "run": "echo report"},
+                    ],
+                },
+            },
+        }
+        destination_workflow = {
+            "name": "CI",
+            "on": {"pull_request": None},
+            "permissions": {"contents": "read"},
+            "env": {"SHARED": "source"},
+            "jobs": {
+                "contract": {
+                    "runs-on": "ubuntu-latest",
+                    "defaults": {"run": {"working-directory": "packages/sdk"}},
+                    "env": {"JOB_ENV": "same"},
+                    "steps": [
+                        {"name": "Detect changed paths", "id": "paths",
+                         "if": "github.event_name == 'pull_request'",
+                         "env": {"PR_BASE_SHA": "${{ github.event.pull_request.base.sha }}"},
+                         "run": "python3 scripts/ci_changed_paths.py"},
+                        {"name": "Checkout repository", "uses": "actions/checkout@v7",
+                         "with": {"fetch-depth": 0, "persist-credentials": False}},
+                        {"name": "[specialist:special] Prepare", "if": guard,
+                         "run": "echo prepare", "env": {"STEP_ENV": "same"}},
+                        {"name": "[specialist:special] Setup", "if": guard,
+                         "uses": "actions/setup-node@v7", "with": {"node-version": "22"}},
+                        {"name": "[specialist:special] Report",
+                         "if": guard + " && always()", "run": "echo report"},
+                        {"name": "Indexer image gate", "if": guard.replace("sdk", "indexer_image"),
+                         "run": "true"},
+                    ],
+                },
+            },
+        }
+        moves_inventory = {
+            "version": 1,
+            "pr_moves": {
+                "specialist.yml": {
+                    "special": {"to": "ci.yml:contract", "path_flag": "sdk",
+                                "reason": "self-test fixture"},
+                },
+            },
+            "pr_replacements": {
+                "infra.yml": {
+                    "docker-changes": {
+                        "to": "scripts/ci_changed_paths.py:indexer_image",
+                        "path_flag": "indexer_image", "reason": "self-test fixture",
+                    },
+                },
+            },
+        }
+
+        def write_moves_fixture(source, destination, inventory):
+            write_yaml_fixture(moves_repo, f"{WORKFLOW_DIR}/specialist.yml", source)
+            write_yaml_fixture(moves_repo, f"{WORKFLOW_DIR}/infra.yml", {
+                "name": "Infra", "on": {"workflow_dispatch": None},
+                "jobs": {"docker-changes": {"runs-on": "ubuntu-latest",
+                                             "steps": [{"name": "Detect", "run": "true"}]}}},
+            )
+            write_yaml_fixture(moves_repo, cap_ci_rel, destination)
+            write_json_fixture(moves_repo, GATES_FILE, inventory)
+            script = os.path.join(moves_repo, "scripts", "ci_changed_paths.py")
+            os.makedirs(os.path.dirname(script), exist_ok=True)
+            with open(script, "w", encoding="utf-8", newline="") as handle:
+                handle.write('PATH_GROUPS = {"sdk": ("sdks/**",), '
+                             '"indexer_image": ("infra/docker/**",)}\n'
+                             'COMMON_PATHS = (".github/workflows/ci.yml", '
+                             '"scripts/ci_changed_paths.py", "tests/ci_changed_paths_test.py")\n')
+
+        write_moves_fixture(source_workflow, destination_workflow, moves_inventory)
+        baseline = pr_moves_problems(moves_repo)
+        if baseline:
+            failures.append("prmoves detector reported a valid relocation: "
+                            + " || ".join(message for _, _, _, message in baseline))
+
+        def expect_moves_failure(label, mutate, needle):
+            source = copy.deepcopy(source_workflow)
+            destination = copy.deepcopy(destination_workflow)
+            inventory = copy.deepcopy(moves_inventory)
+            mutate(source, destination, inventory)
+            write_moves_fixture(source, destination, inventory)
+            found = [message for _, _, _, message in pr_moves_problems(moves_repo)]
+            if not any(needle in message for message in found):
+                failures.append(f"prmoves detector did not report {label}: {' || '.join(found)}")
+
+        def destination_step(destination, name):
+            return next(step for step in destination["jobs"]["contract"]["steps"]
+                        if step.get("name") == name)
+
+        def wrong_prefix(_, destination, __):
+            destination_step(destination, "[specialist:special] Prepare")["name"] = "Prepare"
+
+        def changed_payload(_, destination, __):
+            destination_step(destination, "[specialist:special] Prepare")["run"] = "echo changed"
+
+        def changed_directory(_, destination, __):
+            destination_step(destination, "[specialist:special] Prepare")["working-directory"] = "frontend"
+
+        def changed_environment(_, destination, __):
+            destination_step(destination, "[specialist:special] Prepare")["env"]["STEP_ENV"] = "changed"
+
+        def missing_resilience(_, destination, __):
+            step = destination_step(destination, "[specialist:special] Prepare")
+            step["if"] = step["if"].replace("always() && ", "")
+
+        def wrong_path_guard(_, destination, __):
+            step = destination_step(destination, "[specialist:special] Prepare")
+            step["if"] = step["if"].replace("outputs.sdk", "outputs.fuzz")
+
+        def duplicate_copy(_, destination, __):
+            destination["jobs"]["contract"]["steps"].append(
+                copy.deepcopy(destination_step(destination, "[specialist:special] Prepare")))
+
+        def shallow_checkout(source, destination, __):
+            source["jobs"]["special"]["steps"][0]["with"]["fetch-depth"] = 3
+            destination["jobs"]["contract"]["steps"][1]["with"]["fetch-depth"] = 2
+
+        def changed_checkout_action(_, destination, __):
+            destination["jobs"]["contract"]["steps"][1]["uses"] = "actions/checkout@v6"
+
+        def source_pr_trigger(source, _, __):
+            source["on"]["pull_request"] = None
+
+        def missing_detector(_, destination, __):
+            destination["jobs"]["contract"]["steps"].pop(0)
+
+        def wrong_base_sha(_, destination, __):
+            destination["jobs"]["contract"]["steps"][0]["env"]["PR_BASE_SHA"] = "HEAD"
+
+        def unknown_flag(_, __, inventory):
+            inventory["pr_moves"]["specialist.yml"]["special"]["path_flag"] = "missing"
+
+        def missing_reason(_, __, inventory):
+            inventory["pr_moves"]["specialist.yml"]["special"].pop("reason")
+
+        def unnamed_source_step(source, _, __):
+            source["jobs"]["special"]["steps"][1].pop("name")
+
+        def unused_replacement(_, destination, __):
+            destination["jobs"]["contract"]["steps"] = [
+                step for step in destination["jobs"]["contract"]["steps"]
+                if step.get("name") != "Indexer image gate"
+            ]
+
+        expect_moves_failure("a changed provenance prefix", wrong_prefix, "expected exactly one copy")
+        expect_moves_failure("a changed executable payload", changed_payload, "executable payload differs")
+        expect_moves_failure("a changed working directory", changed_directory, "working directory is")
+        expect_moves_failure("a changed step environment", changed_environment, "environment 'STEP_ENV' differs")
+        expect_moves_failure("a missing always() guard", missing_resilience, "condition differs")
+        expect_moves_failure("a wrong path guard", wrong_path_guard, "condition differs")
+        expect_moves_failure("a duplicate relocated step", duplicate_copy, "found 2")
+        expect_moves_failure("a shallow shared checkout", shallow_checkout, "is shallower than")
+        expect_moves_failure("a changed checkout action", changed_checkout_action,
+                             "shared checkout action differs")
+        expect_moves_failure("a source PR trigger", source_pr_trigger, "source workflow still declares")
+        expect_moves_failure("a missing path detector", missing_detector, "exactly one changed-path detector")
+        expect_moves_failure("a wrong PR base SHA", wrong_base_sha, "does not receive the PR base SHA")
+        expect_moves_failure("an unknown path flag", unknown_flag, "names unknown path_flag")
+        expect_moves_failure("a missing migration reason", missing_reason, "has no reason")
+        expect_moves_failure("an unnamed source step", unnamed_source_step, "has no name")
+        expect_moves_failure("an unused replacement flag", unused_replacement, "is not used by any ci.yml step")
+
+        write_moves_fixture(source_workflow, destination_workflow, moves_inventory)
+        moves_git = init_git_fixture(moves_repo)
+        moves_git("git", "add", "-A")
+        moves_git("git", "commit", "-qm", "base")
+        moves_base = moves_git("git", "rev-parse", "HEAD").stdout.strip()
+        if not moves_base:
+            failures.append("self-test could not build a base commit for the relocation check")
+        else:
+            missing_section = copy.deepcopy(moves_inventory)
+            missing_section.pop("pr_moves")
+            write_moves_fixture(source_workflow, destination_workflow, missing_section)
+            found = [message for _, _, _, message in pr_moves_problems(moves_repo, moves_base)]
+            if not any("(here): pr_moves is missing" in message for message in found):
+                failures.append("prmoves detector let a PR delete the relocation inventory")
+            missing_entry = copy.deepcopy(moves_inventory)
+            missing_entry["pr_moves"]["specialist.yml"].pop("special")
+            write_moves_fixture(source_workflow, destination_workflow, missing_entry)
+            found = [message for _, _, _, message in pr_moves_problems(moves_repo, moves_base)]
+            if not any("existed at the base and is missing here" in message for message in found):
+                failures.append("prmoves detector let a PR unenforce one relocated gate")
+            changed_entry = copy.deepcopy(moves_inventory)
+            changed_entry["pr_moves"]["specialist.yml"]["special"]["path_flag"] = "indexer_image"
+            write_moves_fixture(source_workflow, destination_workflow, changed_entry)
+            found = [message for _, _, _, message in pr_moves_problems(moves_repo, moves_base)]
+            if not any("differs between base and head" in message for message in found):
+                failures.append("prmoves detector accepted a changed relocation record")
+
+        write_moves_fixture(source_workflow, destination_workflow, moves_inventory)
+        script = os.path.join(moves_repo, "scripts", "ci_changed_paths.py")
+        with open(script, "w", encoding="utf-8", newline="") as handle:
+            handle.write('PATH_GROUPS = {"sdk": ("sdks/**",), '
+                         '"indexer_image": ("infra/docker/**",)}\n'
+                         'COMMON_PATHS = ()\n')
+        found = [message for _, _, _, message in pr_moves_problems(moves_repo)]
+        if not any("COMMON_PATHS omits required CI inputs" in message for message in found):
+            failures.append("prmoves detector let the path detector stop selecting every specialist "
+                            "group when CI configuration changes")
+
         # encoding: UTF-16 and a UTF-8 BOM must both be reported.
         with open(os.path.join(repo, "notes.md"), "wb") as handle:
             handle.write("# StreamPay\nsecond line\n".encode("utf-16"))
@@ -1070,8 +2032,8 @@ def self_test():
         for message in failures:
             print(f"SELF-TEST FAIL: {message}")
         return 1
-    print(f"self-test: {len(FIXTURES) + 2} detectors each fired on their own fixture and stayed "
-          "quiet on a valid one; retired, added and relocated steps are handled. The checker is "
+    print("self-test: workflow, path, gate, encoding, PR-cap and relocation detectors each "
+          "fired on deliberate faults and stayed quiet on valid fixtures. The checker is "
           "capable of failing.")
     return 0
 
@@ -1126,6 +2088,10 @@ def main(argv=None):
         problems += check_path_filters(root)
     if "encoding" in rules:
         problems += check_encodings(root, base)
+    if "prcap" in rules:
+        problems += pr_cap_problems(root, base)
+    if "prmoves" in rules:
+        problems += pr_moves_problems(root, base)
 
     counts = {rule: sum(1 for p in problems if p[0] == rule) for rule in rules}
     summary = ", ".join(f"{rule}={counts[rule]}" for rule in rules)

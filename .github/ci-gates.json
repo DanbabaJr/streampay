@@ -237,6 +237,7 @@
       "integrity": [
         "Self-test: the checker can still fail",
         "Self-test: the source scanner can still fail",
+        "Changed-path detector tests",
         "Workflows parse and every step is well-formed",
         "Every required CI gate is still wired",
         "No text file is committed as UTF-16 or with a BOM",
@@ -245,7 +246,144 @@
       ]
     }
   },
-  "retired": {},
+  "pr_checks": {
+    "max": 6,
+    "expected": {
+      "ci.yml": [
+        "contract",
+        "frontend",
+        "data-plane",
+        "storybook-visual",
+        "supply-chain",
+        "docs"
+      ]
+    }
+  },
+  "pr_moves": {
+    "fuzz-gate.yml": {
+      "fuzz_gate": {
+        "to": "ci.yml:contract",
+        "path_flag": "fuzz",
+        "reason": "PR fuzz build and regression replay folded into Contract without adding a check."
+      }
+    },
+    "wasm-diff.yml": {
+      "wasm-diff": {
+        "to": "ci.yml:contract",
+        "path_flag": "wasm_diff",
+        "reason": "Function-level Wasm diff and its artifacts folded into Contract without adding a check."
+      }
+    },
+    "rehearsal.yml": {
+      "rehearsal": {
+        "to": "ci.yml:contract",
+        "path_flag": "rehearsal",
+        "reason": "Release-pipeline rehearsal folded into Contract without adding a check."
+      }
+    },
+    "sdk.yml": {
+      "spec": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "SDK schema and generated-client checks folded into Contract without adding a check."
+      },
+      "conformance": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "Cross-SDK conformance folded into Contract without adding a check."
+      },
+      "mobile": {
+        "to": "ci.yml:contract",
+        "path_flag": "sdk",
+        "reason": "Mobile binding and host checks folded into Contract without adding a check."
+      },
+      "vectors": {
+        "to": "ci.yml:frontend",
+        "path_flag": "sdk",
+        "reason": "Deterministic vector regeneration folded into Frontend without adding a check."
+      },
+      "typescript": {
+        "to": "ci.yml:frontend",
+        "path_flag": "sdk",
+        "reason": "TypeScript SDK checks folded into Frontend without adding a check."
+      }
+    },
+    "infra.yml": {
+      "terraform": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "infra",
+        "reason": "Terraform render and zero-drift checks folded into Data plane without adding a check."
+      },
+      "terraform-plan-gate": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "infra",
+        "reason": "Credential-free Terraform plan gate folded into Data plane without adding a check."
+      },
+      "indexer-image": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "indexer_image",
+        "reason": "Indexer multi-arch image and size-budget checks folded into Data plane without adding a check."
+      }
+    },
+    "secrets-rotation.yml": {
+      "rotation-tests": {
+        "to": "ci.yml:data-plane",
+        "path_flag": "rotation",
+        "reason": "Secrets-rotation regression checks folded into Data plane without adding a check."
+      }
+    },
+    "sbom-vex.yml": {
+      "gate": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "sbom",
+        "reason": "SBOM and VEX generation folded into Security without adding a check."
+      }
+    },
+    "attestation.yml": {
+      "tamper-audit": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "attestation",
+        "reason": "Attestation tamper audit folded into Security without adding a check."
+      }
+    },
+    "release-sign.yml": {
+      "self-test": {
+        "to": "ci.yml:supply-chain",
+        "path_flag": "release_signing",
+        "reason": "Sigstore verifier self-tests folded into Security without adding a check."
+      }
+    },
+    "whitepaper-claims.yml": {
+      "audit": {
+        "to": "ci.yml:docs",
+        "path_flag": "whitepaper",
+        "reason": "Whitepaper claim-to-code audit folded into Docs without adding a check."
+      }
+    },
+    "workflow-integrity.yml": {
+      "integrity": {
+        "to": "ci.yml:docs",
+        "path_flag": null,
+        "reason": "Workflow integrity runs on every PR inside Docs without adding a check."
+      }
+    }
+  },
+  "pr_replacements": {
+    "infra.yml": {
+      "docker-changes": {
+        "to": "scripts/ci_changed_paths.py:indexer_image",
+        "path_flag": "indexer_image",
+        "reason": "The PR image-change detector now emits the indexer_image flag consumed by Data plane."
+      }
+    }
+  },
+  "retired": {
+    "wasm-diff.yml": {
+      "wasm-diff": {
+        "Record PR Number": "The number came from a file the pull request writes, and the privileged commenter trusted it, so a PR could point the bot's comment at any issue in the repo. The commenter now resolves the pull request from the workflow_run event (or the Actions API) and re-validates repository, head SHA and open state before writing, so the artifact is unnecessary as well as unsafe."
+      }
+    }
+  },
   "moved": {
     "ci.yml": {
       "devcontainer-verify": {
