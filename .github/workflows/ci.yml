@@ -89,6 +89,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit tests (RUM consent, privacy, ingest, lab gate)
+        run: npm test
+
       - name: Build
         run: npm run build
 

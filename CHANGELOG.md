@@ -9,6 +9,12 @@ interface: they are only ever appended to, never renumbered or reused.
 
 ## [Unreleased]
 
+### Added
+- Frontend: consent-gated real-user monitoring of Core Web Vitals (LCP, INP, CLS)
+  per route, with sampling, rate limits, a remote kill switch, boundary
+  redaction, a field dashboard at `/rum`, and a lab budget gate
+  (`npm run rum:gate`) that fails on regression. See `docs/RUM.md`.
+
 ## [0.3.0] - 2026-10-04
 
 ### Changed

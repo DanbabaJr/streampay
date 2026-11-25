@@ -1,0 +1,13 @@
+{
+  "field": {
+    "default": { "lcp": 2500, "inp": 200, "cls": 0.1 },
+    "/": { "lcp": 2500, "inp": 200, "cls": 0.1 },
+    "/stream/[id]": { "lcp": 2800, "inp": 200, "cls": 0.1 }
+  },
+  "lab": {
+    "tolerancePct": 10,
+    "default": { "lcp": 3000, "tbt": 300, "cls": 0.1 },
+    "/": { "lcp": 3000, "tbt": 300, "cls": 0.1 },
+    "/stream/[id]": { "lcp": 3300, "tbt": 300, "cls": 0.1 }
+  }
+}
