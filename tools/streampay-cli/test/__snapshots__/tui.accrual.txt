@@ -1,0 +1,11 @@
+StreamPay  testnet  recipient GBRPYH...C7OX2H  [live]
+ 1:Streams  [2:Accrual]  3:Forecast   4:Events 
+------------------------------------------------------------------------
+  stream #1 (Active)
+  accrued:    500 / 1000
+  withdrawn:  100
+  unclaimed:  400
+  on-chain available: 250
+  sender: GAAAAA...AAAWHF  token: CBEPDN...ZPCCEL
+------------------------------------------------------------------------
+tab/arrows: panels  j/k: select  w: withdraw  c: cancel  r: refresh  q: quit

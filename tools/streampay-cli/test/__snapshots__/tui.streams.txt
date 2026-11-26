@@ -1,0 +1,7 @@
+StreamPay  testnet  recipient GBRPYH...C7OX2H  [live]
+[1:Streams]  2:Accrual   3:Forecast   4:Events 
+------------------------------------------------------------------------
+> #1    Active     deposit 1000 withdrawn 100 available 250
+  #2    Active     deposit 1000 withdrawn 100 available 0
+------------------------------------------------------------------------
+tab/arrows: panels  j/k: select  w: withdraw  c: cancel  r: refresh  q: quit

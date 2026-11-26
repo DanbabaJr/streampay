@@ -24,7 +24,7 @@ _streampay() {
   case $cmd in
     ("")
       if [[ $cur != -* ]]; then
-        compadd -- create withdraw cancel top-up claim-all status get key profile completion help
+        compadd -- create withdraw cancel top-up claim-all status get tui key profile completion help
         return
       fi
       ;;
@@ -35,6 +35,7 @@ _streampay() {
     (claim-all) ;;
     (status) opts+=(--stream-id --watch --interval) ;;
     (get) opts+=(--stream-id --watch --interval) ;;
+    (tui) opts+=(--recipient --interval) ;;
     (key)
       if [[ -z $sub && $cur != -* ]]; then
         compadd -- encrypt
