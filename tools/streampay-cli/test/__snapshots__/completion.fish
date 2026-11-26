@@ -56,6 +56,7 @@ complete -c streampay -n '__streampay_depth 0' -f -a top-up -d 'Top up a stream'
 complete -c streampay -n '__streampay_depth 0' -f -a claim-all -d 'Withdraw every claimable recipient stream'
 complete -c streampay -n '__streampay_depth 0' -f -a status -d 'Read and print one decoded stream snapshot'
 complete -c streampay -n '__streampay_depth 0' -f -a get -d 'Alias for status'
+complete -c streampay -n '__streampay_depth 0' -f -a tui -d 'Interactive dashboard of a recipient'\''s streams (JSON Lines when not a TTY)'
 complete -c streampay -n '__streampay_depth 0' -f -a key -d 'Manage encrypted signer keys'
 complete -c streampay -n '__streampay_depth 0' -f -a profile -d 'Manage named network profiles (secrets are never stored)'
 complete -c streampay -n '__streampay_depth 0' -f -a completion -d 'Print a shell completion script'
@@ -88,6 +89,10 @@ complete -c streampay -n '__streampay_is status' -l interval -x -d 'Watch poll i
 complete -c streampay -n '__streampay_is get' -l stream-id -x -d 'Stream id'
 complete -c streampay -n '__streampay_is get' -l watch -d 'Poll and emit JSON Lines, one line per state change'
 complete -c streampay -n '__streampay_is get' -l interval -x -d 'Watch poll interval in milliseconds (default 5000, minimum 1000)'
+
+# tui
+complete -c streampay -n '__streampay_is tui' -l recipient -x -d 'Recipient address (default: --source or the signing key)'
+complete -c streampay -n '__streampay_is tui' -l interval -x -d 'Watch poll interval in milliseconds (default 5000, minimum 1000)'
 
 # key
 complete -c streampay -n '__streampay_is key; and __streampay_depth 1' -f -a encrypt -d 'Write an encrypted signer key file'

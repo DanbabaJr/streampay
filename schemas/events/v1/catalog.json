@@ -332,6 +332,12 @@
       "struct": "StreamScheduled"
     },
     {
+      "event_key": "stream_swept",
+      "fingerprint": "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d",
+      "schema": "events/stream_swept.json",
+      "struct": "StreamSwept"
+    },
+    {
       "event_key": "stream_topped_up",
       "fingerprint": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
       "schema": "events/stream_topped_up.json",

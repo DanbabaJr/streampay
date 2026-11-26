@@ -76,6 +76,10 @@
       "value": 1,
       "type": "u32"
     },
+    "MIN_CLAIM_AMOUNT": {
+      "value": 1000000,
+      "type": "i128"
+    },
     "MIN_DISPUTE_BOND": {
       "value": 1,
       "type": "i128"
@@ -115,6 +119,10 @@
     "STREAM_RECORD_VERSION_V2": {
       "value": 2,
       "type": "u32"
+    },
+    "SWEEP_GRACE_SECONDS": {
+      "value": 2592000,
+      "type": "u64"
     },
     "TARGET_SCHEMA_VERSION": {
       "value": 2,
@@ -2191,6 +2199,32 @@
       "returns": {
         "option": "StreamHook"
       },
+      "error": null,
+      "mutating": true
+    },
+    {
+      "name": "sweep_stream",
+      "doc": "Permissionlessly removes a finished stream's storage (#78).\n\nAnyone may call it; no authorization is required and no tokens move. It\nsucceeds only when the stream is `Depleted` or `Cancelled`, the ledger\nclock is at or past `end_time + SWEEP_GRACE_SECONDS`, and nothing\nencumbers it; otherwise it returns [`StreamError::StreamNotSweepable`].\nReturns the number of persistent entries deleted and emits [`StreamSwept`].",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "u32",
+      "error": "StreamError",
+      "mutating": true
+    },
+    {
+      "name": "is_sweepable",
+      "doc": "Whether [`Self::sweep_stream`] would succeed for `stream_id` right now.",
+      "args": [
+        {
+          "name": "stream_id",
+          "type": "u64"
+        }
+      ],
+      "returns": "bool",
       "error": null,
       "mutating": true
     }
@@ -5301,6 +5335,35 @@
           "name": "error_code",
           "type": "u32",
           "doc": ""
+        }
+      ]
+    },
+    {
+      "name": "StreamSwept",
+      "topic": "stream_swept",
+      "doc": "Emitted when `sweep_stream` removes a finished, settled, unencumbered\nstream's storage (#78). No tokens move: a swept stream holds none.",
+      "topicFields": [
+        {
+          "name": "stream_id",
+          "type": "u64",
+          "doc": ""
+        }
+      ],
+      "dataFields": [
+        {
+          "name": "refund_target",
+          "type": "address",
+          "doc": "The stream's refund target at sweep time: the designated party for its\nunaccrued remainder. The sweep pays it nothing (the stream holds no tokens,\nand Soroban does not refund prepaid rent when an entry is deleted)."
+        },
+        {
+          "name": "depleted",
+          "type": "bool",
+          "doc": "True when the stream ended `Depleted`, false when it ended `Cancelled`."
+        },
+        {
+          "name": "entries_removed",
+          "type": "u32",
+          "doc": "Number of per-stream persistent entries deleted."
         }
       ]
     }

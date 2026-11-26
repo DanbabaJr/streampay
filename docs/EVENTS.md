@@ -61,6 +61,7 @@ Every event the contract emits, with its on-chain topic layout and decoded data 
 | `stream_refund_target_changed` | `StreamRefundTargetChanged` | `stream_id: u64` | `previous_target: Address`, `new_target: Address`, `at_creation: bool` | `sha256:20f8ba96f8e…` |
 | `stream_resumed` | `StreamResumed` | `stream_id: u64` | `new_end_time: u64` | `sha256:76526b2a695…` |
 | `stream_scheduled` | `StreamScheduled` | `intent_id: u64` | `sender: Address`, `recipient: Address`, `token: Address`, `deposit: i128`, `start_time: u64`, `end_time: u64`, `cancelable: bool`, `interval: u64`, `occurrences: u32`, `fee_budget: i128`, `execute_after: u64`, `expires_at: u64` | `sha256:fcfb97a34e2…` |
+| `stream_swept` | `StreamSwept` | `stream_id: u64` | `refund_target: Address`, `depleted: bool`, `entries_removed: u32` | `sha256:245343ff47c…` |
 | `stream_topped_up` | `StreamToppedUp` | `stream_id: u64` | `sender: Address`, `amount: i128`, `new_deposit: i128` | `sha256:84629390198…` |
 | `streams_created` | `StreamsCreated` | `sender: Address` | `stream_ids: Vec<u64>` | `sha256:affd0ccd120…` |
 | `template_approved` | `TemplateApproved` | `template_id: u32` | `version: u32`, `token: Address`, `duration: u64` | `sha256:2556ce26fef…` |

@@ -489,7 +489,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "i128": "340499"
+                  "i128": "687340498"
                 },
                 {
                   "u64": "207"
@@ -542,7 +542,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "1225"
+                  "i128": "2474425"
                 }
               ]
             }
@@ -578,7 +578,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "i128": "361725"
+                  "i128": "465361724"
                 },
                 {
                   "u64": "239"
@@ -634,7 +634,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "1302"
+                  "i128": "1675302"
                 }
               ]
             }
@@ -671,7 +671,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "i128": "917809"
+                  "i128": "226917808"
                 },
                 {
                   "u64": "241"
@@ -794,7 +794,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "1864"
+                  "i128": "816520"
                 }
               ]
             }
@@ -1109,7 +1109,7 @@
                   "address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
                 },
                 {
-                  "i128": "383125"
+                  "i128": "267383124"
                 },
                 {
                   "u64": "288"
@@ -1157,7 +1157,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "940"
+                  "i128": "76"
                 }
               ]
             }
@@ -1241,7 +1241,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "38"
+                  "i128": "26738"
                 }
               ]
             }
@@ -1280,7 +1280,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "i128": "1776"
+                  "i128": "406001775"
                 },
                 {
                   "u64": "286"
@@ -1376,7 +1376,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "321"
+                  "i128": "9961"
                 }
               ]
             }
@@ -1544,7 +1544,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "i128": "849368"
+                  "i128": "125849367"
                 },
                 {
                   "u64": "288"
@@ -1830,7 +1830,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                 },
                 {
-                  "i128": "2649"
+                  "i128": "92186"
                 }
               ]
             }
@@ -3184,7 +3184,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "340499"
+                            "i128": "687340498"
                           }
                         },
                         {
@@ -3260,7 +3260,7 @@
                             "symbol": "withdrawn"
                           },
                           "val": {
-                            "i128": "56749"
+                            "i128": "114556749"
                           }
                         }
                       ]
@@ -3321,7 +3321,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "378677"
+                            "i128": "465378676"
                           }
                         },
                         {
@@ -3397,7 +3397,7 @@
                             "symbol": "withdrawn"
                           },
                           "val": {
-                            "i128": "260557"
+                            "i128": "320214685"
                           }
                         }
                       ]
@@ -3458,7 +3458,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "917809"
+                            "i128": "226917808"
                           }
                         },
                         {
@@ -3534,7 +3534,7 @@
                             "symbol": "withdrawn"
                           },
                           "val": {
-                            "i128": "917809"
+                            "i128": "226917808"
                           }
                         }
                       ]
@@ -3595,7 +3595,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "386188"
+                            "i128": "267386187"
                           }
                         },
                         {
@@ -3732,7 +3732,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "1776"
+                            "i128": "406001775"
                           }
                         },
                         {
@@ -3808,7 +3808,7 @@
                             "symbol": "withdrawn"
                           },
                           "val": {
-                            "i128": "282"
+                            "i128": "64591191"
                           }
                         }
                       ]
@@ -3869,7 +3869,7 @@
                             "symbol": "deposit"
                           },
                           "val": {
-                            "i128": "856373"
+                            "i128": "125856372"
                           }
                         },
                         {
@@ -3945,7 +3945,7 @@
                             "symbol": "withdrawn"
                           },
                           "val": {
-                            "i128": "689035"
+                            "i128": "101263747"
                           }
                         }
                       ]
@@ -3992,7 +3992,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "1225"
+                      "i128": "2474425"
                     }
                   },
                   {
@@ -4036,7 +4036,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "1302"
+                      "i128": "1675302"
                     }
                   },
                   {
@@ -4080,7 +4080,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "3304"
+                      "i128": "816904"
                     }
                   },
                   {
@@ -4124,7 +4124,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "38"
+                      "i128": "26738"
                     }
                   },
                   {
@@ -4133,6 +4133,50 @@
                     },
                     "val": {
                       "address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 500000
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "StreamFee"
+                  },
+                  {
+                    "u64": "5"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "amount"
+                    },
+                    "val": {
+                      "i128": "40600"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "token"
+                    },
+                    "val": {
+                      "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                     }
                   }
                 ]
@@ -4168,7 +4212,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "4076"
+                      "i128": "604076"
                     }
                   },
                   {
@@ -4212,7 +4256,7 @@
                       "symbol": "charged_total"
                     },
                     "val": {
-                      "i128": "38"
+                      "i128": "26738"
                     }
                   },
                   {
@@ -4220,7 +4264,7 @@
                       "symbol": "withdrawn_total"
                     },
                     "val": {
-                      "i128": "38"
+                      "i128": "26738"
                     }
                   }
                 ]
@@ -4256,7 +4300,7 @@
                       "symbol": "charged_total"
                     },
                     "val": {
-                      "i128": "9907"
+                      "i128": "5611307"
                     }
                   },
                   {
@@ -4264,7 +4308,7 @@
                       "symbol": "withdrawn_total"
                     },
                     "val": {
-                      "i128": "8301"
+                      "i128": "5068470"
                     }
                   }
                 ]
@@ -4365,7 +4409,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "85070591730234615865843651857941666637"
+                      "i128": "85070591730234615865843651857674639938"
                     }
                   },
                   {
@@ -4409,7 +4453,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "999999999962"
+                      "i128": "999999973262"
                     }
                   },
                   {
@@ -4461,7 +4505,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "38"
+                      "i128": "26738"
                     }
                   },
                   {
@@ -4685,7 +4729,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "85070591730234615865843651857939547822"
+                      "i128": "85070591730234615865843651856024946427"
                     }
                   },
                   {
@@ -4729,7 +4773,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "999998065661"
+                      "i128": "999166844513"
                     }
                   },
                   {
@@ -4781,7 +4825,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "1924432"
+                      "i128": "827544180"
                     }
                   },
                   {
@@ -4833,7 +4877,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "8301"
+                      "i128": "5068470"
                     }
                   },
                   {
@@ -4885,7 +4929,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "1606"
+                      "i128": "542837"
                     }
                   },
                   {

@@ -97,6 +97,9 @@ mod oracle_staleness_test;
 mod dispute;
 #[cfg(test)]
 mod dispute_lifecycle_test;
+mod dust;
+#[cfg(test)]
+mod dust_test;
 mod errors;
 #[cfg(test)]
 mod event_registry;
@@ -150,6 +153,7 @@ pub use dispute::{
     bond_shares, required_bond, Dispute, DISPUTE_BOND_BPS, DISPUTE_TIMEOUT_SECONDS,
     MIN_DISPUTE_BOND,
 };
+pub use dust::{MIN_CLAIM_AMOUNT, MIN_STREAM_DEPOSIT, SWEEP_GRACE_SECONDS};
 pub use errors::StreamError;
 pub use events::{
     AdvanceDrawn, AdvanceLiquidated, AdvanceRepaid, BatchWithdrawSummary, BeneficiaryEnrolled,
@@ -164,7 +168,7 @@ pub use events::{
     ScheduledStreamExecuted, SenderTransferExpired, SenderTransferProposed, SenderTransferred,
     SponsorActiveSet, SponsorClaim, SponsorRegistered, StorageMigrated, StreamCancelled,
     StreamCreated, StreamPaused, StreamPolicySet, StreamRecordMigrated, StreamRefundTargetChanged,
-    StreamResumed, StreamScheduled, StreamToppedUp, StreamsCreated, TemplateApproved,
+    StreamResumed, StreamScheduled, StreamSwept, StreamToppedUp, StreamsCreated, TemplateApproved,
     TemplateInstantiated, UpgradeCancelled, UpgradeProposed, Withdrawn,
 };
 pub use governance::{
@@ -817,6 +821,9 @@ impl StreamingPayments {
         if deposit_amount <= 0 {
             return Err(surface::reject(Branch::CreateDepositNonPositive));
         }
+        if deposit_amount < MIN_STREAM_DEPOSIT {
+            return Err(surface::reject(Branch::CreateDepositBelowMinimum));
+        }
         if start_time < now {
             return Err(surface::reject(Branch::CreateStartTimeInPast));
         }
@@ -1320,6 +1327,13 @@ impl StreamingPayments {
         if amount > available {
             return Err(surface::reject(Branch::WithdrawAmountExceedsAvailable));
         }
+        dust::check_claim(
+            &env,
+            &s,
+            resolved.timestamp,
+            amount,
+            Branch::WithdrawBelowMinimum,
+        )?;
 
         Self::pay_out(&env, &mut s, amount)
     }
@@ -1371,7 +1385,16 @@ impl StreamingPayments {
             return Err(surface::reject(Branch::ConditionNotMet));
         }
         let mut s = Self::authorize_withdrawal(&env, stream_id)?;
-        Self::settle_accrued(&env, stream_id, &mut s)
+        // Same reads as `accrued_balance`, with the clock resolved once so the
+        // dust floor is judged at the exact instant the balance was measured.
+        let now = oracle::resolve_stream_time(&env, stream_id, s.uses_oracle()).timestamp;
+        let amount = stream::available_amount_with_plan(&env, &s, now)?;
+        if amount <= 0 {
+            return Err(surface::reject(Branch::WithdrawMaxNothingToWithdraw));
+        }
+        dust::check_claim(&env, &s, now, amount, Branch::WithdrawMaxBelowMinimum)?;
+        Self::pay_out(&env, &mut s, amount)?;
+        Ok(amount)
     }
 
     #[cfg_attr(
@@ -5660,5 +5683,60 @@ impl StreamingPayments {
 
     pub fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook> {
         hooks::get_hook(&env, stream_id, event_class)
+    }
+    // ------------------------------------------------- dust economics (#78)
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Permissionlessly removes a finished stream's storage (#78)."
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = "")]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Anyone may call it; no authorization is required and no tokens move. It"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " succeeds only when the stream is `Depleted` or `Cancelled`, the ledger"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " clock is at or past `end_time + SWEEP_GRACE_SECONDS`, and nothing"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " encumbers it; otherwise it returns [`StreamError::StreamNotSweepable`]."
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Returns the number of persistent entries deleted and emits [`StreamSwept`]."
+    )]
+    pub fn sweep_stream(env: Env, stream_id: u64) -> Result<u32, StreamError> {
+        Self::require_not_frozen(&env)?;
+        let s = stream::get_stream(&env, stream_id)?;
+        if let Some(branch) = dust::sweep_blocker(&env, &s, env.ledger().timestamp()) {
+            return Err(surface::reject(branch));
+        }
+        let refund_target = stream::refund_target(&env, &s);
+        let entries_removed = dust::remove_footprint(&env, &s);
+
+        #[cfg(test)]
+        cei_trace::record("event StreamSwept");
+        StreamSwept {
+            stream_id,
+            refund_target,
+            depleted: s.status == StreamStatus::Depleted,
+            entries_removed,
+        }
+        .publish(&env);
+        Ok(entries_removed)
+    }
+
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " Whether [`Self::sweep_stream`] would succeed for `stream_id` right now."
+    )]
+    pub fn is_sweepable(env: Env, stream_id: u64) -> bool {
+        stream::get_stream(&env, stream_id)
+            .is_ok_and(|s| dust::sweep_blocker(&env, &s, env.ledger().timestamp()).is_none())
     }
 }

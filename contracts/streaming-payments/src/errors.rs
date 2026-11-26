@@ -910,6 +910,50 @@ pub enum StreamError {
         doc = " so the number is never reused. See `docs/ERROR_SURFACE.md`."
     )]
     CapExceededStream = 129,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " `create_stream` / `create_streams` / `create_streams_batch`: the deposit is"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " below [`crate::MIN_STREAM_DEPOSIT`], the dust floor under which creating a"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " stream costs more in fees and rent than it can ever pay out (#78)."
+    )]
+    DepositBelowMinimum = 130,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " `withdraw` / `withdraw_max`: the claim is below [`crate::MIN_CLAIM_AMOUNT`] while"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " the stream is still accruing, so the network fee would eat the payout. The"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " floor lifts once accrual stops (window ended, or paused) so nothing is ever"
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = " locked (#78).")]
+    ClaimBelowMinimum = 131,
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " `sweep_stream`: the stream does not meet the sweep predicate — it is not"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " terminal and settled, its post-end grace period has not elapsed, or it is"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " still encumbered (disputed, pending proposal, outstanding advance,"
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = " release-gated, hook-bound or reentrancy-locked) (#78)."
+    )]
+    StreamNotSweepable = 132,
 }
 
 impl StreamError {
@@ -1046,6 +1090,9 @@ impl StreamError {
         StreamError::AgentExpired,
         StreamError::CapExceededPeriod,
         StreamError::CapExceededStream,
+        StreamError::DepositBelowMinimum,
+        StreamError::ClaimBelowMinimum,
+        StreamError::StreamNotSweepable,
     ];
 
     /// The stable numeric value carried across the contract boundary

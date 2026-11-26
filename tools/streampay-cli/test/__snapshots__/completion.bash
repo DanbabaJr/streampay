@@ -25,7 +25,7 @@ _streampay() {
   case "$cmd" in
     "")
       if [[ "$cur" != -* ]]; then
-        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all status get key profile completion help" -- "$cur"))
+        COMPREPLY=($(compgen -W "create withdraw cancel top-up claim-all status get tui key profile completion help" -- "$cur"))
         return 0
       fi
       ;;
@@ -36,6 +36,7 @@ _streampay() {
     claim-all) ;;
     status) opts="$opts --stream-id --watch --interval" ;;
     get) opts="$opts --stream-id --watch --interval" ;;
+    tui) opts="$opts --recipient --interval" ;;
     key)
       if [[ -z "$sub" && "$cur" != -* ]]; then
         COMPREPLY=($(compgen -W "encrypt" -- "$cur"))

@@ -1,0 +1,6 @@
+StreamPay  testnet  recipient GBRPYH...C7OX2H  [live]
+ 1:Streams   2:Accrual   3:Forecast  [4:Events]
+------------------------------------------------------------------------
+  withdrawn        #1 +50
+------------------------------------------------------------------------
+tab/arrows: panels  j/k: select  w: withdraw  c: cancel  r: refresh  q: quit

@@ -240,3 +240,6 @@ every emitted line against `json-schema-v1.json`.
 ## PR description
 
 Closes #112
+## Interactive dashboard (`tui`)
+
+`streampay tui --contract <C...> --recipient <G...>` opens a keyboard-driven dashboard with Streams, Accrual, Forecast and Events panels. Keys: `tab`/arrows or `1`-`4` switch panels, `j`/`k` select, `w` withdraw, `c` cancel, `r` refresh, `q` quit. `w` and `c` only stage an action; nothing is submitted until you press `y` at the confirmation prompt. Failed refreshes show a reconnecting state and back off exponentially (capped at 30s). Without a TTY, or with `--json`, it prints JSON Lines (one `change` line per stream, then a `summary`) and exits. Keys are never logged.

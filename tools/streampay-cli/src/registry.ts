@@ -71,6 +71,14 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "status", description: "Read and print one decoded stream snapshot", options: [STREAM_ID, WATCH, INTERVAL] },
   { name: "get", description: "Alias for status", options: [STREAM_ID, WATCH, INTERVAL] },
   {
+    name: "tui",
+    description: "Interactive dashboard of a recipient's streams (JSON Lines when not a TTY)",
+    options: [
+      { name: "recipient", kind: "value", description: "Recipient address (default: --source or the signing key)" },
+      INTERVAL,
+    ],
+  },
+  {
     name: "key",
     description: "Manage encrypted signer keys",
     options: [],
@@ -118,6 +126,9 @@ export const TRANSACTION_COMMANDS: readonly string[] = ["create", "withdraw", "c
 
 /** Read-only commands: one decoded `get_stream` snapshot, optionally watched. */
 export const READ_COMMANDS: readonly string[] = ["status", "get"];
+
+/** The interactive dashboard: reads like a read command, may submit only after confirmation. */
+export const TUI_COMMAND = "tui";
 
 function allCommandSpecs(commands: readonly CommandSpec[] = COMMANDS): CommandSpec[] {
   return commands.flatMap((command) => [command, ...allCommandSpecs(command.subcommands ?? [])]);
