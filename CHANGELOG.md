@@ -10,6 +10,9 @@ interface: they are only ever appended to, never renumbered or reused.
 ## [Unreleased]
 
 ### Added
+- Frontend: stream comparison workbench at `/compare`. Overlays accrual curves,
+  exhaustion forecast and fee estimates for up to 5 streams or hypothetical
+  parameter sets, simulated client-side with a shareable parameter URL.
 - TypeScript SDK: opt-in submit retry policy (#497). `retry` on
   `StreamPayClient` adds bounded exponential backoff with full jitter for
   transient RPC failures. Retries resend the same signed envelope, using its
