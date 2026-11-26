@@ -391,4 +391,8 @@ pub trait StreamingPaymentsApi {
         event_class: HookEventClass,
     ) -> Result<(), StreamError>;
     fn get_hook(env: Env, stream_id: u64, event_class: HookEventClass) -> Option<StreamHook>;
+
+    // ------------------------------------------------- dust economics (#78)
+    fn sweep_stream(env: Env, stream_id: u64) -> Result<u32, StreamError>;
+    fn is_sweepable(env: Env, stream_id: u64) -> bool;
 }

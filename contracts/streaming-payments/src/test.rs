@@ -2041,12 +2041,14 @@ fn events_are_emitted_with_expected_payloads() {
 
     // Withdrawn event after a partial withdrawal.
     f.advance_time(3 * DAY); // 2 days elapsed of 10
-    f.client.mock_all_auths().withdraw(&id, &1000);
+    f.client
+        .mock_all_auths()
+        .withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     let withdrawn = crate::Withdrawn {
         stream_id: id,
         recipient: f.recipient.clone(),
-        amount: 1000,
-        withdrawn_total: 1000,
+        amount: crate::MIN_CLAIM_AMOUNT,
+        withdrawn_total: crate::MIN_CLAIM_AMOUNT,
     };
     assert_eq!(
         f.env.events().all().filter_by_contract(&f.client.address),
@@ -2060,7 +2062,7 @@ fn events_are_emitted_with_expected_payloads() {
     let cancelled = crate::StreamCancelled {
         stream_id: id,
         cancelled_by: f.recipient.clone(),
-        recipient_amount: streamed - 1000,
+        recipient_amount: streamed - crate::MIN_CLAIM_AMOUNT,
         sender_amount: DEPOSIT - streamed,
     };
     assert_eq!(
@@ -2468,44 +2470,45 @@ fn top_ups_are_fee_free() {
 }
 
 #[test]
-fn fee_floors_to_zero_for_dusty_deposits() {
-    let f = Fixture::setup();
+fn deposit_floor_keeps_the_smallest_fee_above_zero() {
+    // Before #78 a 9_999-unit deposit at 1 bp floored its fee to zero. The
+    // deposit floor now refuses such dust outright, and the smallest deposit
+    // it admits pays a non-zero fee even at the minimum 1 bp rate.
+    let f = Fixture::setup_quiet();
     set_fee(&f, 1); // 1 bp
     let now = f.env.ledger().timestamp();
-    let deposit = 9_999i128; // 1 bp of 9_999 floors to 0 whole units
+
+    let dusty = f.client.mock_all_auths().try_create_stream(
+        &f.sender,
+        &f.recipient,
+        &f.token,
+        &9_999,
+        &(now + DAY),
+        &(now + DAY + DAY),
+        &false,
+    );
+    assert_eq!(
+        dusty.unwrap_err().unwrap(),
+        StreamError::DepositBelowMinimum
+    );
+    assert_eq!(f.client.treasury_status(&f.token).charged_total, 0);
 
     let id = f.client.mock_all_auths().create_stream(
         &f.sender,
         &f.recipient,
         &f.token,
-        &deposit,
+        &crate::MIN_STREAM_DEPOSIT,
         &(now + DAY),
         &(now + DAY + DAY),
         &false,
     );
-
-    // Only StreamCreated was emitted — a fee flooring to zero is no fee.
-    let created = crate::StreamCreated {
-        stream_id: id,
-        sender: f.sender.clone(),
-        recipient: f.recipient.clone(),
-        token: f.token.clone(),
-        deposit,
-        start_time: now + DAY,
-        end_time: now + DAY + DAY,
-        cancelable: false,
-    };
-    assert_eq!(
-        f.env.events().all().filter_by_contract(&f.client.address),
-        [created.to_xdr(&f.env, &f.client.address)],
-    );
-
-    // A fee that floors to zero charges nothing, stores nothing, emits nothing.
-    assert_eq!(f.client.stream_fee(&id), 0);
-    assert_eq!(f.client.treasury_status(&f.token).charged_total, 0);
+    let fee = crate::MIN_STREAM_DEPOSIT / 10_000;
+    assert!(fee > 0);
+    assert_eq!(f.client.stream_fee(&id), fee);
+    assert_eq!(f.client.treasury_status(&f.token).charged_total, fee);
     assert_eq!(
         TokenClient::new(&f.env, &f.token).balance(&f.sender),
-        2 * DEPOSIT - deposit
+        2 * DEPOSIT - crate::MIN_STREAM_DEPOSIT - fee
     );
 }
 
@@ -2993,11 +2996,11 @@ fn run_state_machine_sequence(seed: u64, steps: &[(u8, u16, u16)]) -> Result<(),
     let contract_id = env.register(StreamingPayments, (governor,));
     let client = Client::new(&env, &contract_id);
 
-    StellarAssetClient::new(&env, &token).mint(&sender, &1_000_000_000i128);
+    StellarAssetClient::new(&env, &token).mint(&sender, &1_000_000_000_000i128);
     StellarAssetClient::new(&env, &token).approve(
         &sender,
         &contract_id,
-        &1_000_000_000i128,
+        &1_000_000_000_000i128,
         &1_000_000u32,
     );
 
@@ -3010,7 +3013,9 @@ fn run_state_machine_sequence(seed: u64, steps: &[(u8, u16, u16)]) -> Result<(),
                 let now = env.ledger().timestamp();
                 let start = now + (first as u64 % 4);
                 let duration = 1 + (second as u64 % 100);
-                let deposit = 1 + (first as i128 % 20_000) * 257 + second as i128 % 257;
+                let deposit = crate::MIN_STREAM_DEPOSIT
+                    + (first as i128 % 20_000) * 257
+                    + second as i128 % 257;
                 let cancelable = operation & 0x80 != 0;
                 let id = client.mock_all_auths().create_stream(
                     &sender,
@@ -3059,16 +3064,36 @@ fn run_state_machine_sequence(seed: u64, steps: &[(u8, u16, u16)]) -> Result<(),
                         .unwrap();
                     prop_assert_eq!(error, StreamError::StreamNotActive, "{}", context);
                 } else {
-                    let available =
-                        streams[index].accrued(env.ledger().timestamp()) - streams[index].withdrawn;
+                    let now = env.ledger().timestamp();
+                    let available = streams[index].accrued(now) - streams[index].withdrawn;
+                    // Mid-window claims below the dust floor are refused (#78).
+                    let floor_binds = now < streams[index].end;
                     if available > 0 && second & 1 == 0 {
-                        let amount = 1 + second as i128 % available;
-                        client.mock_all_auths().withdraw(&id, &amount);
-                        streams[index].withdrawn += amount;
+                        let amount = 1 + (second as i128 * 1_000) % available;
+                        if floor_binds && amount < crate::MIN_CLAIM_AMOUNT {
+                            let error = client
+                                .mock_all_auths()
+                                .try_withdraw(&id, &amount)
+                                .unwrap_err()
+                                .unwrap();
+                            prop_assert_eq!(error, StreamError::ClaimBelowMinimum, "{}", context);
+                        } else {
+                            client.mock_all_auths().withdraw(&id, &amount);
+                            streams[index].withdrawn += amount;
+                        }
                     } else if available > 0 {
-                        let paid = client.mock_all_auths().withdraw_max(&id);
-                        prop_assert_eq!(paid, available, "{}: withdraw_max amount", context);
-                        streams[index].withdrawn += paid;
+                        if floor_binds && available < crate::MIN_CLAIM_AMOUNT {
+                            let error = client
+                                .mock_all_auths()
+                                .try_withdraw_max(&id)
+                                .unwrap_err()
+                                .unwrap();
+                            prop_assert_eq!(error, StreamError::ClaimBelowMinimum, "{}", context);
+                        } else {
+                            let paid = client.mock_all_auths().withdraw_max(&id);
+                            prop_assert_eq!(paid, available, "{}: withdraw_max amount", context);
+                            streams[index].withdrawn += paid;
+                        }
                     } else {
                         let error = client
                             .mock_all_auths()
@@ -3301,7 +3326,7 @@ fn run_fee_property(seed: u64, steps: usize) {
             0 => {
                 // create a stream
                 let ti = rng.below(2) as usize;
-                let deposit = 1 + rng.below(1_000_000) as i128;
+                let deposit = crate::MIN_STREAM_DEPOSIT + rng.below(1_000_000_000) as i128;
                 let duration = 1 + rng.below(200);
                 let start_in = rng.below(3);
                 let cancelable = rng.below(2) == 0;
@@ -3346,15 +3371,27 @@ fn run_fee_property(seed: u64, steps: usize) {
                 let id = (idx as u64) + 1;
                 let now = env.ledger().timestamp();
                 let avail = streams[idx].available(now);
+                // Mid-window claims below the dust floor are refused (#78).
+                let end = streams[idx].end;
+                let dust = move |amount: i128| now < end && amount < crate::MIN_CLAIM_AMOUNT;
                 match rng.below(4) {
-                    0 if avail > 0 => {
-                        client.mock_all_auths().withdraw(&id, &avail);
-                        streams[idx].withdrawn += avail;
-                    }
-                    1 if avail > 0 => {
-                        let amount = 1 + rng.below(avail as u64) as i128;
-                        client.mock_all_auths().withdraw(&id, &amount);
-                        streams[idx].withdrawn += amount;
+                    0 | 1 if avail > 0 => {
+                        let amount = if rng.below(2) == 0 {
+                            avail
+                        } else {
+                            1 + rng.below(avail as u64) as i128
+                        };
+                        if dust(amount) {
+                            let err = client
+                                .mock_all_auths()
+                                .try_withdraw(&id, &amount)
+                                .unwrap_err()
+                                .unwrap();
+                            assert_eq!(err, StreamError::ClaimBelowMinimum, "{ctx}: dust claim");
+                        } else {
+                            client.mock_all_auths().withdraw(&id, &amount);
+                            streams[idx].withdrawn += amount;
+                        }
                     }
                     2 => {
                         // Over-withdrawal must always revert, leaving state intact.
@@ -3370,7 +3407,14 @@ fn run_fee_property(seed: u64, steps: usize) {
                         );
                     }
                     _ => {
-                        if avail > 0 {
+                        if avail > 0 && dust(avail) {
+                            let err = client
+                                .mock_all_auths()
+                                .try_withdraw_max(&id)
+                                .unwrap_err()
+                                .unwrap();
+                            assert_eq!(err, StreamError::ClaimBelowMinimum, "{ctx}: dust max");
+                        } else if avail > 0 {
                             let paid = client.mock_all_auths().withdraw_max(&id);
                             assert_eq!(paid, avail, "{ctx}: withdraw_max pays available");
                             streams[idx].withdrawn += paid;
@@ -3636,10 +3680,12 @@ fn dispute_keeps_accrual_and_withdrawals_alive() {
     assert_eq!(f.client.available(&id), DEPOSIT * 3 / 10);
 
     // The recipient can still claim what they earned during the dispute.
-    f.client.mock_all_auths().withdraw(&id, &1000);
+    f.client
+        .mock_all_auths()
+        .withdraw(&id, &crate::MIN_CLAIM_AMOUNT);
     let rest = f.client.mock_all_auths().withdraw_max(&id);
-    assert_eq!(f.recipient_balance(), 1000 + rest);
-    assert_eq!(rest, DEPOSIT * 3 / 10 - 1000);
+    assert_eq!(f.recipient_balance(), crate::MIN_CLAIM_AMOUNT + rest);
+    assert_eq!(rest, DEPOSIT * 3 / 10 - crate::MIN_CLAIM_AMOUNT);
 }
 
 #[test]
@@ -3755,7 +3801,7 @@ fn run_value_conservation_property(seed: u64, steps: usize) {
                 // 1. create_stream
                 let ti = rng.below(2) as usize;
                 let ri = rng.below(3) as usize;
-                let deposit = 100 + rng.below(1_000_000) as i128;
+                let deposit = crate::MIN_STREAM_DEPOSIT + rng.below(1_000_000) as i128;
                 let duration = 10 + rng.below(500);
                 let start_in = rng.below(10);
                 let cancelable = rng.below(2) == 0;
@@ -3779,7 +3825,7 @@ fn run_value_conservation_property(seed: u64, steps: usize) {
                 for _ in 0..count {
                     let ti = rng.below(2) as usize;
                     let ri = rng.below(3) as usize;
-                    let deposit = 100 + rng.below(500_000) as i128;
+                    let deposit = crate::MIN_STREAM_DEPOSIT + rng.below(500_000) as i128;
                     let duration = 10 + rng.below(300);
                     let start_in = rng.below(5);
                     let cancelable = rng.below(2) == 0;
@@ -3811,7 +3857,19 @@ fn run_value_conservation_property(seed: u64, steps: usize) {
                         let avail = client.available(&id);
                         if avail > 0 {
                             let withdraw_amt = 1 + rng.below(avail as u64) as i128;
-                            client.mock_all_auths().withdraw(&id, &withdraw_amt);
+                            // Mid-window claims below the dust floor are refused (#78).
+                            if env.ledger().timestamp() < stream.end_time
+                                && withdraw_amt < crate::MIN_CLAIM_AMOUNT
+                            {
+                                let err = client
+                                    .mock_all_auths()
+                                    .try_withdraw(&id, &withdraw_amt)
+                                    .unwrap_err()
+                                    .unwrap();
+                                assert_eq!(err, StreamError::ClaimBelowMinimum, "{ctx}");
+                            } else {
+                                client.mock_all_auths().withdraw(&id, &withdraw_amt);
+                            }
                         }
                     }
                 }
@@ -3823,7 +3881,17 @@ fn run_value_conservation_property(seed: u64, steps: usize) {
                     let stream = client.get_stream(&id);
                     if stream.status == StreamStatus::Active {
                         let avail = client.available(&id);
-                        if avail > 0 {
+                        if avail > 0
+                            && env.ledger().timestamp() < stream.end_time
+                            && avail < crate::MIN_CLAIM_AMOUNT
+                        {
+                            let err = client
+                                .mock_all_auths()
+                                .try_withdraw_max(&id)
+                                .unwrap_err()
+                                .unwrap();
+                            assert_eq!(err, StreamError::ClaimBelowMinimum, "{ctx}");
+                        } else if avail > 0 {
                             let paid = client.mock_all_auths().withdraw_max(&id);
                             assert_eq!(paid, avail, "{ctx}: withdraw_max mismatch");
                         }
@@ -4910,10 +4978,12 @@ fn property_contract_balance_equals_locks_plus_outstanding_bonds() {
         let id = ids[k];
         match rng.below(7) {
             0 => {
+                // Start at the #78 claim floor so this arm still moves tokens
+                // mid-stream instead of always hitting ClaimBelowMinimum.
                 let _ = f
                     .client
                     .mock_all_auths()
-                    .try_withdraw(&id, &(step as i128 + 1));
+                    .try_withdraw(&id, &(crate::MIN_CLAIM_AMOUNT + step as i128));
             }
             1 => {
                 let _ = f.client.mock_all_auths().try_withdraw_max(&id);
@@ -5424,7 +5494,7 @@ fn create_streams_batch_success() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 1_000_000,
+        deposit: 10_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: true,
@@ -5433,7 +5503,7 @@ fn create_streams_batch_success() {
         sender: f.sender.clone(),
         recipient: recipient2.clone(),
         token: f.token.clone(),
-        deposit: 2_000_000,
+        deposit: 20_000_000,
         start_time: now + 2 * DAY,
         end_time: now + 20 * DAY,
         cancelable: false,
@@ -5448,13 +5518,13 @@ fn create_streams_batch_success() {
     let s1 = f.client.get_stream(&id1);
     assert_eq!(s1.sender, f.sender);
     assert_eq!(s1.recipient, f.recipient);
-    assert_eq!(s1.deposit, 1_000_000);
+    assert_eq!(s1.deposit, 10_000_000);
     assert!(s1.cancelable);
 
     let s2 = f.client.get_stream(&id2);
     assert_eq!(s2.sender, f.sender);
     assert_eq!(s2.recipient, recipient2);
-    assert_eq!(s2.deposit, 2_000_000);
+    assert_eq!(s2.deposit, 20_000_000);
     assert!(!s2.cancelable);
 }
 
@@ -5471,7 +5541,7 @@ fn create_streams_batch_per_entry_isolation() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 1_000_000,
+        deposit: 10_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: true,
@@ -5491,7 +5561,7 @@ fn create_streams_batch_per_entry_isolation() {
         sender: f.sender.clone(),
         recipient: recipient3.clone(),
         token: f.token.clone(),
-        deposit: 2_000_000,
+        deposit: 20_000_000,
         start_time: now + 2 * DAY,
         end_time: now + 20 * DAY,
         cancelable: true,
@@ -5511,9 +5581,9 @@ fn create_streams_batch_per_entry_isolation() {
     let id3 = results.get(2).unwrap().unwrap();
 
     let s1 = f.client.get_stream(&id1);
-    assert_eq!(s1.deposit, 1_000_000);
+    assert_eq!(s1.deposit, 10_000_000);
     let s3 = f.client.get_stream(&id3);
-    assert_eq!(s3.deposit, 2_000_000);
+    assert_eq!(s3.deposit, 20_000_000);
 }
 
 #[test]
@@ -5537,7 +5607,7 @@ fn create_streams_batch_multi_token() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 1_000_000,
+        deposit: 10_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: true,
@@ -5546,7 +5616,7 @@ fn create_streams_batch_multi_token() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: token2.clone(),
-        deposit: 2_000_000,
+        deposit: 20_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: true,
@@ -5560,11 +5630,11 @@ fn create_streams_batch_multi_token() {
 
     let s1 = f.client.get_stream(&id1);
     assert_eq!(s1.token, f.token);
-    assert_eq!(s1.deposit, 1_000_000);
+    assert_eq!(s1.deposit, 10_000_000);
 
     let s2 = f.client.get_stream(&id2);
     assert_eq!(s2.token, token2);
-    assert_eq!(s2.deposit, 2_000_000);
+    assert_eq!(s2.deposit, 20_000_000);
 }
 
 #[test]
@@ -5616,7 +5686,7 @@ fn create_streams_batch_transfer_failure_isolation() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 1_000_000,
+        deposit: 10_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: true,
@@ -5626,7 +5696,7 @@ fn create_streams_batch_transfer_failure_isolation() {
         sender: broke.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 1_000_000,
+        deposit: 10_000_000,
         start_time: now + DAY,
         end_time: now + 10 * DAY,
         cancelable: false,
@@ -5636,7 +5706,7 @@ fn create_streams_batch_transfer_failure_isolation() {
         sender: f.sender.clone(),
         recipient: f.recipient.clone(),
         token: f.token.clone(),
-        deposit: 2_000_000,
+        deposit: 20_000_000,
         start_time: now + 2 * DAY,
         end_time: now + 20 * DAY,
         cancelable: true,
@@ -5656,9 +5726,9 @@ fn create_streams_batch_transfer_failure_isolation() {
     let id2 = results.get(2).unwrap().unwrap();
 
     let s0 = f.client.get_stream(&id0);
-    assert_eq!(s0.deposit, 1_000_000);
+    assert_eq!(s0.deposit, 10_000_000);
     let s2 = f.client.get_stream(&id2);
-    assert_eq!(s2.deposit, 2_000_000);
+    assert_eq!(s2.deposit, 20_000_000);
 }
 
 #[test]
@@ -5675,7 +5745,9 @@ fn measure_batch_instruction_costs() {
                 sender: f.sender.clone(),
                 recipient,
                 token: f.token.clone(),
-                deposit: 1_000_000 + i as i128,
+                // Above the #78 dust floor, so every entry is created and the
+                // measurement covers the success path, not per-entry rejection.
+                deposit: crate::MIN_STREAM_DEPOSIT + i as i128,
                 start_time: now + DAY,
                 end_time: now + 10 * DAY,
                 cancelable: true,
@@ -6089,7 +6161,7 @@ fn storage_migration_over_1000_synthetic_streams() {
     let governor = Address::generate(&env);
 
     const NUM_STREAMS: usize = 1_000;
-    const STREAM_DEPOSIT: i128 = 100_000;
+    const STREAM_DEPOSIT: i128 = crate::MIN_STREAM_DEPOSIT;
     let total_mint = (NUM_STREAMS as i128) * STREAM_DEPOSIT * 2;
     StellarAssetClient::new(&env, &token).mint(&sender, &total_mint);
 
@@ -6135,7 +6207,8 @@ fn storage_migration_over_1000_synthetic_streams() {
     // Streams 1..=100: withdraw some accrued funds.
     for i in 1..=100 {
         let avail = client.available(&(i as u64));
-        if avail > 10 {
+        // Halving must stay above the mid-stream dust floor (#78).
+        if avail >= 2 * crate::MIN_CLAIM_AMOUNT {
             client.mock_all_auths().withdraw(&(i as u64), &(avail / 2));
         }
     }
@@ -6373,22 +6446,24 @@ fn test_stream_policy_creation_enforcement() {
     let now = f.env.ledger().timestamp();
 
     let policy = crate::StreamPolicy {
-        min_deposit: 1_000,
+        min_deposit: 100_000_000,
         min_duration: DAY,
         max_duration: 10 * DAY,
-        min_rate: 1,
-        max_rate: 10_000,
+        min_rate: 100_000,
+        max_rate: 1_000_000_000,
     };
     f.client
         .mock_all_auths()
         .set_stream_policy(&f.governor, &Some(f.token.clone()), &policy);
 
+    // Amounts sit above the contract-wide MIN_STREAM_DEPOSIT (#78) so the
+    // governance policy, not the dust floor, is what rejects them.
     // 1. Deposit below floor
     let res = f.client.mock_all_auths().try_create_stream(
         &f.sender,
         &f.recipient,
         &f.token,
-        &500,
+        &50_000_000,
         &(now + DAY),
         &(now + 3 * DAY),
         &true,
@@ -6403,7 +6478,7 @@ fn test_stream_policy_creation_enforcement() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &5_000,
+        &500_000_000,
         &(now + DAY),
         &(now + DAY + 3600), // 1 hour < 1 day
         &true,
@@ -6418,7 +6493,7 @@ fn test_stream_policy_creation_enforcement() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &5_000,
+        &500_000_000,
         &(now + DAY),
         &(now + 20 * DAY), // 19 days > 10 days
         &true,
@@ -6433,7 +6508,7 @@ fn test_stream_policy_creation_enforcement() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &1_000, // rate = 1000 / 86400 = 0 < 1
+        &100_000_000, // rate = 100_000_000 / 86400 = 1_157 < 100_000
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
@@ -6442,11 +6517,11 @@ fn test_stream_policy_creation_enforcement() {
 
     // 5. Rate above ceiling (deposit / duration > max_rate)
     let tight_rate_policy = crate::StreamPolicy {
-        min_deposit: 1_000,
+        min_deposit: 100_000_000,
         min_duration: DAY,
         max_duration: 10 * DAY,
         min_rate: 0,
-        max_rate: 10,
+        max_rate: 1_000_000,
     };
     f.client.mock_all_auths().set_stream_policy(
         &f.governor,
@@ -6457,7 +6532,7 @@ fn test_stream_policy_creation_enforcement() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &10_000_000, // rate = 10_000_000 / 86400 = 115 > 10
+        &100_000_000_000, // rate = 1e11 / 86400 = 1_157_407 > 1_000_000
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
@@ -6472,7 +6547,7 @@ fn test_stream_policy_creation_enforcement() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &86_400, // rate = 86400 / 86400 = 1 <= 10
+        &8_640_000_000, // rate = 8.64e9 / 86400 = 100_000 <= 1_000_000
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
@@ -6484,14 +6559,17 @@ fn test_stream_policy_creation_enforcement() {
 fn test_stream_policy_grandfathering_matrix() {
     let f = Fixture::setup();
     let now = f.env.ledger().timestamp();
+    // Headroom for the deposit and both top-up attempts; amounts are scaled
+    // above the contract-wide MIN_STREAM_DEPOSIT (#78).
+    StellarAssetClient::new(&f.env, &f.token).mint(&f.sender, &(2 * DEPOSIT));
 
     // 1. Create a stream under initial lenient policy
     let initial_policy = crate::StreamPolicy {
-        min_deposit: 1_000,
+        min_deposit: 100_000_000,
         min_duration: DAY,
         max_duration: 5 * DAY,
         min_rate: 0,
-        max_rate: 100,
+        max_rate: 10_000_000,
     };
     f.client.mock_all_auths().set_stream_policy(
         &f.governor,
@@ -6503,20 +6581,20 @@ fn test_stream_policy_grandfathering_matrix() {
         &f.sender,
         &f.recipient,
         &f.token,
-        &86_400, // 1 token/sec over 1 day
+        &8_640_000_000, // 100_000 units/sec over 1 day
         &(now + DAY),
         &(now + 2 * DAY), // duration = 1 DAY
         &true,
     );
     assert_eq!(f.client.get_stream(&stream_id).id, stream_id);
 
-    // 2. Tighten policy: increase min_duration to 30 days and cap max_rate to 2
+    // 2. Tighten policy: increase min_duration to 30 days and cap max_rate to 200_000
     let tightened_policy = crate::StreamPolicy {
-        min_deposit: 5_000,
+        min_deposit: 500_000_000,
         min_duration: 30 * DAY, // Stream's 1-day duration violates this now!
         max_duration: 60 * DAY,
         min_rate: 0,
-        max_rate: 2, // 2 tokens/sec
+        max_rate: 200_000, // 200_000 units/sec
     };
     f.client.mock_all_auths().set_stream_policy(
         &f.governor,
@@ -6526,13 +6604,16 @@ fn test_stream_policy_grandfathering_matrix() {
 
     // Grandfathering check A: Existing stream duration is grandfathered on top-up!
     // If top-up checked duration, it would fail with PolicyDurationBelowFloor.
-    // Top up with valid rate: +86,400 -> total deposit = 172,800 over 86,400s -> rate = 2 <= max_rate(2)
-    f.client.mock_all_auths().top_up(&stream_id, &86_400);
-    assert_eq!(f.client.get_stream(&stream_id).deposit, 172_800);
+    // Top up with valid rate: +8.64e9 -> total deposit = 1.728e10 over 86,400s -> rate = 200_000 <= max_rate
+    f.client.mock_all_auths().top_up(&stream_id, &8_640_000_000);
+    assert_eq!(f.client.get_stream(&stream_id).deposit, 17_280_000_000);
 
     // Grandfathering check B: If top-up pushes rate above max_rate ceiling, it violates policy
-    // Adding +86,400 again -> total deposit = 259,200 -> rate = 3 > max_rate(2)
-    let res = f.client.mock_all_auths().try_top_up(&stream_id, &86_400);
+    // Adding +8.64e9 again -> total deposit = 2.592e10 -> rate = 300_000 > max_rate
+    let res = f
+        .client
+        .mock_all_auths()
+        .try_top_up(&stream_id, &8_640_000_000);
     assert_eq!(
         res.unwrap_err().unwrap(),
         StreamError::PolicyRateAboveCeiling
@@ -6569,12 +6650,13 @@ fn test_stream_policy_multi_token_boundaries() {
         &200,
     );
 
-    // Set Global policy: min_deposit = 10_000
+    // Amounts are scaled above the contract-wide MIN_STREAM_DEPOSIT (#78).
+    // Set Global policy: min_deposit = 1_000_000_000
     f.client.mock_all_auths().set_stream_policy(
         &f.governor,
         &None,
         &crate::StreamPolicy {
-            min_deposit: 10_000,
+            min_deposit: 1_000_000_000,
             min_duration: 0,
             max_duration: 0,
             min_rate: 0,
@@ -6582,12 +6664,12 @@ fn test_stream_policy_multi_token_boundaries() {
         },
     );
 
-    // Set Token1 specific policy: min_deposit = 500
+    // Set Token1 specific policy: min_deposit = 50_000_000
     f.client.mock_all_auths().set_stream_policy(
         &f.governor,
         &Some(f.token.clone()),
         &crate::StreamPolicy {
-            min_deposit: 500,
+            min_deposit: 50_000_000,
             min_duration: 0,
             max_duration: 0,
             min_rate: 0,
@@ -6595,25 +6677,25 @@ fn test_stream_policy_multi_token_boundaries() {
         },
     );
 
-    // Token1 allows deposit of 1000 (> 500)
+    // Token1 allows deposit of 100_000_000 (> 50_000_000)
     let id1 = f.client.mock_all_auths().create_stream(
         &f.sender,
         &f.recipient,
         &f.token,
-        &1_000,
+        &100_000_000,
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
     );
     assert!(id1 > 0);
 
-    // Token2 falls back to global policy (min_deposit = 10_000)
-    // Deposit of 1000 is rejected on Token2
+    // Token2 falls back to global policy (min_deposit = 1_000_000_000)
+    // Deposit of 100_000_000 is rejected on Token2
     let res = f.client.mock_all_auths().try_create_stream(
         &f.sender,
         &f.recipient,
         &token2,
-        &1_000,
+        &100_000_000,
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
@@ -6623,12 +6705,12 @@ fn test_stream_policy_multi_token_boundaries() {
         StreamError::PolicyDepositBelowFloor
     );
 
-    // Token2 allows deposit of 10_000
+    // Token2 allows deposit of 1_000_000_000
     let id2 = f.client.mock_all_auths().create_stream(
         &f.sender,
         &f.recipient,
         &token2,
-        &10_000,
+        &1_000_000_000,
         &(now + DAY),
         &(now + 2 * DAY),
         &true,
@@ -11780,18 +11862,39 @@ fn run_pause_resume_sequence(seed: u64, steps: &[(u8, u16, u16)]) -> Result<(), 
             3 if s.status == StreamStatus::Active => {
                 // Partial withdraw
                 let avail = f.client.available(&id);
+                // The dust floor binds only while accruing (#78).
+                let floor_binds = !is_paused && f.ledger_time() < s.end_time;
                 if avail > 0 {
                     let amount = 1 + (second as i128 % avail);
-                    f.client.mock_all_auths().withdraw(&id, &amount);
-                    if is_paused {
-                        frozen_available = f.client.available(&id);
+                    if floor_binds && amount < crate::MIN_CLAIM_AMOUNT {
+                        let err = f
+                            .client
+                            .mock_all_auths()
+                            .try_withdraw(&id, &amount)
+                            .unwrap_err()
+                            .unwrap();
+                        prop_assert_eq!(err, StreamError::ClaimBelowMinimum, "{}", context);
+                    } else {
+                        f.client.mock_all_auths().withdraw(&id, &amount);
+                        if is_paused {
+                            frozen_available = f.client.available(&id);
+                        }
                     }
                 }
             }
             4 if s.status == StreamStatus::Active => {
                 // Withdraw max
                 let avail = f.client.available(&id);
-                if avail > 0 {
+                let floor_binds = !is_paused && f.ledger_time() < s.end_time;
+                if avail > 0 && floor_binds && avail < crate::MIN_CLAIM_AMOUNT {
+                    let err = f
+                        .client
+                        .mock_all_auths()
+                        .try_withdraw_max(&id)
+                        .unwrap_err()
+                        .unwrap();
+                    prop_assert_eq!(err, StreamError::ClaimBelowMinimum, "{}", context);
+                } else if avail > 0 {
                     let paid = f.client.mock_all_auths().withdraw_max(&id);
                     prop_assert_eq!(paid, avail, "{}: withdraw_max amount mismatch", context);
                     if is_paused {

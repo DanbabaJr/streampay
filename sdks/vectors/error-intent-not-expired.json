@@ -1,7 +1,7 @@
 {
   "schema": "streampay-vector/v1",
   "name": "error-intent-not-expired",
-  "specFingerprint": "b0beb370c97a250f8fe97c8bbd4bd65247b35dc7145e8c41e1e0b40a826fe276",
+  "specFingerprint": "69b64c290a66e6c2c897e164cfb38eee3c3c6dff31eac056e59b9d4e56a2a8f4",
   "provenance": "schedule_test::reclaim_before_expiry_reverts: reclaim_expired while expires_at is still in the future.",
   "transactionEnvelopeXdr": "AAAAAgAAAADqSmxj4pxSCr71UHsTLsX5lUd2rr6+e5JCHuppFEbSLAABhqAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAPcmVjbGFpbV9leHBpcmVkAAAAAAEAAAAFAAAAAAAAAAEAAAAAAAAAAAAAAAEURtIsAAAAQJ2lMl5KfBk6jvyl8zmK9BZo7S8u2OI+rWryfd2auNWeEsPahrFIDbz1vaSVGzUdFKsUkI9BQModwzVxmgzNPg4=",
   "resultXdr": "AAAAAgAAAAAAAAAZ",

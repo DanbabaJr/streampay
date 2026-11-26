@@ -15,19 +15,19 @@
   "cases": [
     {
       "id": "odd-deposit-halfway-withdraw",
-      "deposit": "101",
+      "deposit": "100000001",
       "startTime": "1000",
       "durationDays": "0.00011574",
       "endTime": "1010",
       "withdrawTime": "1005",
-      "withdrawAmount": "50",
+      "withdrawAmount": "50000000",
       "cancelable": true,
       "events": [
         {
           "name": "StreamCreated",
           "payload": {
             "stream_id": "1",
-            "deposit": "101",
+            "deposit": "100000001",
             "start_time": "1000",
             "end_time": "1010",
             "cancelable": true
@@ -37,32 +37,32 @@
           "name": "Withdrawn",
           "payload": {
             "stream_id": "1",
-            "amount": "50",
-            "withdrawn_total": "50"
+            "amount": "50000000",
+            "withdrawn_total": "50000000"
           }
         }
       ],
       "balances": {
-        "sender": "899",
-        "recipient": "50",
-        "contract": "51"
+        "sender": "899999999",
+        "recipient": "50000000",
+        "contract": "50000001"
       }
     },
     {
       "id": "odd-deposit-at-end-withdraw",
-      "deposit": "101",
+      "deposit": "100000001",
       "startTime": "1000",
       "durationDays": "0.00011574",
       "endTime": "1010",
       "withdrawTime": "1010",
-      "withdrawAmount": "101",
+      "withdrawAmount": "100000001",
       "cancelable": true,
       "events": [
         {
           "name": "StreamCreated",
           "payload": {
             "stream_id": "1",
-            "deposit": "101",
+            "deposit": "100000001",
             "start_time": "1000",
             "end_time": "1010",
             "cancelable": true
@@ -72,14 +72,14 @@
           "name": "Withdrawn",
           "payload": {
             "stream_id": "1",
-            "amount": "101",
-            "withdrawn_total": "101"
+            "amount": "100000001",
+            "withdrawn_total": "100000001"
           }
         }
       ],
       "balances": {
-        "sender": "899",
-        "recipient": "101",
+        "sender": "899999999",
+        "recipient": "100000001",
         "contract": "0"
       }
     }

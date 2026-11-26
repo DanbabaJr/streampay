@@ -1110,6 +1110,21 @@ pub fn generate_schema_representation(env: &Env) -> serde_json::Value {
                 at_creation: false,
             }
         ),
+        event_case!(
+            StreamSwept,
+            topics: [("stream_id", "u64")],
+            data: [
+                ("refund_target", "Address"),
+                ("depleted", "bool"),
+                ("entries_removed", "u32")
+            ],
+            StreamSwept {
+                stream_id: 1,
+                refund_target: sender.clone(),
+                depleted: true,
+                entries_removed: 2,
+            }
+        ),
     ];
 
     let mut events_json = std::vec![];

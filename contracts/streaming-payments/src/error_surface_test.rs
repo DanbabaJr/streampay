@@ -25,7 +25,8 @@ use crate::surface::{trace, Branch, Reachability, RETIRED_CODES};
 use crate::test::{Fixture, RefusingFixture};
 use crate::{
     StreamError, MAX_DURATION_SECONDS, MAX_FEE_BPS, MAX_RATE_SEGMENTS, MAX_WITHDRAW_BATCH,
-    OWNERSHIP_PROPOSAL_TTL_SECONDS, RATE_PROPOSAL_TTL_SECONDS,
+    MIN_CLAIM_AMOUNT, MIN_STREAM_DEPOSIT, OWNERSHIP_PROPOSAL_TTL_SECONDS,
+    RATE_PROPOSAL_TTL_SECONDS, SWEEP_GRACE_SECONDS,
 };
 
 const DAY: u64 = 24 * 60 * 60;
@@ -871,7 +872,7 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 &f.governor,
                 &Some(f.token.clone()),
                 &crate::StreamPolicy {
-                    min_deposit: 1_000,
+                    min_deposit: 100_000_000,
                     min_duration: 0,
                     max_duration: 0,
                     min_rate: 0,
@@ -882,7 +883,7 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 &f.sender,
                 &f.recipient,
                 &f.token,
-                &500,
+                &50_000_000,
                 &(now + DAY),
                 &(now + 2 * DAY),
                 &false,
@@ -946,7 +947,7 @@ fn probe(branch: Branch) -> Option<StreamError> {
                     min_deposit: 0,
                     min_duration: 0,
                     max_duration: 0,
-                    min_rate: 1_000,
+                    min_rate: 1_000_000,
                     max_rate: 0,
                 },
             );
@@ -954,7 +955,7 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 &f.sender,
                 &f.recipient,
                 &f.token,
-                &100,
+                &MIN_STREAM_DEPOSIT,
                 &(now + DAY),
                 &(now + 2 * DAY),
                 &false,
@@ -1264,13 +1265,13 @@ fn probe(branch: Branch) -> Option<StreamError> {
         }
         Branch::RatePolicyAboveCeiling => {
             let f = Fixture::setup_quiet();
-            set_rate_policy(&f, 0, 10);
-            // Deposited below the ceiling (its derived rate is 0 tokens/s), so
+            set_rate_policy(&f, 0, 1_000);
+            // Deposited below the ceiling (its derived rate is 11 units/s), so
             // the stream exists and the ceiling is what the *proposal* breaks.
-            let id = f.create_stream(100, DAY, 10 * DAY, false);
+            let id = f.create_stream(MIN_STREAM_DEPOSIT, DAY, 10 * DAY, false);
             f.client
                 .mock_all_auths()
-                .propose_rate_change(&f.sender, &id, &20);
+                .propose_rate_change(&f.sender, &id, &2_000);
             f.advance_time(2 * DAY);
             Some(rejected!(f
                 .client
@@ -2101,7 +2102,10 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 &crate::HookFailurePolicy::Revert,
             );
             f.advance_time(2 * DAY);
-            Some(rejected!(f.client.mock_all_auths().try_withdraw(&id, &100)))
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_withdraw(&id, &MIN_CLAIM_AMOUNT)))
         }
         Branch::InvalidHookSelector => {
             let f = Fixture::setup_quiet();
@@ -2116,6 +2120,82 @@ fn probe(branch: Branch) -> Option<StreamError> {
                 &empty_sel,
                 &crate::HookFailurePolicy::EmitAndContinue,
             )))
+        }
+        // ------------------------------------------- dust economics (#78)
+        Branch::CreateDepositBelowMinimum => {
+            let f = Fixture::setup_quiet();
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_create_stream(
+                &f.sender,
+                &f.recipient,
+                &f.token,
+                &(MIN_STREAM_DEPOSIT - 1),
+                &(now + DAY),
+                &(now + 2 * DAY),
+                &false,
+            )))
+        }
+        Branch::ScheduleDepositBelowMinimum => {
+            let f = Fixture::setup_quiet();
+            let now = f.env.ledger().timestamp();
+            Some(rejected!(f.client.mock_all_auths().try_schedule_stream(
+                &f.sender,
+                &f.recipient,
+                &f.token,
+                &(MIN_STREAM_DEPOSIT - 1),
+                &(now + 2 * DAY),
+                &(now + 3 * DAY),
+                &false,
+                &0,
+                &1,
+                &0,
+                &(now + DAY),
+                &(now + 2 * DAY),
+            )))
+        }
+        Branch::WithdrawBelowMinimum => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+            f.advance_time(DAY);
+            Some(rejected!(f
+                .client
+                .mock_all_auths()
+                .try_withdraw(&id, &(MIN_CLAIM_AMOUNT - 1))))
+        }
+        Branch::WithdrawMaxBelowMinimum => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, 10 * DAY, false);
+            // One second accrues DEPOSIT / (10 * DAY) ≈ 11_574 base units.
+            f.advance_time(1);
+            Some(rejected!(f.client.mock_all_auths().try_withdraw_max(&id)))
+        }
+        Branch::SweepStreamActive => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, false);
+            f.advance_time(DAY + SWEEP_GRACE_SECONDS);
+            Some(rejected!(f.client.try_sweep_stream(&id)))
+        }
+        Branch::SweepGraceNotElapsed => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, true);
+            f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+            f.advance_time(DAY + SWEEP_GRACE_SECONDS - 1);
+            Some(rejected!(f.client.try_sweep_stream(&id)))
+        }
+        Branch::SweepStreamEncumbered => {
+            let f = Fixture::setup_quiet();
+            let id = f.create_stream(DEPOSIT, 0, DAY, true);
+            f.client.mock_all_auths().cancel_stream(&f.sender, &id);
+            f.client.mock_all_auths().register_hook(
+                &f.sender,
+                &id,
+                &crate::HookEventClass::Withdraw,
+                &soroban_sdk::Address::generate(&f.env),
+                &soroban_sdk::Symbol::new(&f.env, "on_wd"),
+                &crate::HookFailurePolicy::EmitAndContinue,
+            );
+            f.advance_time(DAY + SWEEP_GRACE_SECONDS);
+            Some(rejected!(f.client.try_sweep_stream(&id)))
         }
     }
 }
@@ -2355,7 +2435,10 @@ fn stream_error_variant_list_is_exhaustive() {
             | StreamError::AgentNotAuthorized
             | StreamError::AgentExpired
             | StreamError::CapExceededPeriod
-            | StreamError::CapExceededStream => StreamError::ALL.contains(&e),
+            | StreamError::CapExceededStream
+            | StreamError::DepositBelowMinimum
+            | StreamError::ClaimBelowMinimum
+            | StreamError::StreamNotSweepable => StreamError::ALL.contains(&e),
         }
     }
 

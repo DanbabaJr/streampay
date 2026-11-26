@@ -45,7 +45,7 @@ import {
 } from "@/lib/sponsor";
 import { useToast } from "@/components/toast";
 import { useWallet } from "@/lib/wallet-context";
-import { validateWithdrawal } from "@/lib/withdrawal";
+import { claimReadiness, MIN_CLAIM_AMOUNT, validateWithdrawal } from "@/lib/withdrawal";
 import { formatAmount } from "@/lib/format";
 import DiscoveryConsentModal from "@/components/DiscoveryConsentModal";
 import PaymentShareActions from "@/components/PaymentShareActions";
@@ -61,6 +61,9 @@ export default function StreamDetailClient() {
 
   const [stream, setStream] = useState<StreamView | null>(null);
   const [live, setLive] = useState<LiveAccrualState>(INITIAL_STATE);
+  // Wall-clock seconds as of the last accrual update; drives the dust-floor
+  // ("not worth claiming yet") state without reading the clock during render.
+  const [nowSeconds, setNowSeconds] = useState<number>(() => Math.floor(Date.now() / 1000));
   const [assetMeta, setAssetMeta] = useState<AssetMeta | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [isAmountDirty, setIsAmountDirty] = useState(false);
@@ -109,7 +112,10 @@ export default function StreamDetailClient() {
         };
       },
       readAvailable: () => readAvailable(id),
-      onUpdate: setLive,
+      onUpdate: (next) => {
+        setLive(next);
+        setNowSeconds(Math.floor(Date.now() / 1000));
+      },
     });
     engineRef.current = engine;
     return () => {
@@ -253,8 +259,19 @@ export default function StreamDetailClient() {
     sponsor !== null && sponsor.active && sponsor.token === stream.token;
   const sponsorBudgetLeft = sponsor !== null && BigInt(sponsor.remaining) > 0n;
 
+  // The contract refuses mid-stream claims below MIN_CLAIM_AMOUNT (#78). The
+  // detail page does not read the pause flag, so it assumes "not paused"; the
+  // contract stays the authority (and lifts the floor while paused).
+  const floorContext = {
+    startTime: stream.startTime,
+    endTime: stream.endTime,
+    deposit,
+    nowSeconds,
+  };
+  const readiness = claimReadiness(available, floorContext);
+
   // Validation is executed strictly against on-chain available balance, NOT cosmetic interpolator
-  const validation = validateWithdrawal(amount, available);
+  const validation = validateWithdrawal(amount, available, floorContext);
 
   async function doWithdraw(max: boolean) {
     if (!address) return;
@@ -560,6 +577,18 @@ export default function StreamDetailClient() {
               Withdraw max
             </button>
           </div>
+          {readiness.state === "not-worth-claiming-yet" && (
+            <p className="muted" role="status" data-testid="claim-dust-notice">
+              Not worth claiming yet: the accrued balance is below the{" "}
+              {assetMeta
+                ? `${formatAmount(MIN_CLAIM_AMOUNT, assetMeta.decimals)} ${assetMeta.code}`
+                : `${MIN_CLAIM_AMOUNT.toString()} units`}{" "}
+              minimum claim, so the network fee would eat most of it. Enough
+              should have accrued by{" "}
+              {new Date(readiness.readyAt * 1000).toISOString()}; after the
+              stream ends any amount can be claimed.
+            </p>
+          )}
           {!validation.valid && validation.error && (
             <p className="err">{validation.error}</p>
           )}

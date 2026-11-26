@@ -526,6 +526,15 @@ export interface StreamScheduledEvent {
   expires_at: bigint;
 }
 
+/** Emitted when `sweep_stream` removes a finished, settled, unencumbered stream's storage (#78). No tokens move: a swept stream holds none. */
+/** Event key `stream_swept` — fingerprint `sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d`. */
+export interface StreamSweptEvent {
+  stream_id: bigint;
+  refund_target: string;
+  depleted: boolean;
+  entries_removed: number;
+}
+
 /** Emitted when the sender adds funds to an existing stream. */
 /** Event key `stream_topped_up` — fingerprint `sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9`. */
 export interface StreamToppedUpEvent {
@@ -643,6 +652,7 @@ export const EVENT_KEYS = {
   StreamRefundTargetChanged: "stream_refund_target_changed",
   StreamResumed: "stream_resumed",
   StreamScheduled: "stream_scheduled",
+  StreamSwept: "stream_swept",
   StreamToppedUp: "stream_topped_up",
   StreamsCreated: "streams_created",
   TemplateApproved: "template_approved",
@@ -656,7 +666,7 @@ export const EVENT_KEYS = {
 export type ContractEventName = (typeof EVENT_KEYS)[keyof typeof EVENT_KEYS];
 
 /** Every event this registry knows about, even if a consumer ignores it. */
-export const ALL_CONTRACT_EVENT_NAMES: readonly ContractEventName[] = ["advance_drawn", "advance_liquidated", "advance_repaid", "batch_withdraw_summary", "beneficiary_enrolled", "condition_expired", "condition_met", "condition_registered", "contract_frozen_state_changed", "contract_upgraded", "dispute_expired", "dispute_raised", "dispute_resolved", "fee_charged", "fee_withdrawn", "governance_action_executed", "governance_action_proposed", "governance_action_signed", "governance_action_vetoed", "governance_signers_set", "hook_failed", "hook_invoked", "hook_registered", "operator_key_rotated", "oracle_config_updated", "oracle_stale_fallback", "oracle_time_reported", "ownership_accepted", "ownership_proposed", "policy_asset_executed", "policy_asset_queued", "policy_handoff_accepted", "policy_handoff_cancelled", "policy_handoff_proposed", "policy_initialized", "rate_change_accepted", "rate_change_proposed", "scheduled_intent_cancelled", "scheduled_intent_expired", "scheduled_stream_executed", "sender_transfer_expired", "sender_transfer_proposed", "sender_transferred", "sponsor_active_set", "sponsor_claim", "sponsor_registered", "storage_migrated", "stream_cancelled", "stream_created", "stream_paused", "stream_policy_set", "stream_record_migrated", "stream_refund_target_changed", "stream_resumed", "stream_scheduled", "stream_topped_up", "streams_created", "template_approved", "template_instantiated", "upgrade_cancelled", "upgrade_proposed", "withdrawn"] as const;
+export const ALL_CONTRACT_EVENT_NAMES: readonly ContractEventName[] = ["advance_drawn", "advance_liquidated", "advance_repaid", "batch_withdraw_summary", "beneficiary_enrolled", "condition_expired", "condition_met", "condition_registered", "contract_frozen_state_changed", "contract_upgraded", "dispute_expired", "dispute_raised", "dispute_resolved", "fee_charged", "fee_withdrawn", "governance_action_executed", "governance_action_proposed", "governance_action_signed", "governance_action_vetoed", "governance_signers_set", "hook_failed", "hook_invoked", "hook_registered", "operator_key_rotated", "oracle_config_updated", "oracle_stale_fallback", "oracle_time_reported", "ownership_accepted", "ownership_proposed", "policy_asset_executed", "policy_asset_queued", "policy_handoff_accepted", "policy_handoff_cancelled", "policy_handoff_proposed", "policy_initialized", "rate_change_accepted", "rate_change_proposed", "scheduled_intent_cancelled", "scheduled_intent_expired", "scheduled_stream_executed", "sender_transfer_expired", "sender_transfer_proposed", "sender_transferred", "sponsor_active_set", "sponsor_claim", "sponsor_registered", "storage_migrated", "stream_cancelled", "stream_created", "stream_paused", "stream_policy_set", "stream_record_migrated", "stream_refund_target_changed", "stream_resumed", "stream_scheduled", "stream_swept", "stream_topped_up", "streams_created", "template_approved", "template_instantiated", "upgrade_cancelled", "upgrade_proposed", "withdrawn"] as const;
 
 /** Narrow an arbitrary RPC event name to a registered contract event. */
 export function isContractEventName(name: string): name is ContractEventName {
@@ -720,6 +730,7 @@ export const EVENT_STRUCT_BY_KEY: Record<ContractEventName, string> = {
   "stream_refund_target_changed": "StreamRefundTargetChanged",
   "stream_resumed": "StreamResumed",
   "stream_scheduled": "StreamScheduled",
+  "stream_swept": "StreamSwept",
   "stream_topped_up": "StreamToppedUp",
   "streams_created": "StreamsCreated",
   "template_approved": "TemplateApproved",
@@ -803,6 +814,7 @@ export const EVENT_SHAPES: Record<ContractEventName, EventShape> = {
   "stream_refund_target_changed": { struct: "StreamRefundTargetChanged", eventKey: "stream_refund_target_changed", fingerprint: "sha256:20f8ba96f8e86083b6e7f70644ec49d8958349f8dc3b1ee7462e3868dae8d943", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"previous_target","type":"Address"},{"name":"new_target","type":"Address"},{"name":"at_creation","type":"bool"}] },
   "stream_resumed": { struct: "StreamResumed", eventKey: "stream_resumed", fingerprint: "sha256:76526b2a695c524df20dcea647e64f0cd38a3f8322d5196a26b10134ca4158c0", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"new_end_time","type":"u64"}] },
   "stream_scheduled": { struct: "StreamScheduled", eventKey: "stream_scheduled", fingerprint: "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487", topics: [{"name":"intent_id","type":"u64"}], data: [{"name":"sender","type":"Address"},{"name":"recipient","type":"Address"},{"name":"token","type":"Address"},{"name":"deposit","type":"i128"},{"name":"start_time","type":"u64"},{"name":"end_time","type":"u64"},{"name":"cancelable","type":"bool"},{"name":"interval","type":"u64"},{"name":"occurrences","type":"u32"},{"name":"fee_budget","type":"i128"},{"name":"execute_after","type":"u64"},{"name":"expires_at","type":"u64"}] },
+  "stream_swept": { struct: "StreamSwept", eventKey: "stream_swept", fingerprint: "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"refund_target","type":"Address"},{"name":"depleted","type":"bool"},{"name":"entries_removed","type":"u32"}] },
   "stream_topped_up": { struct: "StreamToppedUp", eventKey: "stream_topped_up", fingerprint: "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9", topics: [{"name":"stream_id","type":"u64"}], data: [{"name":"sender","type":"Address"},{"name":"amount","type":"i128"},{"name":"new_deposit","type":"i128"}] },
   "streams_created": { struct: "StreamsCreated", eventKey: "streams_created", fingerprint: "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3", topics: [{"name":"sender","type":"Address"}], data: [{"name":"stream_ids","type":"Vec<u64>"}] },
   "template_approved": { struct: "TemplateApproved", eventKey: "template_approved", fingerprint: "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b", topics: [{"name":"template_id","type":"u32"}], data: [{"name":"version","type":"u32"},{"name":"token","type":"Address"},{"name":"duration","type":"u64"}] },
@@ -869,6 +881,7 @@ export const EVENT_FINGERPRINTS: Record<string, string> = {
   "StreamRefundTargetChanged": "sha256:20f8ba96f8e86083b6e7f70644ec49d8958349f8dc3b1ee7462e3868dae8d943",
   "StreamResumed": "sha256:76526b2a695c524df20dcea647e64f0cd38a3f8322d5196a26b10134ca4158c0",
   "StreamScheduled": "sha256:fcfb97a34e2115fabfcea45aa6a1a8e807ab85dd467186eb5e25e494fe490487",
+  "StreamSwept": "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d",
   "StreamToppedUp": "sha256:846293901988cf6cfb2fc5e8a7821a66f8c61c2496e7e4c52c0e2f099df932c9",
   "StreamsCreated": "sha256:affd0ccd120eb20fa19a2b6072ab17bb95cf1349fdc89898e4eb9187583fbdd3",
   "TemplateApproved": "sha256:2556ce26fef265a2d6a39bec5ffe01924ad60ca4e3bd4f96310ad439fb6f0b3b",

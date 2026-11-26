@@ -1,0 +1,52 @@
+{
+  "$defs": {},
+  "$id": "https://streampay.dev/schemas/events/v1/events/stream_swept.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Emitted when `sweep_stream` removes a finished, settled, unencumbered stream's storage (#78). No tokens move: a swept stream holds none.",
+  "properties": {
+    "depleted": {
+      "type": "boolean",
+      "x-soroban-type": "bool"
+    },
+    "entries_removed": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer",
+      "x-soroban-type": "u32"
+    },
+    "refund_target": {
+      "description": "Stellar account or contract address (StrKey).",
+      "type": "string",
+      "x-soroban-type": "Address"
+    }
+  },
+  "required": [
+    "refund_target",
+    "depleted",
+    "entries_removed"
+  ],
+  "title": "StreamSwept",
+  "type": "object",
+  "x-streampay": {
+    "event_key": "stream_swept",
+    "fingerprint": "sha256:245343ff47cced9cf5751fb6977185d758cce635735e9f112dff7a82fa94e35d",
+    "registry_version": 1,
+    "topicSchema": {
+      "items": [
+        {
+          "minimum": 0,
+          "type": "integer",
+          "x-soroban-type": "u64"
+        }
+      ],
+      "type": "array"
+    },
+    "topics": [
+      {
+        "name": "stream_id",
+        "type": "u64"
+      }
+    ]
+  }
+}

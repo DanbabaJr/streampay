@@ -358,6 +358,21 @@ const ERROR_METADATA = {
     retryable: false,
     reproduction: '// Retired code. No on-chain branch triggers this error.\n// Reserved for append-only numbering continuity.',
   },
+  130: {
+    remediation: 'Raise the deposit to at least MIN_STREAM_DEPOSIT (10,000,000 base units, 1 token at 7 decimals). For schedule_stream the floor applies to each occurrence. See docs/DUST_ECONOMICS.md.',
+    toastClass: 'error',
+    retryable: false,
+  },
+  131: {
+    remediation: 'Claim at least MIN_CLAIM_AMOUNT (1,000,000 base units, 0.1 token at 7 decimals), wait until more has accrued, or claim any amount once the stream has ended or is paused. withdraw_many is exempt. See docs/DUST_ECONOMICS.md.',
+    toastClass: 'warning',
+    retryable: true,
+  },
+  132: {
+    remediation: 'Only Depleted or Cancelled streams with nothing pending (dispute, proposal, advance, condition, hook, lock) can be swept, and only 30 days after end_time. Call is_sweepable first. See docs/DUST_ECONOMICS.md.',
+    toastClass: 'warning',
+    retryable: false,
+  },
 }
 
 
@@ -567,7 +582,9 @@ for (const item of variants) {
 
   const isRetired = RETIRED_NAMES.has(item.name);
   const status = isRetired ? 'Retired (Unreachable)' : 'Active (Enforced)';
-  const probe = probeFor(item.name, isReproCode);
+  // Codes from 130 on (#78) also resolve brace-wrapped registry arms; the
+  // ranges below stay on their existing maps so their pages are unchanged.
+  const probe = probeFor(item.name, isReproCode || item.code >= 130);
 
   let triggerSection = `This error is returned by the contract when:
 - \`${item.name}\` validation fails during entrypoint invocation.

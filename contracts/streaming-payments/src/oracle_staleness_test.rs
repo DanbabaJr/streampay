@@ -21,7 +21,7 @@ fn staleness_boundary_and_fallback_lifecycle() {
         .mock_all_auths()
         .set_oracle_config(&f.governor, &publishers, &1, &MAX_STALE_SECONDS);
 
-    let stream_id = f.create_stream_with_oracle(1_000, 0, 100, false, true);
+    let stream_id = f.create_stream_with_oracle(crate::MIN_STREAM_DEPOSIT, 0, 100, false, true);
     let report_ledger_time = f.ledger_time() + 100;
     f.set_ledger_time(report_ledger_time);
     let oracle_time = report_ledger_time + 5;

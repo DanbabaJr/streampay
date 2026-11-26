@@ -274,6 +274,9 @@ pub fn validate_schedule(
     if deposit <= 0 {
         return Err(StreamError::ZeroAmount);
     }
+    if deposit < crate::MIN_STREAM_DEPOSIT {
+        return Err(reject(Branch::ScheduleDepositBelowMinimum));
+    }
     if end_time <= start_time {
         return Err(StreamError::InvalidTimeRange);
     }

@@ -6,6 +6,12 @@ be mentioned here — by event struct name and field name — before the PR can
 merge. Breaking changes are rejected outright; they need a governed
 v1 → v2 migration (see [README.md](README.md#versioning-v1--v2-coexistence)).
 
+## v1.0.7 — 2026-11-26 (dust economics and the stale-stream sweeper, #78)
+
+One additive event; no existing event changed shape (entry count 62 → 63).
+
+- `StreamSwept`: added event (topic `stream_id:u64`, data `refund_target`, `depleted`, `entries_removed`) — emitted by the permissionless `sweep_stream` when it deletes a finished (`Depleted` or `Cancelled`), unencumbered stream's storage at least `SWEEP_GRACE_SECONDS` after its `end_time`. No tokens move: `refund_target` names the party the stream's remainder already went to, `depleted` is false for a cancelled stream, and `entries_removed` counts the per-stream persistent entries deleted. See [docs/DUST_ECONOMICS.md](../../docs/DUST_ECONOMICS.md).
+
 ## v1.0.6 — 2026-11-24 (`main` repair #697: session-key, commit-reveal and insurance surfaces withdrawn)
 
 Eight registry entries disappear (entry count 70 → 62): `AgentAuthorized` and
