@@ -29,7 +29,7 @@ test("decodes cancellation payouts", () => {
   const event = decodeEventXdr(vector("cancel-stream").eventsXdr[0]!);
   assert.ok(event);
   assert.equal(event.type, "StreamCancelled");
-  assert.equal(event.recipientAmount, 1_999_999_000n);
+  assert.equal(event.recipientAmount, 1_999_000_000n);
   assert.equal(event.senderAmount, 8_000_000_000n);
 });
 
